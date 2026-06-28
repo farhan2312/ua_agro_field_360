@@ -1,0 +1,71 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { cn } from "@/lib/cn";
+import { activeNavHref, visibleNav, type NavItem } from "@/lib/nav";
+import type { RoleKey } from "@/lib/roles";
+import { NavIcons } from "../icons";
+import { RoleSwitcher } from "./RoleSwitcher";
+
+function NavLink({ item, active }: { item: NavItem; active: boolean }) {
+  const Icon = NavIcons[item.id];
+  return (
+    <Link
+      href={item.href}
+      className={cn(
+        "flex items-center gap-3 rounded-[10px] px-3.5 py-[11px] text-[13.5px] transition-all duration-150",
+        active
+          ? "bg-white/[0.12] font-semibold text-white"
+          : "font-normal text-white/60 hover:bg-white/[0.08]",
+      )}
+    >
+      <Icon className="opacity-85" />
+      {item.label}
+    </Link>
+  );
+}
+
+export function Sidebar({ role }: { role: RoleKey }) {
+  const pathname = usePathname();
+  const active = activeNavHref(pathname);
+  const { main, admin, showAdminGroup } = visibleNav(role);
+
+  return (
+    <nav className="fixed inset-y-0 left-0 z-20 flex w-64 flex-col text-white shadow-sidebar bg-gradient-to-b from-brand-900 to-brand-950">
+      {/* Brand */}
+      <div className="flex items-center gap-3.5 border-b border-white/[0.08] px-[22px] pt-6 pb-5">
+        <img
+          src="/logo.png"
+          alt="UA Field Intel"
+          className="box-border h-[46px] w-[46px] rounded-full bg-white p-0.5"
+        />
+        <div>
+          <div className="text-[15px] font-bold tracking-[0.3px]">UA Field Intel</div>
+          <div className="mt-0.5 text-[10px] tracking-[0.5px] opacity-50">KISAN SEWA KENDRA</div>
+        </div>
+      </div>
+
+      {/* Nav */}
+      <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 py-4">
+        {main.map((item) => (
+          <NavLink key={item.id} item={item} active={active === item.href} />
+        ))}
+
+        {showAdminGroup && (
+          <>
+            <div className="mt-3 px-3.5 pb-1.5 text-[9.5px] font-semibold uppercase tracking-[1px] text-white/25">
+              Administration
+            </div>
+            {admin.map((item) => (
+              <NavLink key={item.id} item={item} active={active === item.href} />
+            ))}
+          </>
+        )}
+      </div>
+
+      {/* Role switcher */}
+      <RoleSwitcher role={role} />
+    </nav>
+  );
+}

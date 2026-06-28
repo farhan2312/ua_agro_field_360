@@ -1,0 +1,159 @@
+import { notFound } from "next/navigation";
+import { prisma } from "@/lib/prisma";
+import { getRole } from "@/lib/session";
+import {
+  SEGMENT_ENUM_TO_LABEL,
+  LEAD_ENUM_TO_LABEL,
+  SEGMENT_BGS,
+  SEGMENT_COLORS,
+  type SegmentLabel,
+} from "@/lib/segments";
+import { inr } from "@/lib/format";
+import { storeColor } from "@/lib/store-utils";
+import { BackLink } from "@/components/farmer-detail/BackLink";
+import { FarmerProfileCard } from "@/components/farmer-detail/FarmerProfileCard";
+import { StoreAssignmentCard } from "@/components/farmer-detail/StoreAssignmentCard";
+import { KpiMini } from "@/components/farmer-detail/KpiMini";
+import { SalesHistoryCard } from "@/components/farmer-detail/SalesHistoryCard";
+import { VisitReportsCard } from "@/components/farmer-detail/VisitReportsCard";
+import { ConcernsCard } from "@/components/farmer-detail/ConcernsCard";
+import type { FarmerDetail } from "@/components/farmer-detail/types";
+
+export const dynamic = "force-dynamic";
+
+const FALLBACK_SEG_BG = "#F5F5F5";
+const FALLBACK_SEG_COLOR = "#757575";
+
+function buildDetail(
+  farmer: NonNullable<Awaited<ReturnType<typeof loadFarmer>>>,
+): FarmerDetail {
+  const segmentLabel: SegmentLabel | "" = farmer.segment
+    ? SEGMENT_ENUM_TO_LABEL[farmer.segment] ?? ""
+    : "";
+  const statusLabel = farmer.leadStatus
+    ? LEAD_ENUM_TO_LABEL[farmer.leadStatus] ?? ""
+    : farmer.status ?? "";
+
+  const sales = farmer.sales.map((s) => ({
+    id: s.id,
+    invoice: s.invoice ?? "",
+    date: s.date ?? "",
+    items: s.items ?? "",
+    amount: s.amount ?? "",
+    store: s.store ?? "",
+  }));
+
+  const visitLog = farmer.visits.map((v) => ({
+    id: v.id,
+    purpose: v.purpose ?? v.type ?? "Field Visit",
+    date: v.date ?? "",
+    notes: v.notes ?? "",
+    by: v.officerName ?? "",
+  }));
+
+  // Computed lifetime value from numeric amounts (falls back to ₹0).
+  const ltvNum = farmer.sales.reduce((sum, s) => sum + (s.amountNum ?? 0), 0);
+
+  const store = farmer.store
+    ? {
+        name: farmer.store.name,
+        code: farmer.store.code,
+        color: storeColor(farmer.store.id),
+        address: farmer.store.address ?? "",
+        officers: farmer.store.employees.map((e) => ({ name: e.name })),
+      }
+    : null;
+
+  return {
+    id: farmer.id,
+    name: farmer.name,
+    village: farmer.village ?? "",
+    district: farmer.district ?? "",
+    mobile: farmer.mobile ?? "",
+    land: farmer.land != null ? String(farmer.land) : "",
+    crop: farmer.crop ?? "",
+    season: "",
+    soil: "",
+    status: statusLabel,
+    segment: segmentLabel,
+    segBg: segmentLabel ? SEGMENT_BGS[segmentLabel] : FALLBACK_SEG_BG,
+    segColor: segmentLabel ? SEGMENT_COLORS[segmentLabel] : FALLBACK_SEG_COLOR,
+    ltv: inr(ltvNum),
+    saleCount: sales.length,
+    visitCount: visitLog.length,
+    lastPurchaseAmt: sales[0]?.amount || "—",
+    lastPurchaseDate: sales[0]?.date || "No purchases",
+    store,
+    sales,
+    visitLog,
+    concerns: farmer.concerns ?? "",
+    issues: farmer.issues ?? [],
+  };
+}
+
+async function loadFarmer(id: number) {
+  return prisma.farmer.findUnique({
+    where: { id },
+    include: {
+      store: { include: { employees: { take: 2, orderBy: { id: "asc" } } } },
+      sales: { orderBy: { id: "desc" } },
+      visits: { orderBy: { id: "desc" } },
+    },
+  });
+}
+
+export default async function FarmerDetailPage({
+  params,
+}: {
+  params: { id: string };
+}) {
+  const id = Number(params.id);
+  if (!Number.isFinite(id)) notFound();
+
+  const isAdmin = getRole() === "sysadmin";
+
+  let farmer: Awaited<ReturnType<typeof loadFarmer>> = null;
+  try {
+    farmer = await loadFarmer(id);
+  } catch {
+    farmer = null; // DB unavailable pre-seed — fall through to not-found shell.
+  }
+
+  if (!farmer) notFound();
+
+  const detail = buildDetail(farmer);
+
+  return (
+    <div className="animate-fadeUp">
+      <BackLink />
+
+      {/* Top grid — Profile + Store + 2 KPI minis */}
+      <div className="grid grid-cols-4 gap-4 mb-[18px]">
+        <FarmerProfileCard farmer={detail} />
+        {detail.store && <StoreAssignmentCard store={detail.store} />}
+        <KpiMini
+          label="Lifetime Value"
+          value={detail.ltv}
+          valueColor="#2E7D32"
+          sub={`${detail.saleCount} invoices`}
+        />
+        <KpiMini
+          label="Last Purchase"
+          value={detail.lastPurchaseAmt}
+          valueColor="#1A1C1A"
+          sub={detail.lastPurchaseDate}
+        />
+      </div>
+
+      {/* Middle grid — Sales History + Visit Log */}
+      <div className="grid grid-cols-[1.2fr_1fr] gap-[18px] mb-[18px]">
+        <SalesHistoryCard sales={detail.sales} />
+        <VisitReportsCard visits={detail.visitLog} count={detail.visitCount} />
+      </div>
+
+      {(detail.concerns || detail.issues.length > 0 || isAdmin) && (
+        <ConcernsCard concerns={detail.concerns} issues={detail.issues} />
+      )}
+    </div>
+  );
+}

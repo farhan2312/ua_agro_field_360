@@ -1,0 +1,276 @@
+// UA Field Intel — Prisma schema
+// Backend: Azure Database for PostgreSQL (Flexible Server)
+// Run: npm run db:push  (or db:migrate) then npm run db:import && npm run db:seed
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─────────────────────────── Enums ───────────────────────────
+
+enum Role {
+  ASR // Agricultural Specialist Sales Rep / field officer
+  STORE_MANAGER
+  REGIONAL
+  CENTRAL
+  SYSADMIN
+}
+
+enum ProjectStatus {
+  PLANNED
+  ACTIVE
+  COMPLETED
+}
+
+enum Segment {
+  HIGH_VALUE
+  MEDIUM_VALUE
+  NEW_LOW
+  DORMANT
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  FOLLOWUP
+  CONVERTED
+  DORMANT
+}
+
+enum DataSource {
+  REAL // imported from the master-data spreadsheet
+  DEMO // curated showcase records from the original design
+}
+
+// ─────────────────────────── Master data ───────────────────────────
+
+model Store {
+  id              Int        @id @default(autoincrement())
+  code            String     @unique // e.g. AGRO0012
+  name            String
+  status          String     @default("Active")
+  zone            String? // district / zone
+  address         String?
+  empCode         String?
+  regionalManager String?
+  lat             Float?
+  lng             Float?
+  source          DataSource @default(REAL)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  farmers   Farmer[]
+  employees Employee[]
+  visits    Visit[]
+
+  @@index([zone])
+}
+
+model Employee {
+  id          Int        @id @default(autoincrement())
+  storeId     Int?
+  store       Store?     @relation(fields: [storeId], references: [id])
+  storeCode   String?
+  name        String
+  mobile      String?
+  email       String?
+  designation String? // AGC, CI, BDM, ...
+  post        String? // Agriculture Officer, Store Manager, ...
+  source      DataSource @default(REAL)
+  createdAt   DateTime   @default(now())
+
+  @@index([storeCode])
+}
+
+model User {
+  id           Int        @id @default(autoincrement())
+  name         String
+  role         Role
+  roleLabel    String? // display label e.g. "Agri Officer"
+  initials     String?
+  gradA        String?
+  gradB        String?
+  email        String?    @unique
+  mobile       String?
+  employeeCode String?
+  storeId      Int?
+  zone         String?
+  territory    String?
+  lastActive   String?
+  visitsMtd    String?
+  active       Boolean    @default(true)
+  source       DataSource @default(DEMO)
+  createdAt    DateTime   @default(now())
+}
+
+/** Editable app settings / KPIs / feature flags (key → JSON-ish string value). */
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model Farmer {
+  id         Int         @id @default(autoincrement())
+  code       String      @unique // FARM001
+  name       String
+  mobile     String?
+  village    String?
+  district   String?
+  zone       String?
+  storeId    Int?
+  store      Store?      @relation(fields: [storeId], references: [id])
+  storeCode  String?
+  // Enrichment (present for demo farmers; null for bulk-imported real farmers)
+  crop       String?
+  land       Float?
+  segment    Segment?
+  leadStatus LeadStatus?
+  status     String?
+  concerns   String?
+  issues     String[]    @default([])
+  lat        Float?
+  lng        Float?
+  source     DataSource  @default(REAL)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  sales  Sale[]
+  visits Visit[]
+
+  @@index([storeCode])
+  @@index([segment])
+  @@index([leadStatus])
+}
+
+model Sale {
+  id        Int      @id @default(autoincrement())
+  farmerId  Int
+  farmer    Farmer   @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+  invoice   String?
+  date      String? // display string e.g. "Jun 10"
+  items     String?
+  amount    String? // display string e.g. "₹11,200"
+  amountNum Int? // numeric for analytics
+  store     String?
+  createdAt DateTime @default(now())
+}
+
+// A Visit doubles as the per-farmer visit log entry and the Visit Repository record.
+model Visit {
+  id          Int         @id @default(autoincrement())
+  farmerId    Int?
+  farmer      Farmer?     @relation(fields: [farmerId], references: [id])
+  storeId     Int?
+  store       Store?      @relation(fields: [storeId], references: [id])
+  officerName String?
+  date        String? // display string
+  visitedAt   DateTime?
+  purpose     String?
+  notes       String?
+  type        String? // visit type / reason
+  segment     Segment?
+  leadStatus  LeadStatus?
+
+  // New-Visit wizard captured fields
+  gpsLat          Float?
+  gpsLng          Float?
+  soilType        String?
+  soilTesting     String?
+  waterSource     String[] @default([])
+  mainCrop        String?
+  crops           String[] @default([])
+  otherCrops      String?
+  season          String?
+  cropInsured     Boolean  @default(false)
+  landHoldingUnit String?
+  products        String[] @default([])
+  productRequired String[] @default([])
+  currentProblem  String[] @default([])
+  cropRisk        String[] @default([])
+  dangerZone      String[] @default([])
+  annualExpense   String?
+  purchaseFreq    String?
+  otherShops      String?
+  fpoMember       Boolean  @default(false)
+  contractFarming Boolean  @default(false)
+  dairyServices   Boolean  @default(false)
+  whatsappAvail   Boolean  @default(false)
+  photos          String[] @default([])
+  voiceNotes      String[] @default([])
+
+  source    DataSource @default(DEMO)
+  createdAt DateTime   @default(now())
+
+  @@index([farmerId])
+  @@index([storeId])
+}
+
+// ─────────────────────────── Action Planner ───────────────────────────
+
+model Project {
+  id          Int             @id @default(autoincrement())
+  title       String
+  status      ProjectStatus   @default(PLANNED)
+  owner       String?
+  due         String? // display date
+  groupName   String? // target group description
+  farmerIds   Int[]           @default([])
+  farmerNames String[]        @default([])
+  source      DataSource      @default(DEMO)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  updates ProjectUpdate[]
+}
+
+model ProjectUpdate {
+  id        Int      @id @default(autoincrement())
+  projectId Int
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  text      String
+  by        String?
+  date      String?
+  createdAt DateTime @default(now())
+}
+
+// ─────────────────────────── Clusters ───────────────────────────
+
+model Cluster {
+  id          Int        @id @default(autoincrement())
+  name        String
+  layerFilter String? // segment | crop | leadStatus | all
+  criteria    String? // JSON: { layer, layerLabel, layerValue, store, storeName }
+  farmerIds   Int[]      @default([])
+  farmerNames String[]   @default([])
+  createdBy   String?
+  source      DataSource @default(DEMO)
+  createdAt   DateTime   @default(now())
+}
+
+// ─────────────────────────── Reference / admin ───────────────────────────
+
+model FieldOption {
+  id        Int      @id @default(autoincrement())
+  fieldName String   @unique
+  inputType String? // dropdown | multiselect | toggle | freetext | slider
+  options   String[] @default([])
+  createdAt DateTime @default(now())
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  actor     String?
+  action    String // CREATE | UPDATE | CONFIG | EXPORT | DELETE
+  entity    String? // affected entity name (optional)
+  detail    String?
+  ip        String?
+  displayTs String? // pixel-faithful timestamp label e.g. "Jun 22, 10:42"
+  createdAt DateTime @default(now())
+}
