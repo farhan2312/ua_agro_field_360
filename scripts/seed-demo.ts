@@ -4,7 +4,7 @@
  *   npm run db:seed   (run after db:push and db:import)
  *
  * Idempotent: demo stores/farmers/users are upserted; demo sales/visits/projects/
- * audit are cleared (by source) and recreated. Demo farmer codes (FARM003, …) also asdasd asd
+ * audit are cleared (by source) and recreated. Demo farmer codes (FARM003, …) also
  * exist in the real import — upserting enriches those real rows and tags them DEMO.
  */
 import "dotenv/config";
