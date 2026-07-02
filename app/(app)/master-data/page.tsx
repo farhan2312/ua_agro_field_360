@@ -42,7 +42,7 @@ export default async function MasterDataPage({
 }: {
   searchParams?: { tab?: string; page?: string };
 }) {
-  const role = getRole();
+  const role = await getRole();
   if (role !== "central" && role !== "sysadmin") {
     return (
       <EmptyState

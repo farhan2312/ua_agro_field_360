@@ -27,7 +27,7 @@ async function getAuditRows(): Promise<AuditRowData[]> {
 
 export default async function AuditPage() {
   // Sysadmin-only: enforce the gate at the route level, not just the nav link.
-  if (getRole() !== "sysadmin") notFound();
+  if ((await getRole()) !== "sysadmin") notFound();
 
   const rows = await getAuditRows();
   return <AuditTable rows={rows} />;

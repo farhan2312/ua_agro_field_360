@@ -40,10 +40,23 @@ Shortcut for steps 2–4 once `.env` is set: `npm run db:setup`.
 
 See `.env.example`. Required:
 
-| Var            | Description                                                |
-| -------------- | ---------------------------------------------------------- |
-| `DATABASE_URL` | Azure Postgres connection string (keep `?sslmode=require`) |
-| `DIRECT_URL`   | Non-pooled connection for Prisma migrate (same value ok)   |
+| Var            | Description                                                    |
+| -------------- | ------------------------------------------------------------- |
+| `DATABASE_URL` | Azure Postgres connection string (keep `?sslmode=require`)    |
+| `DIRECT_URL`   | Non-pooled connection for Prisma migrate (same value ok)      |
+| `AUTH_SECRET`  | Long random secret for signing session JWTs (required for login) |
+
+## Authentication
+
+The app is gated by real auth (middleware protects every route):
+
+- **Sign in** at `/login`; **register** at `/register` (request access → admin approves).
+- Create the default admin: `npm run db:admin` → **admin@uaagro.com / uaagro12345**.
+- New users register with a requested role and land in **Pending** on the **Users** page;
+  the admin approves them there and assigns a role. Only the admin sees the "view as role"
+  switcher; everyone else has their assigned role + sign out.
+
+Generate `AUTH_SECRET`: `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`
 
 ## Deploying to Vercel
 

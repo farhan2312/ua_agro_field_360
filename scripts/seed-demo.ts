@@ -162,7 +162,7 @@ async function main() {
 
   // 3. sales + 4. visits (clear demo, recreate)
   const demoFarmerIds = [...dbIdByDemoId.values()];
-  await prisma.sale.deleteMany({ where: { farmerId: { in: demoFarmerIds } } });
+  await prisma.sale.deleteMany({ where: { farmerId: { in: demoFarmerIds }, source: "DEMO" } });
   await prisma.visit.deleteMany({ where: { source: "DEMO" } });
 
   let saleCount = 0;
@@ -176,6 +176,7 @@ async function main() {
         data: f.sales.map((s) => ({
           farmerId, invoice: s.inv, date: s.date, items: s.items,
           amount: s.amt, amountNum: parseAmt(s.amt), store: s.store,
+          source: "DEMO" as const,
         })),
       });
       saleCount += f.sales.length;
@@ -215,6 +216,7 @@ async function main() {
       name: u.name, role: u.role as never, roleLabel: u.roleLabel, initials: u.init,
       gradA: u.gradA, gradB: u.gradB, territory: u.territory, lastActive: u.lastActive,
       visitsMtd: u.visitsMtd, active: u.status === "Active", source: "DEMO" as const,
+      approvalStatus: "APPROVED" as const,
     };
     await prisma.user.upsert({
       where: { email: u.email },

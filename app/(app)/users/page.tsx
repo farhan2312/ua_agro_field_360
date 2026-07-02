@@ -2,7 +2,9 @@ import { prisma } from "@/lib/prisma";
 import { getRole } from "@/lib/session";
 import { initials } from "@/lib/format";
 import { storeColor } from "@/lib/store-utils";
+import { PRISMA_TO_KEY, roleLabel, type RoleKey } from "@/lib/roles";
 import { UserManagementScreen } from "@/components/users/UserManagementScreen";
+import { PendingApprovals, type PendingUser } from "@/components/users/PendingApprovals";
 import type { UserRow, StoreRow } from "@/components/users/types";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +19,28 @@ const STORE_COLOR_BY_CODE: Record<string, string> = {
   AGRO0031: "#C62828", // Aliganj
 };
 
+async function loadPending(): Promise<PendingUser[]> {
+  try {
+    const rows = await prisma.user.findMany({
+      where: { approvalStatus: "PENDING" },
+      orderBy: { createdAt: "desc" },
+    });
+    return rows.map((u) => {
+      const key = (PRISMA_TO_KEY[u.role] ?? "officer") as RoleKey;
+      return {
+        id: u.id,
+        name: u.name,
+        email: u.email ?? "",
+        requestedRoleKey: key,
+        requestedRoleLabel: u.roleLabel ?? roleLabel(key),
+        when: u.lastActive ?? "recently",
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
 async function loadData(): Promise<{
   users: UserRow[];
   stores: StoreRow[];
@@ -24,7 +48,10 @@ async function loadData(): Promise<{
 }> {
   try {
     const [dbUsers, dbStores] = await Promise.all([
-      prisma.user.findMany({ orderBy: { id: "asc" } }),
+      prisma.user.findMany({
+        where: { approvalStatus: "APPROVED" },
+        orderBy: { id: "asc" },
+      }),
       prisma.store.findMany({
         // Only the curated demo stores carry the rich master-data view.
         where: { source: "REAL", code: { in: Object.keys(STORE_COLOR_BY_CODE) } },
@@ -90,16 +117,22 @@ async function loadData(): Promise<{
 }
 
 export default async function UsersPage() {
-  const role = getRole();
+  const role = await getRole();
   const canEdit = role === "sysadmin";
-  const { users, stores, totals } = await loadData();
+  const [{ users, stores, totals }, pending] = await Promise.all([
+    loadData(),
+    canEdit ? loadPending() : Promise.resolve([]),
+  ]);
 
   return (
-    <UserManagementScreen
-      users={users}
-      stores={stores}
-      storeTotals={totals}
-      canEdit={canEdit}
-    />
+    <>
+      {canEdit && <PendingApprovals pending={pending} />}
+      <UserManagementScreen
+        users={users}
+        stores={stores}
+        storeTotals={totals}
+        canEdit={canEdit}
+      />
+    </>
   );
 }

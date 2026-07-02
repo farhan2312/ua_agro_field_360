@@ -96,7 +96,7 @@ async function loadFarmer(id: number) {
     where: { id },
     include: {
       store: { include: { employees: { take: 2, orderBy: { id: "asc" } } } },
-      sales: { orderBy: { id: "desc" } },
+      sales: { orderBy: [{ soldAt: "desc" }, { id: "desc" }], take: 60 },
       visits: { orderBy: { id: "desc" } },
     },
   });
@@ -110,7 +110,7 @@ export default async function FarmerDetailPage({
   const id = Number(params.id);
   if (!Number.isFinite(id)) notFound();
 
-  const isAdmin = getRole() === "sysadmin";
+  const isAdmin = (await getRole()) === "sysadmin";
 
   let farmer: Awaited<ReturnType<typeof loadFarmer>> = null;
   try {
@@ -122,6 +122,21 @@ export default async function FarmerDetailPage({
   if (!farmer) notFound();
 
   const detail = buildDetail(farmer);
+
+  // Accurate lifetime value + invoice count across ALL bills (the list above is capped).
+  try {
+    const agg = await prisma.sale.aggregate({
+      where: { farmerId: id },
+      _sum: { amountNum: true },
+      _count: { _all: true },
+    });
+    if (agg._count._all > 0) {
+      detail.ltv = inr(agg._sum.amountNum ?? 0);
+      detail.saleCount = agg._count._all;
+    }
+  } catch {
+    // keep the from-list computation on error
+  }
 
   return (
     <div className="animate-fadeUp">

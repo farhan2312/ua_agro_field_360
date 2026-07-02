@@ -1,4 +1,3 @@
-import { getRole } from "@/lib/session";
 import {
   FUNNEL,
   HEATMAP,
@@ -31,10 +30,6 @@ export default function AnalyticsPage({
 }: {
   searchParams?: { period?: string };
 }) {
-  // Role only changes the header subtitle (rendered by the shell); here we
-  // read it so the screen stays role-aware for future scoping.
-  getRole();
-
   const periodParam = searchParams?.period;
   const period = periodParam && VALID_PERIODS.includes(periodParam) ? periodParam : "30d";
 

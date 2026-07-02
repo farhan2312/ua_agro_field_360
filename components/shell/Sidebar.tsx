@@ -6,7 +6,14 @@ import { cn } from "@/lib/cn";
 import { activeNavHref, visibleNav, type NavItem } from "@/lib/nav";
 import type { RoleKey } from "@/lib/roles";
 import { NavIcons } from "../icons";
-import { RoleSwitcher } from "./RoleSwitcher";
+import { AccountMenu } from "./AccountMenu";
+
+interface PersonaVM {
+  name: string;
+  role: string;
+  init: string;
+  color: string;
+}
 
 function NavLink({ item, active }: { item: NavItem; active: boolean }) {
   const Icon = NavIcons[item.id];
@@ -26,7 +33,17 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
   );
 }
 
-export function Sidebar({ role }: { role: RoleKey }) {
+export function Sidebar({
+  role,
+  persona,
+  isAdmin,
+  impersonating,
+}: {
+  role: RoleKey;
+  persona: PersonaVM;
+  isAdmin: boolean;
+  impersonating: RoleKey | null;
+}) {
   const pathname = usePathname();
   const active = activeNavHref(pathname);
   const { main, admin, showAdminGroup } = visibleNav(role);
@@ -64,8 +81,8 @@ export function Sidebar({ role }: { role: RoleKey }) {
         )}
       </div>
 
-      {/* Role switcher */}
-      <RoleSwitcher role={role} />
+      {/* Account / role switcher */}
+      <AccountMenu persona={persona} isAdmin={isAdmin} impersonating={impersonating} />
     </nav>
   );
 }

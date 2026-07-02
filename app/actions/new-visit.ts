@@ -18,7 +18,7 @@ function leadEnum(label: string): string | undefined {
  * DB cannot crash the wizard — on failure we still route to /dashboard.
  */
 export async function submitVisitAction(form: VisitForm): Promise<void> {
-  const persona = getPersona();
+  const persona = await getPersona();
   const officerName = persona.name;
 
   try {

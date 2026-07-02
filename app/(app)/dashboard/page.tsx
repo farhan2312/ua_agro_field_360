@@ -91,8 +91,8 @@ async function loadSystemEvents(): Promise<SystemEventVM[]> {
 }
 
 export default async function DashboardPage() {
-  const role = getRole();
-  const persona = getPersona();
+  const role = await getRole();
+  const persona = await getPersona();
 
   const kpi = await loadKpi();
   const recent = await loadRecentVisits(

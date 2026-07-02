@@ -47,6 +47,44 @@ export const PERSONAS: Record<RoleKey, Persona> = {
 
 export const ROLE_ORDER: RoleKey[] = ["regional", "officer", "central", "sysadmin"];
 
+/** Display label + avatar gradient for a role (reused from the persona map). */
+export function roleLabel(key: RoleKey): string {
+  return PERSONAS[key].role;
+}
+export function roleGradient(key: RoleKey): string {
+  return PERSONAS[key].color;
+}
+
+/** Prisma Role enum ↔ persona RoleKey. */
+export const PRISMA_TO_KEY: Record<string, RoleKey> = {
+  SYSADMIN: "sysadmin",
+  REGIONAL: "regional",
+  CENTRAL: "central",
+  ASR: "officer",
+  STORE_MANAGER: "officer",
+};
+export const KEY_TO_PRISMA: Record<RoleKey, string> = {
+  sysadmin: "SYSADMIN",
+  regional: "REGIONAL",
+  central: "CENTRAL",
+  officer: "ASR",
+};
+
+/** Avatar gradient stops per role (used in the Users table + new accounts). */
+export const ROLE_GRAD: Record<RoleKey, [string, string]> = {
+  regional: ["#43A047", "#F9A825"],
+  officer: ["#1565C0", "#42A5F5"],
+  central: ["#7B1FA2", "#CE93D8"],
+  sysadmin: ["#E65100", "#FF8F00"],
+};
+
+/** Roles a user may request at registration (admin is granted, not requested). */
+export const REQUESTABLE_ROLES: { key: RoleKey; label: string }[] = [
+  { key: "officer", label: "Agricultural Officer" },
+  { key: "regional", label: "Regional Manager" },
+  { key: "central", label: "Central Team" },
+];
+
 /** Which views each role may access (from the showX flags in renderVals). */
 export const NAV_VISIBILITY: Record<string, (r: RoleKey) => boolean> = {
   dashboard: () => true,

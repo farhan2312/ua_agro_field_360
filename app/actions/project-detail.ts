@@ -10,7 +10,7 @@ export async function addProjectUpdate(projectId: number, text: string) {
   const trimmed = text.trim();
   if (!trimmed) return;
 
-  const persona = getPersona();
+  const persona = await getPersona();
   const date = new Date().toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",

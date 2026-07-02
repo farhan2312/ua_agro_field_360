@@ -48,6 +48,12 @@ enum DataSource {
   DEMO // curated showcase records from the original design
 }
 
+enum ApprovalStatus {
+  PENDING // registered, awaiting admin approval
+  APPROVED // approved by admin — can sign in
+  REJECTED // denied
+}
+
 // ─────────────────────────── Master data ───────────────────────────
 
 model Store {
@@ -89,24 +95,29 @@ model Employee {
 }
 
 model User {
-  id           Int        @id @default(autoincrement())
-  name         String
-  role         Role
-  roleLabel    String? // display label e.g. "Agri Officer"
-  initials     String?
-  gradA        String?
-  gradB        String?
-  email        String?    @unique
-  mobile       String?
-  employeeCode String?
-  storeId      Int?
-  zone         String?
-  territory    String?
-  lastActive   String?
-  visitsMtd    String?
-  active       Boolean    @default(true)
-  source       DataSource @default(DEMO)
-  createdAt    DateTime   @default(now())
+  id             Int            @id @default(autoincrement())
+  name           String
+  role           Role
+  roleLabel      String? // display label e.g. "Agri Officer"
+  initials       String?
+  gradA          String?
+  gradB          String?
+  email          String?        @unique
+  passwordHash   String? // bcrypt hash (null for legacy/demo display rows)
+  approvalStatus ApprovalStatus @default(PENDING)
+  mobile         String?
+  employeeCode   String?
+  storeId        Int?
+  zone           String?
+  territory      String?
+  lastActive     String?
+  visitsMtd      String?
+  active         Boolean        @default(true)
+  source         DataSource     @default(DEMO)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt @default(now())
+
+  @@index([approvalStatus])
 }
 
 /** Editable app settings / KPIs / feature flags (key → JSON-ish string value). */
@@ -150,16 +161,24 @@ model Farmer {
 }
 
 model Sale {
-  id        Int      @id @default(autoincrement())
-  farmerId  Int
-  farmer    Farmer   @relation(fields: [farmerId], references: [id], onDelete: Cascade)
-  invoice   String?
-  date      String? // display string e.g. "Jun 10"
-  items     String?
-  amount    String? // display string e.g. "₹11,200"
-  amountNum Int? // numeric for analytics
-  store     String?
-  createdAt DateTime @default(now())
+  id            Int        @id @default(autoincrement())
+  farmerId      Int
+  farmer        Farmer     @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+  invoice       String? // Order No / bill number
+  date          String? // display string e.g. "01 Apr 2025"
+  soldAt        DateTime? // real bill date for sorting
+  items         String? // item summary (e.g. "Urea 45kg, DAP · +2 more")
+  itemCount     Int? // number of line items on the bill
+  category      String? // dominant product category
+  amount        String? // display string e.g. "₹11,200"
+  amountNum     Int? // numeric total (rupees) for analytics/LTV
+  store         String? // retailer / store name
+  financialYear String? // e.g. "FY 24-25"
+  source        DataSource @default(REAL)
+  createdAt     DateTime   @default(now())
+
+  @@index([farmerId])
+  @@index([source])
 }
 
 // A Visit doubles as the per-farmer visit log entry and the Visit Repository record.

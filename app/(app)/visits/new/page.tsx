@@ -8,7 +8,7 @@ import type { LookupFarmer } from "@/components/new-visit/types";
 
 export default async function NewVisitPage() {
   // Route guard: the `central` persona has no New Visit nav entry (spec §1).
-  const role = getRole();
+  const role = await getRole();
   if (role === "central") redirect("/dashboard");
 
   let options: WizardOptions = resolveOptions([]);
