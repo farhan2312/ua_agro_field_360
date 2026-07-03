@@ -3,7 +3,7 @@ import { avatarColor } from "@/lib/format";
 import { shortStoreName, storeColor } from "@/lib/store-utils";
 import { SEGMENT_ENUM_TO_LABEL, LEAD_ENUM_TO_LABEL } from "@/lib/segments";
 import { MapView } from "@/components/map/MapView";
-import type { MapFarmer, MapStore } from "@/components/map/types";
+import type { MapFarmer, MapStore, StoreListItem } from "@/components/map/types";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +18,8 @@ function daysAgo(d: Date | null | undefined): number | null {
 export default async function MapViewPage() {
   let farmers: MapFarmer[] = [];
   let stores: MapStore[] = [];
+  let allStores: StoreListItem[] = [];
+  let categories: string[] = [];
 
   try {
     // Only farmers with real coordinates are plottable (the 12 enriched demo set).
@@ -99,10 +101,53 @@ export default async function MapViewPage() {
       lng: s.lng as number,
       farmerCount: s._count.farmers,
     }));
+
+    // Every store (alphabetical) for the picker list + distinct sale categories for filtering.
+    const [allStoreRows, catRows] = await Promise.all([
+      prisma.store.findMany({
+        orderBy: { name: "asc" },
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          zone: true,
+          lat: true,
+          _count: { select: { farmers: true } },
+        },
+      }),
+      prisma.sale.findMany({
+        where: { category: { not: null } },
+        distinct: ["category"],
+        select: { category: true },
+        orderBy: { category: "asc" },
+        take: 40,
+      }),
+    ]);
+
+    allStores = allStoreRows.map((s): StoreListItem => ({
+      id: s.id,
+      code: s.code,
+      name: s.name,
+      shortName: shortStoreName(s.name),
+      color: storeColor(s.id),
+      zone: s.zone,
+      farmerCount: s._count.farmers,
+      hasGps: s.lat != null,
+    }));
+    categories = catRows.map((c) => c.category!).filter(Boolean);
   } catch {
     farmers = [];
     stores = [];
+    allStores = [];
+    categories = [];
   }
 
-  return <MapView farmers={farmers} stores={stores} />;
+  return (
+    <MapView
+      farmers={farmers}
+      stores={stores}
+      allStores={allStores}
+      categories={categories}
+    />
+  );
 }

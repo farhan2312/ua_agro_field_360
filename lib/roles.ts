@@ -149,7 +149,7 @@ export function viewTitle(
     case "projectDetail":
       return ["Project Details", ""];
     case "mapView":
-      return ["Map View", "Farmer locations · Agra District & surrounding"];
+      return ["Cluster Builder", "Browse stores, filter farmers, and save clusters for action"];
     case "farmerCluster":
       return ["Farmer Clusters", "Segmented farmer groups for targeted actions"];
     case "visitRepo":

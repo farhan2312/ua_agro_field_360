@@ -157,6 +157,7 @@ model Farmer {
   visits Visit[]
 
   @@index([storeCode])
+  @@index([storeId])
   @@index([segment])
   @@index([leadStatus])
 }

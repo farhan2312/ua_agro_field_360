@@ -36,3 +36,16 @@ export interface MapStore {
   /** Count of plotted (lat/lng) farmers attached to this store. */
   farmerCount: number;
 }
+
+/** Every store (incl. those without GPS) for the alphabetical picker list. */
+export interface StoreListItem {
+  id: number;
+  code: string;
+  name: string;
+  shortName: string;
+  color: string;
+  zone: string | null;
+  /** Total farmers attached to this store (real count). */
+  farmerCount: number;
+  hasGps: boolean;
+}
