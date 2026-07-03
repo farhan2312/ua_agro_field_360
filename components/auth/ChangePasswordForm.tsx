@@ -2,11 +2,10 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
-import { loginAction } from "@/app/actions/auth";
+import { changePasswordAction } from "@/app/actions/auth";
 import { inputClass, Field, EyeToggle } from "./fields";
 
-export function LoginForm() {
+export function ChangePasswordForm() {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -17,7 +16,7 @@ export function LoginForm() {
     setError(null);
     const fd = new FormData(e.currentTarget);
     start(async () => {
-      const res = await loginAction(fd);
+      const res = await changePasswordAction(fd);
       if (res.error) setError(res.error);
       else {
         router.replace("/dashboard");
@@ -27,38 +26,40 @@ export function LoginForm() {
   };
 
   return (
-    <div className="w-full max-w-[380px] rounded-2xl bg-white p-8 shadow-modal">
+    <div className="w-full max-w-[400px] rounded-2xl bg-white p-8 shadow-modal">
       <div className="mb-6 flex justify-center">
         <img src="/logo.png" alt="UA Agro" className="h-12" />
       </div>
-      <h2 className="text-[20px] font-bold text-ink">Sign in</h2>
-      <p className="mt-1 text-[12.5px] text-ink-muted">Access the UA Field Intel platform</p>
+      <h2 className="text-[20px] font-bold text-ink">Set a new password</h2>
+      <p className="mt-1 text-[12.5px] text-ink-muted">
+        For security, choose a new password before continuing.
+      </p>
 
       <form onSubmit={onSubmit} className="mt-6 space-y-4">
-        <Field label="Employee Code">
-          <input
-            name="employeeCode"
-            type="text"
-            required
-            autoComplete="username"
-            autoCapitalize="characters"
-            placeholder="e.g. UA1234"
-            className={`${inputClass} uppercase placeholder:normal-case`}
-          />
-        </Field>
-
-        <Field label="Password">
+        <Field label="New password" hint="(min 8 chars)">
           <div className="relative">
             <input
               name="password"
               type={show ? "text" : "password"}
               required
-              autoComplete="current-password"
+              minLength={8}
+              autoComplete="new-password"
               placeholder="••••••••"
               className={inputClass}
             />
             <EyeToggle shown={show} onToggle={() => setShow((s) => !s)} />
           </div>
+        </Field>
+        <Field label="Confirm new password">
+          <input
+            name="confirm"
+            type={show ? "text" : "password"}
+            required
+            minLength={8}
+            autoComplete="new-password"
+            placeholder="••••••••"
+            className={inputClass}
+          />
         </Field>
 
         {error && (
@@ -72,19 +73,9 @@ export function LoginForm() {
           disabled={pending}
           className="w-full rounded-lg bg-brand-600 py-2.5 text-[13.5px] font-semibold text-white transition-colors hover:bg-brand-700 active:scale-[0.99] disabled:opacity-60"
         >
-          {pending ? "Signing in…" : "Sign in"}
+          {pending ? "Saving…" : "Save & continue"}
         </button>
       </form>
-
-      <div className="mt-5 text-center text-[12.5px] text-ink-muted">
-        New to UA Field Intel?{" "}
-        <Link href="/register" className="font-semibold text-brand-600 hover:underline">
-          Request access
-        </Link>
-      </div>
-      <div className="mt-3 text-center text-[10.5px] text-ink-400">
-        UA Agro · Internal use only
-      </div>
     </div>
   );
 }

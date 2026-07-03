@@ -9,7 +9,7 @@ import { approveUserAction, rejectUserAction } from "@/app/actions/users";
 export interface PendingUser {
   id: number;
   name: string;
-  email: string;
+  code: string;
   requestedRoleKey: RoleKey;
   requestedRoleLabel: string;
   when: string;
@@ -52,7 +52,9 @@ function PendingRow({ user }: { user: PendingUser }) {
       </span>
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13.5px] font-semibold text-ink">{user.name}</div>
-        <div className="truncate text-[12px] text-ink-muted">{user.email}</div>
+        <div className="truncate text-[12px] font-medium text-ink-muted">
+          <span className="text-ink-500">Code:</span> {user.code || "—"}
+        </div>
       </div>
       <div className="hidden text-[11.5px] text-ink-500 sm:block">
         Requested: <span className="font-medium text-ink-700">{user.requestedRoleLabel}</span>

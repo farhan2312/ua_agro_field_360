@@ -30,7 +30,7 @@ async function loadPending(): Promise<PendingUser[]> {
       return {
         id: u.id,
         name: u.name,
-        email: u.email ?? "",
+        code: u.employeeCode ?? "",
         requestedRoleKey: key,
         requestedRoleLabel: u.roleLabel ?? roleLabel(key),
         when: u.lastActive ?? "recently",
@@ -71,7 +71,7 @@ async function loadData(): Promise<{
       id: u.id,
       init: u.initials ?? initials(u.name),
       name: u.name,
-      email: u.email ?? "",
+      email: u.employeeCode ?? u.email ?? "",
       roleLabel: u.roleLabel ?? "",
       grad: `linear-gradient(135deg, ${u.gradA ?? "#2E7D32"}, ${u.gradB ?? "#66BB6A"})`,
       territory: u.territory ?? "",

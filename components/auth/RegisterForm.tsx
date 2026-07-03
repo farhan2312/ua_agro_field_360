@@ -55,8 +55,14 @@ export function RegisterForm() {
         <Field label="Full name">
           <input name="name" required placeholder="Your full name" className={inputClass} />
         </Field>
-        <Field label="Email">
-          <input name="email" type="email" required placeholder="you@uaagro.com" className={inputClass} />
+        <Field label="Employee Code">
+          <input
+            name="employeeCode"
+            required
+            autoCapitalize="characters"
+            placeholder="e.g. UA1234"
+            className={`${inputClass} uppercase placeholder:normal-case`}
+          />
         </Field>
         <Field label="Password" hint="(min 8 chars)">
           <div className="relative">

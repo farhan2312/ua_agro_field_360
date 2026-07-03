@@ -3,9 +3,35 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen">
       {/* Left brand panel */}
       <div className="relative hidden w-1/2 flex-col justify-between overflow-hidden bg-gradient-to-br from-brand-900 to-brand-950 p-12 text-white lg:flex">
-        <div className="pointer-events-none absolute -left-48 top-[28%] h-[560px] w-[560px] rounded-full border border-white/[0.04]" />
-        <div className="pointer-events-none absolute -left-28 top-[42%] h-[380px] w-[380px] rounded-full border border-white/[0.05]" />
-        <div className="pointer-events-none absolute right-0 top-0 h-full w-px bg-white/[0.05]" />
+        {/* Soft green glow behind the arcs */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full"
+          style={{
+            width: 640,
+            height: 640,
+            background:
+              "radial-gradient(circle, rgba(129,199,132,0.18), rgba(129,199,132,0) 68%)",
+          }}
+        />
+        {/* Concentric semicircles anchored to the left edge */}
+        {[300, 500, 720, 960, 1220].map((d, i) => (
+          <div
+            key={d}
+            aria-hidden
+            className="pointer-events-none absolute left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border"
+            style={{
+              width: d,
+              height: d,
+              borderColor: `rgba(255,255,255,${(0.1 - i * 0.014).toFixed(3)})`,
+            }}
+          />
+        ))}
+        {/* Faint tinted accent ring */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute left-0 top-1/2 h-[500px] w-[500px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-brand-300/20"
+        />
 
         <div className="relative flex items-center gap-3">
           <img src="/logo.png" alt="UA Agro" className="h-11 w-11 rounded-lg bg-white p-1" />

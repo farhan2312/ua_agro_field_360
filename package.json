@@ -16,7 +16,7 @@
     "db:import": "tsx scripts/import-data.ts",
     "db:import-sales": "tsx scripts/import-sales.ts",
     "db:seed": "tsx scripts/seed-demo.ts",
-    "db:admin": "tsx scripts/create-admin.ts",
+    "db:accounts": "tsx scripts/create-accounts.ts",
     "db:reset": "prisma migrate reset --force",
     "db:setup": "prisma db push && npm run db:import && npm run db:seed"
   },

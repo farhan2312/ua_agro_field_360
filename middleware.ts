@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import { SESSION_COOKIE, verifySession } from "@/lib/session-token";
 
 const PUBLIC_PATHS = new Set(["/login", "/register"]);
+const CHANGE_PW = "/change-password";
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -21,7 +22,15 @@ export async function middleware(req: NextRequest) {
   // Signed in but on an auth page → send to the app.
   if (session && isPublic) {
     const url = req.nextUrl.clone();
-    url.pathname = "/dashboard";
+    url.pathname = session.mustChangePassword ? CHANGE_PW : "/dashboard";
+    url.search = "";
+    return NextResponse.redirect(url);
+  }
+
+  // Signed in and must reset password → force the change-password page.
+  if (session && session.mustChangePassword && pathname !== CHANGE_PW) {
+    const url = req.nextUrl.clone();
+    url.pathname = CHANGE_PW;
     url.search = "";
     return NextResponse.redirect(url);
   }

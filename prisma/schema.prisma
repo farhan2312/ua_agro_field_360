@@ -103,10 +103,11 @@ model User {
   gradA          String?
   gradB          String?
   email          String?        @unique
+  employeeCode   String?        @unique // login identifier (e.g. "UA999")
   passwordHash   String? // bcrypt hash (null for legacy/demo display rows)
+  mustChangePassword Boolean    @default(false) // force a reset on first login
   approvalStatus ApprovalStatus @default(PENDING)
   mobile         String?
-  employeeCode   String?
   storeId        Int?
   zone           String?
   territory      String?

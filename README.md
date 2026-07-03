@@ -48,13 +48,22 @@ See `.env.example`. Required:
 
 ## Authentication
 
-The app is gated by real auth (middleware protects every route):
+Real auth (middleware protects every route). **Login is by Employee Code** (e.g. `UA999`).
 
-- **Sign in** at `/login`; **register** at `/register` (request access → admin approves).
-- Create the default admin: `npm run db:admin` → **admin@uaagro.com / uaagro12345**.
-- New users register with a requested role and land in **Pending** on the **Users** page;
-  the admin approves them there and assigns a role. Only the admin sees the "view as role"
-  switcher; everyone else has their assigned role + sign out.
+Seed the internal accounts: `npm run db:accounts`
+
+| Employee Code | Password      | Role                        |
+| ------------- | ------------- | --------------------------- |
+| `UA999`       | `uaagro999`   | System Admin (super admin)  |
+| `UA1001`      | `uaagro12345` | Regional Manager (test)     |
+| `UA1002`      | `uaagro12345` | Agricultural Officer (test) |
+| `UA1003`      | `uaagro12345` | Central Team (test)         |
+
+- **Sign in** at `/login` with employee code + password; **register** at `/register`
+  (enter your employee code + requested role → **Pending** on the **Users** page → admin approves & assigns a role).
+- Only the admin sees the **"view as role"** switcher; everyone else has their assigned role + sign out.
+- Accounts created with the shared **default password** are forced to set a new password on first login
+  (`/change-password`); the seeded test accounts above are exempt.
 
 Generate `AUTH_SECRET`: `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`
 

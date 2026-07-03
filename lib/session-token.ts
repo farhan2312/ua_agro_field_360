@@ -11,9 +11,10 @@ const MAX_AGE = 60 * 60 * 24 * 7; // 7 days
 export interface SessionUser {
   userId: number;
   name: string;
-  email: string;
+  employeeCode: string;
   roleKey: RoleKey;
   isAdmin: boolean;
+  mustChangePassword: boolean;
 }
 
 function secret(): Uint8Array {
@@ -36,9 +37,10 @@ export async function verifySession(token: string): Promise<SessionUser | null> 
     return {
       userId: Number(payload.userId),
       name: String(payload.name),
-      email: String(payload.email),
+      employeeCode: String(payload.employeeCode ?? ""),
       roleKey: payload.roleKey as RoleKey,
       isAdmin: Boolean(payload.isAdmin),
+      mustChangePassword: Boolean(payload.mustChangePassword),
     };
   } catch {
     return null;
