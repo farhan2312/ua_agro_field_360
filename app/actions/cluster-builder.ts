@@ -19,9 +19,10 @@ import {
   type CreateClusterResult,
 } from "@/lib/cluster";
 
-/** Build the Prisma `where` for a store's farmers from the active filters. */
-function buildWhere(storeId: number, f: FarmerFilters): Prisma.FarmerWhereInput {
-  const where: Prisma.FarmerWhereInput = { storeId };
+/** Build the Prisma `where` for the selected stores' farmers from the active filters. */
+function buildWhere(storeIds: number[], f: FarmerFilters): Prisma.FarmerWhereInput {
+  const where: Prisma.FarmerWhereInput =
+    storeIds.length === 1 ? { storeId: storeIds[0] } : { storeId: { in: storeIds } };
   if (f.village) where.village = f.village;
   if (f.crop) where.crop = f.crop;
   if (f.segment && SEGMENT_LABEL_TO_ENUM[f.segment as never])
@@ -42,12 +43,17 @@ function buildWhere(storeId: number, f: FarmerFilters): Prisma.FarmerWhereInput 
 }
 
 export async function getStoreFarmers(
-  storeId: number,
+  storeIds: number[],
   filters: FarmerFilters,
   page = 1,
 ): Promise<StoreFarmersResult> {
+  if (!storeIds.length) {
+    return { rows: [], total: 0, page, pageSize: PAGE_SIZE, villages: [], crops: [] };
+  }
   try {
-    const where = buildWhere(storeId, filters);
+    const where = buildWhere(storeIds, filters);
+    const storeScope: Prisma.FarmerWhereInput =
+      storeIds.length === 1 ? { storeId: storeIds[0] } : { storeId: { in: storeIds } };
     const [total, rows, villageRows, cropRows] = await Promise.all([
       prisma.farmer.count({ where }),
       prisma.farmer.findMany({
@@ -58,14 +64,14 @@ export async function getStoreFarmers(
         select: { id: true, name: true, mobile: true, village: true, crop: true, segment: true, leadStatus: true },
       }),
       prisma.farmer.findMany({
-        where: { storeId, village: { not: null } },
+        where: { ...storeScope, village: { not: null } },
         distinct: ["village"],
         select: { village: true },
         orderBy: { village: "asc" },
         take: 300,
       }),
       prisma.farmer.findMany({
-        where: { storeId, crop: { not: null } },
+        where: { ...storeScope, crop: { not: null } },
         distinct: ["crop"],
         select: { crop: true },
         orderBy: { crop: "asc" },
@@ -117,7 +123,7 @@ export async function createClusterFromSelection(
   try {
     let ids: number[];
     if (input.allMatching) {
-      const where = buildWhere(input.storeId, input.filters);
+      const where = buildWhere(input.storeIds, input.filters);
       const matched = await prisma.farmer.findMany({
         where,
         select: { id: true },
@@ -141,7 +147,7 @@ export async function createClusterFromSelection(
 
     const persona = await getPersona();
     const criteria = JSON.stringify({
-      storeId: input.storeId,
+      storeIds: input.storeIds,
       storeName: input.storeName,
       filters: input.filters,
       count: ids.length,

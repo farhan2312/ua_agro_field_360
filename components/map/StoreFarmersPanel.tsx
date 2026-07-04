@@ -15,12 +15,17 @@ const selectClass =
   "rounded-lg border border-line bg-white px-2.5 py-2 text-[12px] font-medium text-ink-600 outline-none focus:border-brand-400";
 
 export function StoreFarmersPanel({
-  store,
+  stores,
   categories,
 }: {
-  store: StoreListItem;
+  stores: StoreListItem[];
   categories: string[];
 }) {
+  const storeIds = useMemo(() => stores.map((s) => s.id), [stores]);
+  const storeKey = storeIds.join(",");
+  const storeLabel = stores.length === 1 ? stores[0].name : `${stores.length} stores`;
+  const storeShort = stores.length === 1 ? stores[0].shortName : `${stores.length} stores`;
+
   const [filters, setFilters] = useState<FarmerFilters>(EMPTY_FILTERS);
   const [page, setPage] = useState(1);
   const [data, setData] = useState<StoreFarmersResult | null>(null);
@@ -34,27 +39,35 @@ export function StoreFarmersPanel({
   const [saving, startSave] = useTransition();
   const [toast, setToast] = useState<string | null>(null);
 
-  // Reset everything when the store changes.
+  // Reset everything when the store selection changes.
   useEffect(() => {
     setFilters(EMPTY_FILTERS);
     setPage(1);
     setSelected(new Set());
     setAllMatching(false);
-  }, [store.id]);
+  }, [storeKey]);
 
-  // Fetch (debounced) whenever store / filters / page change.
+  // Fetch (debounced) whenever stores / filters / page change.
   useEffect(() => {
     const t = setTimeout(() => {
       startLoad(async () => {
-        const res = await getStoreFarmers(store.id, filters, page);
+        const res = await getStoreFarmers(storeIds, filters, page);
         setData(res);
       });
     }, 300);
     return () => clearTimeout(t);
-  }, [store.id, filters, page]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeKey, filters, page]);
 
   const setFilter = (k: keyof FarmerFilters, v: string) => {
     setFilters((f) => ({ ...f, [k]: v || undefined }));
+    setPage(1);
+    setAllMatching(false);
+    setSelected(new Set());
+  };
+  const hasFilters = Object.values(filters).some((v) => v && String(v).trim());
+  const clearFilters = () => {
+    setFilters(EMPTY_FILTERS);
     setPage(1);
     setAllMatching(false);
     setSelected(new Set());
@@ -92,7 +105,7 @@ export function StoreFarmersPanel({
   }, [filters]);
 
   const openCluster = () => {
-    setClusterName(`${store.shortName} — ${new Date().getFullYear()}`);
+    setClusterName(`${storeShort} — ${new Date().getFullYear()}`);
     setModalOpen(true);
   };
 
@@ -100,8 +113,8 @@ export function StoreFarmersPanel({
     startSave(async () => {
       const res = await createClusterFromSelection({
         name: clusterName,
-        storeId: store.id,
-        storeName: store.shortName,
+        storeIds,
+        storeName: storeShort,
         filters,
         explicitIds: allMatching ? undefined : [...selected],
         allMatching,
@@ -125,7 +138,7 @@ export function StoreFarmersPanel({
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-5 py-3.5">
         <div>
           <div className="text-[15px] font-bold text-ink">
-            {store.name}
+            {storeLabel}
             <span className="ml-2 text-[12px] font-medium text-ink-muted">
               {grouped(total)} farmers{activeFilterText !== "no filters" ? " (filtered)" : ""}
             </span>
@@ -187,6 +200,17 @@ export function StoreFarmersPanel({
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
+        <button
+          type="button"
+          onClick={clearFilters}
+          disabled={!hasFilters}
+          className="ml-auto flex items-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-[12px] font-semibold text-ink-600 transition-colors hover:bg-surface-100 disabled:opacity-40"
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M3 3l6 6M9 3l-6 6" />
+          </svg>
+          Clear filters
+        </button>
       </div>
 
       {/* Select-all-matching banner */}
@@ -299,7 +323,7 @@ export function StoreFarmersPanel({
           eyebrow="Cluster Builder"
           eyebrowColor="#2E7D32"
           title="Create farmer cluster"
-          subtitle={`${store.name} · ${grouped(selectedCount)} farmers`}
+          subtitle={`${storeLabel} · ${grouped(selectedCount)} farmers`}
           onClose={() => setModalOpen(false)}
         />
         <div className="px-6 py-5">

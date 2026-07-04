@@ -30,7 +30,7 @@ export function MapView({
   categories: string[];
 }) {
   const [layer, setLayer] = useState<MapLayerKey>("segment");
-  const [selectedStoreId, setSelectedStoreId] = useState<number | null>(null);
+  const [selectedStoreIds, setSelectedStoreIds] = useState<Set<number>>(new Set());
   const [showStorePins, setShowStorePins] = useState(true);
   const [selectedFarmerId, setSelectedFarmerId] = useState<number | null>(null);
 
@@ -38,10 +38,11 @@ export function MapView({
     () => farmers.find((f) => f.id === selectedFarmerId) ?? null,
     [farmers, selectedFarmerId],
   );
-  const selectedStore = useMemo(
-    () => allStores.find((s) => s.id === selectedStoreId) ?? null,
-    [allStores, selectedStoreId],
+  const selectedStores = useMemo(
+    () => allStores.filter((s) => selectedStoreIds.has(s.id)),
+    [allStores, selectedStoreIds],
   );
+  const selectedIdList = useMemo(() => [...selectedStoreIds], [selectedStoreIds]);
   const activeLayerLabel = LEGEND_META[layer].label;
 
   const legendItems = useMemo(() => {
@@ -55,8 +56,16 @@ export function MapView({
       .filter((it) => it.count > 0);
   }, [farmers, layer]);
 
-  const selectStore = (id: number) => {
-    setSelectedStoreId((cur) => (cur === id ? null : id));
+  const toggleStore = (id: number) => {
+    setSelectedStoreIds((cur) => {
+      const n = new Set(cur);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+    setSelectedFarmerId(null);
+  };
+  const clearStores = () => {
+    setSelectedStoreIds(new Set());
     setSelectedFarmerId(null);
   };
 
@@ -112,7 +121,12 @@ export function MapView({
       {/* Store list + map */}
       <div className="flex flex-col gap-3.5 lg:flex-row">
         <div className="h-[420px] w-full lg:h-[520px] lg:w-[300px] lg:flex-none">
-          <StoreList stores={allStores} selectedId={selectedStoreId} onSelect={selectStore} />
+          <StoreList
+            stores={allStores}
+            selectedIds={selectedIdList}
+            onToggle={toggleStore}
+            onClear={clearStores}
+          />
         </div>
 
         <div className="flex min-w-0 flex-1 overflow-hidden rounded-[14px] border border-black/[0.04] bg-white shadow-card">
@@ -121,11 +135,11 @@ export function MapView({
               farmers={farmers}
               stores={stores}
               layer={layer}
-              storeFilter={selectedStoreId}
+              selectedStoreIds={selectedIdList}
               showStorePins={showStorePins}
               selectedFarmerId={selectedFarmerId}
               onSelectFarmer={(f) => setSelectedFarmerId(f.id)}
-              onToggleStore={selectStore}
+              onToggleStore={toggleStore}
             />
           </div>
           {selectedFarmer && (
@@ -163,14 +177,18 @@ export function MapView({
         )}
       </div>
 
-      {/* Selected store's farmers + cluster builder */}
-      {selectedStore ? (
-        <StoreFarmersPanel key={selectedStore.id} store={selectedStore} categories={categories} />
+      {/* Selected stores' farmers + cluster builder */}
+      {selectedStores.length > 0 ? (
+        <StoreFarmersPanel
+          key={selectedIdList.join(",")}
+          stores={selectedStores}
+          categories={categories}
+        />
       ) : (
         <div className="mt-3.5 rounded-[14px] border border-dashed border-line bg-white px-6 py-10 text-center">
-          <div className="text-[14px] font-semibold text-ink">Select a store to build a cluster</div>
+          <div className="text-[14px] font-semibold text-ink">Select one or more stores to build a cluster</div>
           <div className="mt-1 text-[12px] text-ink-muted">
-            Pick a store from the list (or a pin on the map) to see its farmers, filter them by village,
+            Tick stores in the list (or click pins on the map) to see their farmers, filter by village,
             crop, purchase behaviour or segment, and save a cluster for later action.
           </div>
         </div>

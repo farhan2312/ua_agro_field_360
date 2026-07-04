@@ -35,7 +35,7 @@ export interface StoreFarmersResult {
 
 export interface CreateClusterInput {
   name: string;
-  storeId: number;
+  storeIds: number[];
   storeName: string;
   filters: FarmerFilters;
   /** Explicitly checked farmer ids (when not selecting all matching). */

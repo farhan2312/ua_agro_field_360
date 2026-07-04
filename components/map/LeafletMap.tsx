@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
-import { MapContainer, TileLayer, Marker, Tooltip } from "react-leaflet";
+import { useEffect, useMemo } from "react";
+import { MapContainer, TileLayer, Marker, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import type { MapLayerKey } from "@/lib/map-layers";
 import { initials } from "@/lib/format";
@@ -15,9 +15,7 @@ const UP_ZOOM = 7;
 function farmerIcon(f: MapFarmer, color: string, selected: boolean, dimmed: boolean): L.DivIcon {
   const size = selected ? 40 : 30;
   const border = selected ? 3.5 : 2.5;
-  const shadow = selected
-    ? "0 4px 12px rgba(0,0,0,0.35)"
-    : "0 2px 5px rgba(0,0,0,0.25)";
+  const shadow = selected ? "0 4px 12px rgba(0,0,0,0.35)" : "0 2px 5px rgba(0,0,0,0.25)";
   const font = selected ? 12 : 10;
   const html = `
     <div style="transform:translate(-50%,-100%);opacity:${dimmed ? 0.18 : 1};">
@@ -26,12 +24,7 @@ function farmerIcon(f: MapFarmer, color: string, selected: boolean, dimmed: bool
       </div>
       <div style="width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:8px solid ${color};margin:0 auto;opacity:0.9;"></div>
     </div>`;
-  return L.divIcon({
-    html,
-    className: "ua-pin",
-    iconSize: [size, size],
-    iconAnchor: [0, 0],
-  });
+  return L.divIcon({ html, className: "ua-pin", iconSize: [size, size], iconAnchor: [0, 0] });
 }
 
 function storeIcon(s: MapStore, selected: boolean): L.DivIcon {
@@ -47,19 +40,50 @@ function storeIcon(s: MapStore, selected: boolean): L.DivIcon {
       </div>
       <div style="width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:7px solid ${s.color};margin:0 auto;"></div>
     </div>`;
-  return L.divIcon({
-    html,
-    className: "ua-store-pin",
-    iconSize: [36, 36],
-    iconAnchor: [0, 0],
-  });
+  return L.divIcon({ html, className: "ua-store-pin", iconSize: [36, 36], iconAnchor: [0, 0] });
+}
+
+/** Pans/zooms the map to fit the selected stores (or all stores when none selected). */
+function MapController({
+  stores,
+  selectedStoreIds,
+}: {
+  stores: MapStore[];
+  selectedStoreIds: number[];
+}) {
+  const map = useMap();
+  const selKey = [...selectedStoreIds].sort((a, b) => a - b).join(",");
+
+  useEffect(() => {
+    const focus =
+      selectedStoreIds.length > 0
+        ? stores.filter((s) => selectedStoreIds.includes(s.id))
+        : stores;
+    if (focus.length === 0) {
+      map.flyTo(UP_CENTER, UP_ZOOM, { duration: 0.6 });
+      return;
+    }
+    if (focus.length === 1) {
+      map.flyTo([focus[0].lat, focus[0].lng], 13, { duration: 0.8 });
+      return;
+    }
+    const bounds = L.latLngBounds(focus.map((s) => [s.lat, s.lng] as [number, number]));
+    map.flyToBounds(bounds, {
+      padding: [60, 60],
+      maxZoom: selectedStoreIds.length > 0 ? 12 : 9,
+      duration: 0.7,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selKey]);
+
+  return null;
 }
 
 export interface LeafletMapProps {
   farmers: MapFarmer[];
   stores: MapStore[];
   layer: MapLayerKey;
-  storeFilter: number | null;
+  selectedStoreIds: number[];
   showStorePins: boolean;
   selectedFarmerId: number | null;
   onSelectFarmer: (f: MapFarmer) => void;
@@ -70,16 +94,19 @@ export default function LeafletMap({
   farmers,
   stores,
   layer,
-  storeFilter,
+  selectedStoreIds,
   showStorePins,
   selectedFarmerId,
   onSelectFarmer,
   onToggleStore,
 }: LeafletMapProps) {
+  const hasSelection = selectedStoreIds.length > 0;
+  const selSet = useMemo(() => new Set(selectedStoreIds), [selectedStoreIds]);
+
   const farmerMarkers = useMemo(
     () =>
       farmers.map((f) => {
-        const inFilter = storeFilter === null || f.storeId === storeFilter;
+        const inFilter = !hasSelection || (f.storeId != null && selSet.has(f.storeId));
         const selected = f.id === selectedFarmerId;
         const color = colorFor(layer, f);
         return (
@@ -89,46 +116,38 @@ export default function LeafletMap({
             icon={farmerIcon(f, color, selected, !inFilter)}
             zIndexOffset={selected ? 1000 : 0}
             opacity={inFilter ? 1 : 0.18}
-            eventHandlers={{
-              click: () => {
-                if (inFilter) onSelectFarmer(f);
-              },
-            }}
+            eventHandlers={{ click: () => inFilter && onSelectFarmer(f) }}
           />
         );
       }),
-    [farmers, layer, storeFilter, selectedFarmerId, onSelectFarmer],
+    [farmers, layer, hasSelection, selSet, selectedFarmerId, onSelectFarmer],
   );
 
-  const storeMarkers = useMemo(
-    () =>
-      stores.map((s) => (
-        <Marker
-          key={`s-${s.id}`}
-          position={[s.lat, s.lng]}
-          icon={storeIcon(s, s.id === storeFilter)}
-          zIndexOffset={500}
-          eventHandlers={{ click: () => onToggleStore(s.id) }}
-        >
-          <Tooltip direction="top" offset={[0, -40]} opacity={1}>
-            {s.name}
-          </Tooltip>
-        </Marker>
-      )),
-    [stores, storeFilter, onToggleStore],
-  );
+  // Only the selected stores show when there's a selection; otherwise all.
+  const storeMarkers = useMemo(() => {
+    const visible = hasSelection ? stores.filter((s) => selSet.has(s.id)) : stores;
+    return visible.map((s) => (
+      <Marker
+        key={`s-${s.id}`}
+        position={[s.lat, s.lng]}
+        icon={storeIcon(s, selSet.has(s.id))}
+        zIndexOffset={500}
+        eventHandlers={{ click: () => onToggleStore(s.id) }}
+      >
+        <Tooltip direction="top" offset={[0, -40]} opacity={1}>
+          {s.name}
+        </Tooltip>
+      </Marker>
+    ));
+  }, [stores, hasSelection, selSet, onToggleStore]);
 
   return (
-    <MapContainer
-      center={UP_CENTER}
-      zoom={UP_ZOOM}
-      scrollWheelZoom
-      className="h-full w-full"
-    >
+    <MapContainer center={UP_CENTER} zoom={UP_ZOOM} scrollWheelZoom className="h-full w-full">
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
+      <MapController stores={stores} selectedStoreIds={selectedStoreIds} />
       {farmerMarkers}
       {showStorePins && storeMarkers}
     </MapContainer>

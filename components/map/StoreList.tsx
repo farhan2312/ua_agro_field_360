@@ -3,19 +3,22 @@
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/cn";
 import { grouped } from "@/lib/format";
-import { SearchIcon } from "@/components/icons";
+import { SearchIcon, CheckIcon } from "@/components/icons";
 import type { StoreListItem } from "./types";
 
 export function StoreList({
   stores,
-  selectedId,
-  onSelect,
+  selectedIds,
+  onToggle,
+  onClear,
 }: {
   stores: StoreListItem[];
-  selectedId: number | null;
-  onSelect: (id: number) => void;
+  selectedIds: number[];
+  onToggle: (id: number) => void;
+  onClear: () => void;
 }) {
   const [q, setQ] = useState("");
+  const selSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -33,7 +36,17 @@ export function StoreList({
       <div className="border-b border-line px-3.5 pt-3.5 pb-3">
         <div className="mb-2 flex items-center justify-between">
           <div className="text-[13px] font-bold text-ink">Stores</div>
-          <div className="text-[11px] font-semibold text-ink-muted">{filtered.length}</div>
+          {selectedIds.length > 0 ? (
+            <button
+              type="button"
+              onClick={onClear}
+              className="text-[11px] font-semibold text-brand-700 hover:underline"
+            >
+              {selectedIds.length} selected · Clear
+            </button>
+          ) : (
+            <div className="text-[11px] font-semibold text-ink-muted">{filtered.length}</div>
+          )}
         </div>
         <div className="relative">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted">
@@ -53,21 +66,26 @@ export function StoreList({
           <div className="p-6 text-center text-[12px] text-ink-muted">No stores match.</div>
         ) : (
           filtered.map((s) => {
-            const active = s.id === selectedId;
+            const active = selSet.has(s.id);
             return (
               <button
                 key={s.id}
                 type="button"
-                onClick={() => onSelect(s.id)}
+                onClick={() => onToggle(s.id)}
                 className={cn(
-                  "flex w-full items-center gap-2.5 border-b border-surface-200 px-3.5 py-2.5 text-left transition-colors",
+                  "flex w-full items-center gap-2.5 border-b border-surface-200 px-3 py-2.5 text-left transition-colors",
                   active ? "bg-brand-50" : "hover:bg-surface-100",
                 )}
               >
                 <span
-                  className="h-2.5 w-2.5 flex-none rounded-[2px]"
-                  style={{ background: s.color }}
-                />
+                  className={cn(
+                    "flex h-4 w-4 flex-none items-center justify-center rounded border transition-colors",
+                    active ? "border-brand-600 bg-brand-600 text-white" : "border-line bg-white",
+                  )}
+                >
+                  {active && <CheckIcon />}
+                </span>
+                <span className="h-2.5 w-2.5 flex-none rounded-[2px]" style={{ background: s.color }} />
                 <span className="min-w-0 flex-1">
                   <span
                     className={cn(
