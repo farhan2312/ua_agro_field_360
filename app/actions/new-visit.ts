@@ -172,6 +172,8 @@ export async function submitVisitAction(
         whatsappNumber: form.whatsappAvail
           ? form.serviceDetail.whatsappAvail?.trim() || null
           : null,
+        photos: form.photos,
+        voiceNotes: form.voiceNotes,
         visitedAt: new Date(),
         source: "REAL",
       },

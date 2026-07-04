@@ -15,6 +15,8 @@ import { ChipGroupWithOther } from "./ChipGroupWithOther";
 import { CropSelector } from "./CropSelector";
 import { BucketSlider } from "./BucketSlider";
 import { OtherReveal } from "./OtherReveal";
+import { PhotoCapture } from "./PhotoCapture";
+import { VoiceRecorder } from "./VoiceRecorder";
 import { VILLAGES, DISTRICTS, type WizardOptions } from "./field-options";
 import { INITIAL_FORM, type VisitForm, type FarmerLookup } from "./types";
 import { submitVisitAction, lookupFarmerByMobile } from "@/app/actions/new-visit";
@@ -78,6 +80,7 @@ export function NewVisitWizard({
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<VisitForm>(INITIAL_FORM);
   const [pending, startTransition] = useTransition();
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const set = <K extends keyof VisitForm>(key: K, value: VisitForm[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
@@ -194,6 +197,18 @@ export function NewVisitWizard({
       currentProblem: foldArr(form.currentProblem, ot.currentProblem),
       cropRisk: foldArr(form.cropRisk, ot.cropRisk),
     };
+    // Guard the attachment payload against the server-action body limit (12MB).
+    // Data-URL string length ≈ byte size; block early with a clear message
+    // rather than letting an oversize POST fail silently and lose the visit.
+    const mediaBytes = [...form.photos, ...form.voiceNotes].reduce((n, s) => n + s.length, 0);
+    if (mediaBytes > 10 * 1024 * 1024) {
+      setSubmitError(
+        `Attachments are too large (~${Math.round(mediaBytes / (1024 * 1024))} MB). ` +
+          `Remove some photos or voice notes and try again.`,
+      );
+      return;
+    }
+    setSubmitError(null);
     startTransition(() => void submitVisitAction(payload, editingFarmerId));
   };
 
@@ -629,15 +644,6 @@ export function NewVisitWizard({
           <div>
             <div className="mb-5 text-[18px] font-bold text-[#1A1C1A]">Review & Submit</div>
 
-            <div className="mb-5">
-              <FieldLabel>Lead Status *</FieldLabel>
-              <ChipGroup
-                options={options.leadStatus}
-                value={form.leadStatus}
-                onChange={(v) => set("leadStatus", v)}
-              />
-            </div>
-
             <div className="mb-6">
               <FieldLabel>Follow-up Date</FieldLabel>
               <input
@@ -667,23 +673,25 @@ export function NewVisitWizard({
                     <span className="font-semibold text-[#1A1C1A]">{value}</span>
                   </div>
                 ))}
-                <div className="text-[#757575]">
-                  Status: <span className="font-semibold text-[#2E7D32]">{form.leadStatus}</span>
-                </div>
               </div>
             </div>
 
-            <div className="flex gap-3">
-              {["+ Attach Photos", "+ Record Voice Note"].map((label) => (
-                <button
-                  key={label}
-                  type="button"
-                  className="flex-1 rounded-[10px] border-[1.5px] border-dashed border-[#BDBDBD] px-7 py-3.5 text-center text-[13px] text-[#757575] hover:border-[#2E7D32] hover:text-[#2E7D32]"
-                >
-                  {label}
-                </button>
-              ))}
+            <div className="grid gap-5 sm:grid-cols-2">
+              <div>
+                <FieldLabel>Photos</FieldLabel>
+                <PhotoCapture photos={form.photos} onChange={(v) => set("photos", v)} />
+              </div>
+              <div>
+                <FieldLabel>Voice Notes</FieldLabel>
+                <VoiceRecorder notes={form.voiceNotes} onChange={(v) => set("voiceNotes", v)} />
+              </div>
             </div>
+          </div>
+        )}
+
+        {submitError && (
+          <div className="mt-4 rounded-[10px] border border-[#F5C6C6] bg-[#FDECEA] px-3.5 py-2.5 text-[12px] font-medium text-[#C62828]">
+            {submitError}
           </div>
         )}
 
