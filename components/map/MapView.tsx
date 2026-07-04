@@ -22,17 +22,16 @@ export function MapView({
   farmers,
   stores,
   allStores,
-  categories,
 }: {
   farmers: MapFarmer[];
   stores: MapStore[];
   allStores: StoreListItem[];
-  categories: string[];
 }) {
   const [layer, setLayer] = useState<MapLayerKey>("segment");
   const [selectedStoreIds, setSelectedStoreIds] = useState<Set<number>>(new Set());
   const [showStorePins, setShowStorePins] = useState(true);
   const [selectedFarmerId, setSelectedFarmerId] = useState<number | null>(null);
+  const [fitNonce, setFitNonce] = useState(0);
 
   const selectedFarmer = useMemo(
     () => farmers.find((f) => f.id === selectedFarmerId) ?? null,
@@ -56,18 +55,22 @@ export function MapView({
       .filter((it) => it.count > 0);
   }, [farmers, layer]);
 
-  const toggleStore = (id: number) => {
+  const toggleStore = (id: number, fromMap = false) => {
     setSelectedStoreIds((cur) => {
       const n = new Set(cur);
       n.has(id) ? n.delete(id) : n.add(id);
       return n;
     });
     setSelectedFarmerId(null);
+    // Selecting from the list re-frames the map; clicking pins keeps the current view.
+    if (!fromMap) setFitNonce((k) => k + 1);
   };
   const clearStores = () => {
     setSelectedStoreIds(new Set());
     setSelectedFarmerId(null);
+    setFitNonce((k) => k + 1);
   };
+  const fitToSelection = () => setFitNonce((k) => k + 1);
 
   if (allStores.length === 0) {
     return (
@@ -106,9 +109,19 @@ export function MapView({
         })}
         <button
           type="button"
+          onClick={fitToSelection}
+          className="ml-auto flex items-center gap-1.5 rounded-[20px] border-[1.5px] border-[#E0E0E0] bg-white px-3.5 py-1.5 text-[11.5px] font-semibold text-[#616161] hover:bg-[#F5F5F5]"
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+            <path d="M1 4V1h3M8 1h3v3M11 8v3H8M4 11H1V8" />
+          </svg>
+          Fit to selection
+        </button>
+        <button
+          type="button"
           onClick={() => setShowStorePins((v) => !v)}
           className={cn(
-            "ml-auto flex items-center gap-1.5 rounded-[20px] border-[1.5px] px-3.5 py-1.5 text-[11.5px] font-semibold",
+            "flex items-center gap-1.5 rounded-[20px] border-[1.5px] px-3.5 py-1.5 text-[11.5px] font-semibold",
             showStorePins
               ? "border-[#C8E6C9] bg-[#E8F5E9] text-[#2E7D32]"
               : "border-[#E0E0E0] bg-[#F5F5F5] text-[#616161] hover:bg-[#EEEEEE]",
@@ -136,10 +149,11 @@ export function MapView({
               stores={stores}
               layer={layer}
               selectedStoreIds={selectedIdList}
+              fitNonce={fitNonce}
               showStorePins={showStorePins}
               selectedFarmerId={selectedFarmerId}
               onSelectFarmer={(f) => setSelectedFarmerId(f.id)}
-              onToggleStore={toggleStore}
+              onToggleStore={(id) => toggleStore(id, true)}
             />
           </div>
           {selectedFarmer && (
@@ -179,11 +193,7 @@ export function MapView({
 
       {/* Selected stores' farmers + cluster builder */}
       {selectedStores.length > 0 ? (
-        <StoreFarmersPanel
-          key={selectedIdList.join(",")}
-          stores={selectedStores}
-          categories={categories}
-        />
+        <StoreFarmersPanel key={selectedIdList.join(",")} stores={selectedStores} />
       ) : (
         <div className="mt-3.5 rounded-[14px] border border-dashed border-line bg-white px-6 py-10 text-center">
           <div className="text-[14px] font-semibold text-ink">Select one or more stores to build a cluster</div>

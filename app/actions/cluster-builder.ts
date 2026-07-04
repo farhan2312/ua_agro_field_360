@@ -23,7 +23,7 @@ import {
 function buildWhere(storeIds: number[], f: FarmerFilters): Prisma.FarmerWhereInput {
   const where: Prisma.FarmerWhereInput =
     storeIds.length === 1 ? { storeId: storeIds[0] } : { storeId: { in: storeIds } };
-  if (f.village) where.village = f.village;
+  if (f.villages?.length) where.village = { in: f.villages };
   if (f.crop) where.crop = f.crop;
   if (f.segment && SEGMENT_LABEL_TO_ENUM[f.segment as never])
     where.segment = SEGMENT_LABEL_TO_ENUM[f.segment as never] as never;
@@ -48,13 +48,13 @@ export async function getStoreFarmers(
   page = 1,
 ): Promise<StoreFarmersResult> {
   if (!storeIds.length) {
-    return { rows: [], total: 0, page, pageSize: PAGE_SIZE, villages: [], crops: [] };
+    return { rows: [], total: 0, page, pageSize: PAGE_SIZE, villages: [], crops: [], categories: [] };
   }
   try {
     const where = buildWhere(storeIds, filters);
     const storeScope: Prisma.FarmerWhereInput =
       storeIds.length === 1 ? { storeId: storeIds[0] } : { storeId: { in: storeIds } };
-    const [total, rows, villageRows, cropRows] = await Promise.all([
+    const [total, rows, villageGroups, cropRows, categoryRows] = await Promise.all([
       prisma.farmer.count({ where }),
       prisma.farmer.findMany({
         where,
@@ -63,12 +63,13 @@ export async function getStoreFarmers(
         take: PAGE_SIZE,
         select: { id: true, name: true, mobile: true, village: true, crop: true, segment: true, leadStatus: true },
       }),
-      prisma.farmer.findMany({
+      // Villages served by THIS store's farmers, biggest first (the "nearby" quick-pick).
+      prisma.farmer.groupBy({
+        by: ["village"],
         where: { ...storeScope, village: { not: null } },
-        distinct: ["village"],
-        select: { village: true },
-        orderBy: { village: "asc" },
-        take: 300,
+        _count: { _all: true },
+        orderBy: { _count: { village: "desc" } },
+        take: 250,
       }),
       prisma.farmer.findMany({
         where: { ...storeScope, crop: { not: null } },
@@ -76,6 +77,14 @@ export async function getStoreFarmers(
         select: { crop: true },
         orderBy: { crop: "asc" },
         take: 50,
+      }),
+      // Product categories actually purchased by this store's farmers.
+      prisma.sale.findMany({
+        where: { farmer: storeScope, category: { not: null } },
+        distinct: ["category"],
+        select: { category: true },
+        orderBy: { category: "asc" },
+        take: 40,
       }),
     ]);
 
@@ -106,11 +115,14 @@ export async function getStoreFarmers(
       total,
       page,
       pageSize: PAGE_SIZE,
-      villages: villageRows.map((v) => v.village!).filter(Boolean),
+      villages: villageGroups
+        .filter((v) => v.village)
+        .map((v) => ({ village: v.village as string, count: v._count._all })),
       crops: cropRows.map((c) => c.crop!).filter(Boolean),
+      categories: categoryRows.map((c) => c.category!).filter(Boolean),
     };
   } catch {
-    return { rows: [], total: 0, page, pageSize: PAGE_SIZE, villages: [], crops: [] };
+    return { rows: [], total: 0, page, pageSize: PAGE_SIZE, villages: [], crops: [], categories: [] };
   }
 }
 

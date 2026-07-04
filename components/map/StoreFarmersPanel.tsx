@@ -16,10 +16,8 @@ const selectClass =
 
 export function StoreFarmersPanel({
   stores,
-  categories,
 }: {
   stores: StoreListItem[];
-  categories: string[];
 }) {
   const storeIds = useMemo(() => stores.map((s) => s.id), [stores]);
   const storeKey = storeIds.join(",");
@@ -38,6 +36,7 @@ export function StoreFarmersPanel({
   const [clusterName, setClusterName] = useState("");
   const [saving, startSave] = useTransition();
   const [toast, setToast] = useState<string | null>(null);
+  const [villageQuery, setVillageQuery] = useState("");
 
   // Reset everything when the store selection changes.
   useEffect(() => {
@@ -59,18 +58,34 @@ export function StoreFarmersPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeKey, filters, page]);
 
-  const setFilter = (k: keyof FarmerFilters, v: string) => {
-    setFilters((f) => ({ ...f, [k]: v || undefined }));
+  const resetSelection = () => {
     setPage(1);
     setAllMatching(false);
     setSelected(new Set());
   };
-  const hasFilters = Object.values(filters).some((v) => v && String(v).trim());
+  const setFilter = (k: keyof FarmerFilters, v: string) => {
+    setFilters((f) => ({ ...f, [k]: v || undefined }));
+    resetSelection();
+  };
+  const selectedVillages = useMemo(() => filters.villages ?? [], [filters.villages]);
+  const villageSet = useMemo(() => new Set(selectedVillages), [selectedVillages]);
+  const toggleVillage = (v: string) => {
+    const s = new Set(selectedVillages);
+    s.has(v) ? s.delete(v) : s.add(v);
+    setFilters((f) => ({ ...f, villages: s.size ? [...s] : undefined }));
+    resetSelection();
+  };
+  const hasFilters = !!(
+    filters.q?.trim() ||
+    filters.category ||
+    filters.crop ||
+    filters.segment ||
+    filters.leadStatus ||
+    selectedVillages.length
+  );
   const clearFilters = () => {
     setFilters(EMPTY_FILTERS);
-    setPage(1);
-    setAllMatching(false);
-    setSelected(new Set());
+    resetSelection();
   };
 
   const rows = data?.rows ?? [];
@@ -98,11 +113,16 @@ export function StoreFarmersPanel({
   };
 
   const activeFilterText = useMemo(() => {
-    const parts = Object.entries(filters)
-      .filter(([, v]) => v)
-      .map(([k, v]) => `${k}: ${v}`);
+    const parts: string[] = [];
+    if (selectedVillages.length)
+      parts.push(`${selectedVillages.length} village${selectedVillages.length > 1 ? "s" : ""}`);
+    if (filters.category) parts.push(filters.category);
+    if (filters.crop) parts.push(filters.crop);
+    if (filters.segment) parts.push(filters.segment);
+    if (filters.leadStatus) parts.push(filters.leadStatus);
+    if (filters.q?.trim()) parts.push(`"${filters.q.trim()}"`);
     return parts.length ? parts.join(" · ") : "no filters";
-  }, [filters]);
+  }, [filters, selectedVillages.length]);
 
   const openCluster = () => {
     setClusterName(`${storeShort} — ${new Date().getFullYear()}`);
@@ -170,15 +190,9 @@ export function StoreFarmersPanel({
           placeholder="Search name / mobile / village…"
           className="min-w-[220px] flex-1 rounded-lg border border-line bg-white px-3 py-2 text-[12.5px] text-ink outline-none focus:border-brand-400"
         />
-        <select value={filters.village ?? ""} onChange={(e) => setFilter("village", e.target.value)} className={selectClass}>
-          <option value="">All villages</option>
-          {(data?.villages ?? []).map((v) => (
-            <option key={v} value={v}>{v}</option>
-          ))}
-        </select>
         <select value={filters.category ?? ""} onChange={(e) => setFilter("category", e.target.value)} className={selectClass}>
           <option value="">Any purchase</option>
-          {categories.map((c) => (
+          {(data?.categories ?? []).map((c) => (
             <option key={c} value={c}>{c}</option>
           ))}
         </select>
@@ -212,6 +226,62 @@ export function StoreFarmersPanel({
           Clear filters
         </button>
       </div>
+
+      {/* Village picker — the store's villages (nearby), quick multi-add */}
+      {(data?.villages.length ?? 0) > 0 && (
+        <div className="border-b border-line px-5 py-3">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="text-[11px] font-bold uppercase tracking-[0.5px] text-ink-600">
+              Nearby villages
+            </span>
+            <span className="text-[11px] text-ink-muted">
+              {grouped(data?.villages.length ?? 0)} in {stores.length === 1 ? "this store" : "these stores"}
+              {selectedVillages.length > 0 && ` · ${selectedVillages.length} selected`}
+            </span>
+            {selectedVillages.length > 0 && (
+              <button
+                type="button"
+                onClick={() => { setFilters((f) => ({ ...f, villages: undefined })); resetSelection(); }}
+                className="text-[11px] font-semibold text-brand-700 hover:underline"
+              >
+                Clear villages
+              </button>
+            )}
+            <input
+              value={villageQuery}
+              onChange={(e) => setVillageQuery(e.target.value)}
+              placeholder="Find a village…"
+              className="ml-auto w-[180px] rounded-lg border border-line bg-white px-2.5 py-1.5 text-[12px] text-ink outline-none focus:border-brand-400"
+            />
+          </div>
+          <div className="flex max-h-[132px] flex-wrap gap-1.5 overflow-y-auto">
+            {(data?.villages ?? [])
+              .filter((v) => !villageQuery.trim() || v.village.toLowerCase().includes(villageQuery.trim().toLowerCase()))
+              .slice(0, 120)
+              .map((v) => {
+                const on = villageSet.has(v.village);
+                return (
+                  <button
+                    key={v.village}
+                    type="button"
+                    onClick={() => toggleVillage(v.village)}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11.5px] font-medium transition-colors",
+                      on
+                        ? "border-brand-600 bg-brand-600 text-white"
+                        : "border-line bg-white text-ink-600 hover:border-brand-400 hover:bg-brand-50",
+                    )}
+                  >
+                    {v.village}
+                    <span className={cn("text-[10px] font-bold", on ? "text-white/70" : "text-ink-400")}>
+                      {grouped(v.count)}
+                    </span>
+                  </button>
+                );
+              })}
+          </div>
+        </div>
+      )}
 
       {/* Select-all-matching banner */}
       {total > rows.length && (

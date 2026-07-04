@@ -4,12 +4,17 @@ export const PAGE_SIZE = 25;
 export const MAX_CLUSTER = 25_000;
 
 export interface FarmerFilters {
-  village?: string;
+  villages?: string[]; // multi-select villages
   crop?: string;
   segment?: string; // display label
   leadStatus?: string; // display label
   category?: string; // product category from sales
   q?: string;
+}
+
+export interface VillageFacet {
+  village: string;
+  count: number;
 }
 
 export interface StoreFarmerRow {
@@ -29,8 +34,9 @@ export interface StoreFarmersResult {
   total: number;
   page: number;
   pageSize: number;
-  villages: string[];
-  crops: string[];
+  villages: VillageFacet[]; // per-store, with farmer counts, biggest first
+  crops: string[]; // per-store
+  categories: string[]; // per-store (products purchased)
 }
 
 export interface CreateClusterInput {

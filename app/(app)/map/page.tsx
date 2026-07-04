@@ -19,7 +19,6 @@ export default async function MapViewPage() {
   let farmers: MapFarmer[] = [];
   let stores: MapStore[] = [];
   let allStores: StoreListItem[] = [];
-  let categories: string[] = [];
 
   try {
     // Only farmers with real coordinates are plottable (the 12 enriched demo set).
@@ -102,27 +101,18 @@ export default async function MapViewPage() {
       farmerCount: s._count.farmers,
     }));
 
-    // Every store (alphabetical) for the picker list + distinct sale categories for filtering.
-    const [allStoreRows, catRows] = await Promise.all([
-      prisma.store.findMany({
-        orderBy: { name: "asc" },
-        select: {
-          id: true,
-          code: true,
-          name: true,
-          zone: true,
-          lat: true,
-          _count: { select: { farmers: true } },
-        },
-      }),
-      prisma.sale.findMany({
-        where: { category: { not: null } },
-        distinct: ["category"],
-        select: { category: true },
-        orderBy: { category: "asc" },
-        take: 40,
-      }),
-    ]);
+    // Every store (alphabetical) for the picker list.
+    const allStoreRows = await prisma.store.findMany({
+      orderBy: { name: "asc" },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        zone: true,
+        lat: true,
+        _count: { select: { farmers: true } },
+      },
+    });
 
     allStores = allStoreRows.map((s): StoreListItem => ({
       id: s.id,
@@ -134,20 +124,11 @@ export default async function MapViewPage() {
       farmerCount: s._count.farmers,
       hasGps: s.lat != null,
     }));
-    categories = catRows.map((c) => c.category!).filter(Boolean);
   } catch {
     farmers = [];
     stores = [];
     allStores = [];
-    categories = [];
   }
 
-  return (
-    <MapView
-      farmers={farmers}
-      stores={stores}
-      allStores={allStores}
-      categories={categories}
-    />
-  );
+  return <MapView farmers={farmers} stores={stores} allStores={allStores} />;
 }
