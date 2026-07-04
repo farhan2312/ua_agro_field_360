@@ -10,17 +10,20 @@ export function Toggle({
   onChange,
   labels = { on: "Yes", off: "No" },
   disabled,
+  ariaLabel,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   labels?: { on: string; off: string };
   disabled?: boolean;
+  ariaLabel?: string;
 }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
+      aria-label={ariaLabel}
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className="inline-flex items-center gap-2 disabled:opacity-50"

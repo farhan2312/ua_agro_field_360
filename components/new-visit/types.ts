@@ -34,6 +34,11 @@ export interface VisitForm {
   // Step 4 — Review & Submit
   leadStatus: string;
   followUpDate: string;
+  // Cross-cutting side-channels (not columns themselves)
+  /** R6: free text for an "Other" chip, keyed by wizard field key (soil, waterSource, crop, product, …). */
+  otherText: Record<string, string>;
+  /** R5: detail text for a service toggle when ON, keyed by the service field key. */
+  serviceDetail: Record<string, string>;
 }
 
 export const INITIAL_FORM: VisitForm = {
@@ -45,7 +50,7 @@ export const INITIAL_FORM: VisitForm = {
   visitPurpose: "",
   landHolding: "",
   soil: "",
-  soilTesting: "",
+  soilTesting: "Not Required",
   waterSource: [],
   mainCrop: "",
   crop: [],
@@ -66,6 +71,8 @@ export const INITIAL_FORM: VisitForm = {
   whatsappAvail: false,
   leadStatus: "New",
   followUpDate: "",
+  otherText: {},
+  serviceDetail: {},
 };
 
 /** Full record returned by the server-side mobile lookup (for autofill + edit). */

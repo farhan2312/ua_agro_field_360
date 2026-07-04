@@ -226,6 +226,11 @@ model Visit {
   contractFarming Boolean  @default(false)
   dairyServices   Boolean  @default(false)
   whatsappAvail   Boolean  @default(false)
+  // Service & membership detail (captured when the matching toggle is on)
+  fpoName         String?
+  contractDetail  String?
+  dairyDetail     String?
+  whatsappNumber  String?
   photos          String[] @default([])
   voiceNotes      String[] @default([])
 

@@ -161,6 +161,17 @@ export async function submitVisitAction(
         contractFarming: form.contractFarming,
         dairyServices: form.dairyServices,
         whatsappAvail: form.whatsappAvail,
+        // Service detail — only stored when the matching toggle is on.
+        fpoName: form.fpoMember ? form.serviceDetail.fpoMember?.trim() || null : null,
+        contractDetail: form.contractFarming
+          ? form.serviceDetail.contractFarming?.trim() || null
+          : null,
+        dairyDetail: form.dairyServices
+          ? form.serviceDetail.dairyServices?.trim() || null
+          : null,
+        whatsappNumber: form.whatsappAvail
+          ? form.serviceDetail.whatsappAvail?.trim() || null
+          : null,
         visitedAt: new Date(),
         source: "REAL",
       },

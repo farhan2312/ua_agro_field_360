@@ -11,6 +11,10 @@ import {
   type SegmentLabel,
 } from "@/lib/segments";
 import { ChipGroup } from "./ChipGroup";
+import { ChipGroupWithOther } from "./ChipGroupWithOther";
+import { CropSelector } from "./CropSelector";
+import { BucketSlider } from "./BucketSlider";
+import { OtherReveal } from "./OtherReveal";
 import { VILLAGES, DISTRICTS, type WizardOptions } from "./field-options";
 import { INITIAL_FORM, type VisitForm, type FarmerLookup } from "./types";
 import { submitVisitAction, lookupFarmerByMobile } from "@/app/actions/new-visit";
@@ -82,6 +86,40 @@ export function NewVisitWizard({
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
       set(key, e.target.value as VisitForm[typeof key]);
 
+  /* ── "Other" specify boxes (R6) + service detail boxes (R5) ── */
+  type ServiceKey = "fpoMember" | "contractFarming" | "dairyServices" | "whatsappAvail";
+
+  const setOtherText = (k: string, v: string) =>
+    setForm((f) => ({ ...f, otherText: { ...f.otherText, [k]: v } }));
+
+  const setServiceDetail = (k: string, v: string) =>
+    setForm((f) => ({ ...f, serviceDetail: { ...f.serviceDetail, [k]: v } }));
+
+  // Toggle a service on/off; clear its detail when off; seed WhatsApp from the
+  // entered mobile the first time it's turned on.
+  const setService = (key: ServiceKey, on: boolean) =>
+    setForm((f) => {
+      const serviceDetail = { ...f.serviceDetail };
+      if (!on) serviceDetail[key] = "";
+      else if (key === "whatsappAvail" && !serviceDetail.whatsappAvail)
+        serviceDetail.whatsappAvail = f.mobile;
+      return { ...f, [key]: on, serviceDetail } as VisitForm;
+    });
+
+  // Chip onChange wrapper that also drops the "Other" text when "Other" leaves
+  // the selection, so abandoned detail is never persisted.
+  const setChip =
+    (key: keyof VisitForm, fieldKey: string) =>
+    (v: string | string[]) =>
+      setForm((f) => {
+        const stillOther = Array.isArray(v) ? v.includes("Other") : v === "Other";
+        return {
+          ...f,
+          [key]: v,
+          otherText: stillOther ? f.otherText : { ...f.otherText, [fieldKey]: "" },
+        } as VisitForm;
+      });
+
   /* ── Server-side mobile lookup → autofill + edit mode ── */
   const [lookupStatus, setLookupStatus] = useState<"idle" | "loading" | "found" | "notfound">("idle");
   const [foundFarmer, setFoundFarmer] = useState<FarmerLookup | null>(null);
@@ -110,14 +148,19 @@ export function NewVisitWizard({
           setEditingFarmerId(fa.id);
           setLookupStatus("found");
           // Autofill the identity fields from the existing record (editable).
-          setForm((prev) => ({
-            ...prev,
-            name: fa.name || prev.name,
-            village: fa.village || prev.village,
-            district: fa.district || prev.district,
-            mainCrop: fa.mainCrop || prev.mainCrop,
-            leadStatus: fa.leadStatusLabel || prev.leadStatus,
-          }));
+          setForm((prev) => {
+            const nextMain = fa.mainCrop || prev.mainCrop;
+            return {
+              ...prev,
+              name: fa.name || prev.name,
+              village: fa.village || prev.village,
+              district: fa.district || prev.district,
+              mainCrop: nextMain,
+              // Keep the CropSelector invariant: main is never also an "other".
+              crop: prev.crop.filter((c) => c !== nextMain),
+              leadStatus: fa.leadStatusLabel || prev.leadStatus,
+            };
+          });
         } else {
           setFoundFarmer(null);
           setEditingFarmerId(null);
@@ -132,7 +175,27 @@ export function NewVisitWizard({
 
   const next = () => setStep((s) => Math.min(s + 1, 4));
   const prev = () => setStep((s) => Math.max(s - 1, 0));
-  const submit = () => startTransition(() => void submitVisitAction(form, editingFarmerId));
+
+  const submit = () => {
+    // Fold each selected "Other" into "Other: <specified text>" so the typed
+    // detail is persisted in the existing columns (no schema change for R6).
+    const foldOne = (v: string, t?: string) =>
+      v === "Other" && t?.trim() ? `Other: ${t.trim()}` : v;
+    const foldArr = (a: string[], t?: string) => a.map((v) => foldOne(v, t));
+    const ot = form.otherText;
+    const payload: VisitForm = {
+      ...form,
+      soil: foldOne(form.soil, ot.soil),
+      waterSource: foldArr(form.waterSource, ot.waterSource),
+      mainCrop: foldOne(form.mainCrop, ot.crop),
+      crop: foldArr(form.crop, ot.crop),
+      product: foldArr(form.product, ot.product),
+      productRequired: foldArr(form.productRequired, ot.productRequired),
+      currentProblem: foldArr(form.currentProblem, ot.currentProblem),
+      cropRisk: foldArr(form.cropRisk, ot.cropRisk),
+    };
+    startTransition(() => void submitVisitAction(payload, editingFarmerId));
+  };
 
   return (
     <div className="mx-auto max-w-[800px] animate-fadeUp">
@@ -352,61 +415,75 @@ export function NewVisitWizard({
 
             <div className="mb-5">
               <FieldLabel>Land Holding *</FieldLabel>
-              <ChipGroup
+              <BucketSlider
                 options={options.landHolding}
                 value={form.landHolding}
                 onChange={(v) => set("landHolding", v)}
+                ariaLabel="Land Holding"
               />
             </div>
 
-            <div className="mb-5 grid grid-cols-2 gap-4">
+            <div className="mb-5 grid grid-cols-2 items-start gap-4">
               <div>
                 <FieldLabel>Soil Type</FieldLabel>
-                <ChipGroup
+                <ChipGroupWithOther
                   size="sm"
+                  fieldKey="soil"
                   options={options.soilType}
                   value={form.soil}
-                  onChange={(v) => set("soil", v)}
+                  onChange={setChip("soil", "soil")}
+                  detail={form.otherText.soil ?? ""}
+                  onDetail={(t) => setOtherText("soil", t)}
                 />
               </div>
               <div>
                 <FieldLabel>Soil Testing</FieldLabel>
-                <ChipGroup
-                  size="sm"
-                  options={options.soilTesting}
-                  value={form.soilTesting}
-                  onChange={(v) => set("soilTesting", v)}
+                <Toggle
+                  ariaLabel="Soil Testing"
+                  checked={form.soilTesting === "Required"}
+                  onChange={(v) => set("soilTesting", v ? "Required" : "Not Required")}
+                  labels={{ on: "Required", off: "Not Required" }}
                 />
               </div>
             </div>
 
             <div className="mb-5">
               <FieldLabel>Water Source</FieldLabel>
-              <ChipGroup
+              <ChipGroupWithOther
                 multi
+                fieldKey="waterSource"
                 options={options.waterSource}
                 value={form.waterSource}
-                onChange={(v) => set("waterSource", v)}
+                onChange={setChip("waterSource", "waterSource")}
+                detail={form.otherText.waterSource ?? ""}
+                onDetail={(t) => setOtherText("waterSource", t)}
               />
             </div>
 
             <div className="mb-5">
-              <FieldLabel>Main Crop *</FieldLabel>
-              <ChipGroup
-                options={options.mainCrop}
-                value={form.mainCrop}
-                onChange={(v) => set("mainCrop", v)}
-              />
-            </div>
-
-            <div className="mb-5">
-              <FieldLabel>Other Crops Grown</FieldLabel>
-              <ChipGroup
-                multi
-                size="sm"
+              <FieldLabel>
+                Crops *{" "}
+                <span className="font-normal text-[#9E9E9E]">
+                  — pick crops, star the main one
+                </span>
+              </FieldLabel>
+              <CropSelector
                 options={options.crop}
-                value={form.crop}
-                onChange={(v) => set("crop", v)}
+                main={form.mainCrop}
+                others={form.crop}
+                onChange={({ main, others }) =>
+                  setForm((f) => ({
+                    ...f,
+                    mainCrop: main,
+                    crop: others,
+                    otherText:
+                      main === "Other" || others.includes("Other")
+                        ? f.otherText
+                        : { ...f.otherText, crop: "" },
+                  }))
+                }
+                otherText={form.otherText.crop ?? ""}
+                onOtherText={(v) => setOtherText("crop", v)}
               />
             </div>
 
@@ -444,22 +521,35 @@ export function NewVisitWizard({
             <div className="mb-5 text-[18px] font-bold text-[#1A1C1A]">Products & Issues</div>
             {(
               [
-                ["Products Currently Using", "product"],
-                ["Products Required", "productRequired"],
-                ["Current Problem", "currentProblem"],
-                ["Crop Risk", "cropRisk"],
-                ["Danger Zone", "dangerZone"],
+                ["Products Currently Using", "product", true],
+                ["Products Required", "productRequired", true],
+                ["Current Problem", "currentProblem", true],
+                ["Crop Risk", "cropRisk", true],
+                ["Danger Zone", "dangerZone", false],
               ] as const
-            ).map(([label, key], i, arr) => (
+            ).map(([label, key, hasOther], i, arr) => (
               <div key={key} className={i < arr.length - 1 ? "mb-[18px]" : ""}>
                 <FieldLabel>{label}</FieldLabel>
-                <ChipGroup
-                  multi
-                  size="sm"
-                  options={options[key]}
-                  value={form[key]}
-                  onChange={(v) => set(key, v)}
-                />
+                {hasOther ? (
+                  <ChipGroupWithOther
+                    multi
+                    size="sm"
+                    fieldKey={key}
+                    options={options[key]}
+                    value={form[key]}
+                    onChange={setChip(key, key)}
+                    detail={form.otherText[key] ?? ""}
+                    onDetail={(t) => setOtherText(key, t)}
+                  />
+                ) : (
+                  <ChipGroup
+                    multi
+                    size="sm"
+                    options={options[key]}
+                    value={form[key]}
+                    onChange={(v) => set(key, v)}
+                  />
+                )}
               </div>
             ))}
           </div>
@@ -472,10 +562,11 @@ export function NewVisitWizard({
 
             <div className="mb-[18px]">
               <FieldLabel>Annual Agriculture Expense</FieldLabel>
-              <ChipGroup
+              <BucketSlider
                 options={options.annualExpense}
                 value={form.annualExpense}
                 onChange={(v) => set("annualExpense", v)}
+                ariaLabel="Annual Agriculture Expense"
               />
             </div>
 
@@ -502,18 +593,31 @@ export function NewVisitWizard({
             <div className="mb-3.5 border-t border-[#F0F0F0] pt-1 text-[13px] font-bold text-[#424242]">
               Services & Membership
             </div>
-            <div className="grid grid-cols-2 gap-x-8 gap-y-4">
+            <div className="flex flex-col gap-2.5">
               {(
                 [
-                  ["FPO Member?", "fpoMember"],
-                  ["Contract Farming?", "contractFarming"],
-                  ["Dairy Services?", "dairyServices"],
-                  ["WhatsApp Available?", "whatsappAvail"],
+                  ["FPO Member?", "fpoMember", "FPO / society name"],
+                  ["Contract Farming?", "contractFarming", "Company & crop under contract"],
+                  ["Dairy Services?", "dairyServices", "Dairy details (name, animals, litres/day)"],
+                  ["WhatsApp Available?", "whatsappAvail", "WhatsApp number"],
                 ] as const
-              ).map(([label, key]) => (
-                <div key={key} className="flex items-center gap-3">
-                  <div className="flex-1 text-[12px] font-semibold text-[#616161]">{label}</div>
-                  <Toggle checked={form[key]} onChange={(v) => set(key, v)} />
+              ).map(([label, key, ph]) => (
+                <div key={key} className="rounded-[10px] border border-[#F0F0F0] px-3.5 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-[12px] font-semibold text-[#616161]">{label}</div>
+                    <Toggle
+                      ariaLabel={label}
+                      checked={form[key]}
+                      onChange={(v) => setService(key, v)}
+                    />
+                  </div>
+                  <OtherReveal
+                    show={form[key]}
+                    value={form.serviceDetail[key] ?? ""}
+                    onChange={(v) => setServiceDetail(key, v)}
+                    placeholder={ph}
+                    inputMode={key === "whatsappAvail" ? "numeric" : undefined}
+                  />
                 </div>
               ))}
             </div>

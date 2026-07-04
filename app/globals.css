@@ -40,6 +40,23 @@
     background: #2e7d32;
     cursor: pointer;
   }
+
+  /* Bucket slider (New Visit): larger glove-friendly white thumb with a green
+     ring. Scoped to .nv-bucket-range so it never restyles other sliders. */
+  .nv-bucket-range::-webkit-slider-thumb {
+    width: 26px;
+    height: 26px;
+    background: #ffffff;
+    border: 2px solid #2e7d32;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  }
+  .nv-bucket-range::-moz-range-thumb {
+    width: 26px;
+    height: 26px;
+    background: #ffffff;
+    border: 2px solid #2e7d32;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  }
 }
 
 /* Leaflet container default sizing (map view) */
