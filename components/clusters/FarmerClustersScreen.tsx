@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { CreateClusterModal } from "./CreateClusterModal";
 import { ClusterGlyph, PlusGlyph, InfoGlyph, PersonGlyph } from "./icons";
 import {
   type ClusterView,
   type ClusterFarmer,
+  type ClusterMemberRow,
+  type ClusterMembersResult,
   type StoreOption,
   listCriteriaText,
   detailCriteriaText,
@@ -15,6 +17,7 @@ import {
   segBg,
   segColor,
 } from "./types";
+import { getClusterFarmers } from "@/app/actions/clusters";
 import { cn } from "@/lib/cn";
 
 interface Props {
@@ -70,7 +73,7 @@ export function FarmerClustersScreen({ clusters, farmers, stores }: Props) {
           {/* Right — detail panel */}
           <div className="overflow-hidden rounded-[14px] border border-black/[0.03] bg-white shadow-card">
             {selected ? (
-              <ClusterDetailPanel cluster={selected} farmers={farmers} />
+              <ClusterDetailPanel cluster={selected} />
             ) : (
               <ClusterEmptyHint />
             )}
@@ -151,18 +154,26 @@ function ClusterListCard({
   );
 }
 
-/* ── Right detail panel ── */
-function ClusterDetailPanel({
-  cluster,
-  farmers,
-}: {
-  cluster: ClusterView;
-  farmers: ClusterFarmer[];
-}) {
-  const idSet = new Set(cluster.farmerIds);
-  const members = farmers
-    .map((f, idx) => ({ f, idx }))
-    .filter(({ f }) => idSet.has(f.id));
+/* ── Right detail panel (fetches members on demand — real or demo) ── */
+function ClusterDetailPanel({ cluster }: { cluster: ClusterView }) {
+  const [data, setData] = useState<ClusterMembersResult | null>(null);
+  const [page, setPage] = useState(1);
+  const [loading, startLoad] = useTransition();
+
+  useEffect(() => {
+    setPage(1);
+  }, [cluster.id]);
+
+  useEffect(() => {
+    startLoad(async () => {
+      const res = await getClusterFarmers(cluster.id, page);
+      setData(res);
+    });
+  }, [cluster.id, page]);
+
+  const total = data?.total ?? cluster.farmerCount;
+  const rows = data?.rows ?? [];
+  const pages = Math.max(1, Math.ceil(total / (data?.pageSize ?? 20)));
 
   return (
     <>
@@ -192,26 +203,58 @@ function ClusterDetailPanel({
       <div className="flex items-center gap-[10px] border-b border-[#F0F0F0] bg-[#FAFAFA] px-[22px] py-3">
         <PersonGlyph />
         <div className="text-[13px] font-bold text-[#1A1C1A]">
-          {members.length} Farmers in this cluster
+          {total.toLocaleString("en-IN")} Farmers in this cluster
         </div>
       </div>
 
       {/* Farmer rows */}
       <div className="flex max-h-[380px] flex-col gap-2 overflow-y-auto px-[14px] py-[10px]">
-        {members.length === 0 ? (
+        {loading && rows.length === 0 ? (
+          <div className="px-3 py-8 text-center text-[12px] text-[#BDBDBD]">Loading farmers…</div>
+        ) : rows.length === 0 ? (
           <div className="px-3 py-8 text-center text-[12px] text-[#BDBDBD]">
-            No member farmers available for this cluster.
+            No member farmers found for this cluster.
           </div>
         ) : (
-          members.map(({ f, idx }) => <ClusterFarmerRow key={f.id} farmer={f} globalIndex={idx} />)
+          rows.map((f, idx) => (
+            <ClusterFarmerRow key={f.id} farmer={f} globalIndex={(page - 1) * 20 + idx} />
+          ))
         )}
       </div>
+
+      {/* Pagination */}
+      {pages > 1 && (
+        <div className="flex items-center justify-between border-t border-[#F0F0F0] px-[22px] py-3 text-[12px] text-[#616161]">
+          <span>
+            Page {page} of {pages.toLocaleString("en-IN")}
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={page <= 1 || loading}
+              onClick={() => setPage((p) => p - 1)}
+              className="rounded-md border border-[#E0E0E0] px-3 py-1.5 font-semibold hover:bg-[#F5F5F5] disabled:opacity-40"
+            >
+              Prev
+            </button>
+            <button
+              type="button"
+              disabled={page >= pages || loading}
+              onClick={() => setPage((p) => p + 1)}
+              className="rounded-md border border-[#E0E0E0] px-3 py-1.5 font-semibold hover:bg-[#F5F5F5] disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </>
   );
 }
 
 /* ── Farmer row ── */
-function ClusterFarmerRow({ farmer, globalIndex }: { farmer: ClusterFarmer; globalIndex: number }) {
+function ClusterFarmerRow({ farmer, globalIndex }: { farmer: ClusterMemberRow; globalIndex: number }) {
+  const hasSeg = farmer.segment && farmer.segment !== "—";
   return (
     <Link
       href={`/farmers/${farmer.id}`}
@@ -225,17 +268,23 @@ function ClusterFarmerRow({ farmer, globalIndex }: { farmer: ClusterFarmer; glob
       </div>
       <div className="min-w-0 flex-1">
         <div className="text-[13px] font-semibold text-[#1A1C1A]">{farmer.name}</div>
-        <div className="mt-px text-[11px] text-[#9E9E9E]">
-          {farmer.village} · {farmer.crop} · {farmer.land} acres
+        <div className="mt-px truncate text-[11px] text-[#9E9E9E]">
+          {[farmer.village, farmer.crop !== "—" ? farmer.crop : null, farmer.land ? `${farmer.land} acres` : null]
+            .filter(Boolean)
+            .join(" · ")}
         </div>
       </div>
       <div className="flex flex-col items-end gap-1">
-        <div
-          className="rounded-[20px] px-[9px] py-[2px] text-[10px] font-bold"
-          style={{ background: segBg(farmer.segment), color: segColor(farmer.segment) }}
-        >
-          {farmer.segment}
-        </div>
+        {hasSeg ? (
+          <div
+            className="rounded-[20px] px-[9px] py-[2px] text-[10px] font-bold"
+            style={{ background: segBg(farmer.segment), color: segColor(farmer.segment) }}
+          >
+            {farmer.segment}
+          </div>
+        ) : (
+          <div className="text-[11px] font-semibold text-[#2E7D32]">{farmer.ltv}</div>
+        )}
         <div className="text-[10px] text-[#BDBDBD]">{farmer.lastVisit}</div>
       </div>
     </Link>

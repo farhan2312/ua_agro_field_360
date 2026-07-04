@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { LAYER_LABELS, type MapLayerKey } from "@/lib/map-layers";
 import { SEGMENT_ENUM_TO_LABEL, LEAD_ENUM_TO_LABEL } from "@/lib/segments";
+import { inr } from "@/lib/format";
+import { CLUSTER_PAGE_SIZE, type ClusterMembersResult } from "@/components/clusters/types";
 
 export interface CreateClusterInput {
   name: string;
@@ -130,5 +132,69 @@ function matchesLayer(
       return true;
     default:
       return true;
+  }
+}
+
+/**
+ * Fetch a cluster's member farmers (real or demo) on demand, paginated, ordered
+ * by the stored id list. Used by the cluster detail panel.
+ */
+export async function getClusterFarmers(
+  clusterId: number,
+  page = 1,
+): Promise<ClusterMembersResult> {
+  try {
+    const cluster = await prisma.cluster.findUnique({
+      where: { id: clusterId },
+      select: { farmerIds: true },
+    });
+    if (!cluster) return { rows: [], total: 0, page, pageSize: CLUSTER_PAGE_SIZE };
+
+    const ids = cluster.farmerIds;
+    const total = ids.length;
+    const pageIds = ids.slice((page - 1) * CLUSTER_PAGE_SIZE, page * CLUSTER_PAGE_SIZE);
+    if (pageIds.length === 0) return { rows: [], total, page, pageSize: CLUSTER_PAGE_SIZE };
+
+    const [farmers, sums] = await Promise.all([
+      prisma.farmer.findMany({
+        where: { id: { in: pageIds } },
+        select: {
+          id: true,
+          name: true,
+          village: true,
+          crop: true,
+          land: true,
+          segment: true,
+          visits: { orderBy: { id: "desc" }, take: 1, select: { date: true } },
+        },
+      }),
+      prisma.sale.groupBy({
+        by: ["farmerId"],
+        where: { farmerId: { in: pageIds } },
+        _sum: { amountNum: true },
+      }),
+    ]);
+
+    const byId = new Map(farmers.map((f) => [f.id, f]));
+    const ltvById = new Map(sums.map((s) => [s.farmerId, s._sum.amountNum ?? 0]));
+
+    // Preserve the stored id order.
+    const rows = pageIds
+      .map((id) => byId.get(id))
+      .filter((f): f is NonNullable<typeof f> => Boolean(f))
+      .map((f) => ({
+        id: f.id,
+        name: f.name,
+        village: f.village ?? "—",
+        crop: f.crop ?? "—",
+        land: f.land ?? 0,
+        segment: f.segment ? SEGMENT_ENUM_TO_LABEL[f.segment] ?? "—" : "—",
+        lastVisit: f.visits[0]?.date ?? "—",
+        ltv: ltvById.get(f.id) ? inr(ltvById.get(f.id)!) : "—",
+      }));
+
+    return { rows, total, page, pageSize: CLUSTER_PAGE_SIZE };
+  } catch {
+    return { rows: [], total: 0, page, pageSize: CLUSTER_PAGE_SIZE };
   }
 }

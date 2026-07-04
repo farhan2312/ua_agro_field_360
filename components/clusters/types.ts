@@ -41,6 +41,27 @@ export interface StoreOption {
   name: string;
 }
 
+export const CLUSTER_PAGE_SIZE = 20;
+
+/** A member farmer of a cluster, fetched on demand (works for real + demo). */
+export interface ClusterMemberRow {
+  id: number;
+  name: string;
+  village: string;
+  crop: string;
+  land: number;
+  segment: string; // display label or "—"
+  lastVisit: string;
+  ltv: string; // formatted ₹ or "—"
+}
+
+export interface ClusterMembersResult {
+  rows: ClusterMemberRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 /* ── criteriaText helpers (two spacing variants — faithful to the DSL) ── */
 
 /** List-row criteria text: `layerLabel[: value] · storeName`. */
