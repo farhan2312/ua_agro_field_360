@@ -58,9 +58,12 @@ export default async function LeadsPage() {
         crop: true,
         land: true,
         leadStatus: true,
+        // Only the most recent visit is needed for the card's "last visit"
+        // label — bound this so it never loads a farmer's full visit history.
         visits: {
           select: { date: true, visitedAt: true },
-          orderBy: { visitedAt: "desc" },
+          orderBy: { visitedAt: { sort: "desc", nulls: "last" } },
+          take: 1,
         },
       },
       orderBy: { name: "asc" },

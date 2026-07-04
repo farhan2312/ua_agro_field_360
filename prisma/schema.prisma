@@ -160,6 +160,8 @@ model Farmer {
   @@index([storeId])
   @@index([segment])
   @@index([leadStatus])
+  @@index([mobile]) // exact-match lookup during New Visit intake/edit
+  @@index([source]) // DEMO/REAL filters (clusters, users, map)
 }
 
 model Sale {
@@ -181,6 +183,7 @@ model Sale {
 
   @@index([farmerId])
   @@index([source])
+  @@index([soldAt]) // date-sorted analytics/history
 }
 
 // A Visit doubles as the per-farmer visit log entry and the Visit Repository record.
@@ -231,6 +234,8 @@ model Visit {
 
   @@index([farmerId])
   @@index([storeId])
+  @@index([visitedAt]) // recent-visit sorts (dashboard, visit repository)
+  @@index([officerName]) // per-officer dashboard + repository filters
 }
 
 // ─────────────────────────── Action Planner ───────────────────────────
@@ -294,4 +299,6 @@ model AuditLog {
   ip        String?
   displayTs String? // pixel-faithful timestamp label e.g. "Jun 22, 10:42"
   createdAt DateTime @default(now())
+
+  @@index([createdAt]) // recent-first ordering (audit log, dashboard events)
 }

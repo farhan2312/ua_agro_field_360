@@ -8,6 +8,7 @@ import {
   type SegmentLabel,
 } from "@/lib/segments";
 import { statusColor } from "@/lib/status";
+import { getSegmentSummary } from "@/lib/stats";
 import { initials, inr, avatarColor } from "@/lib/format";
 import { shortStoreName, storeColor } from "@/lib/store-utils";
 import { SegmentSummaryCards } from "@/components/farmers/SegmentSummaryCards";
@@ -61,52 +62,16 @@ export default async function FarmersPage({
   let registeredTotal = 0;
 
   try {
-    // ── Segment summary cards: counts + revenue over ALL farmers (ignore filters)
-    const [segGroups, segRevenue, regCount] = await Promise.all([
-      prisma.farmer.groupBy({
-        by: ["segment"],
-        _count: { _all: true },
-      }),
-      // Revenue per segment = sum of the segment's farmers' Sale.amountNum.
-      prisma.sale.groupBy({
-        by: ["farmerId"],
-        _sum: { amountNum: true },
-      }),
-      prisma.farmer.count(),
-    ]);
-    registeredTotal = regCount;
-
-    const countBySeg = new Map<SegmentLabel, number>();
-    for (const g of segGroups) {
-      if (!g.segment) continue;
-      const label = SEGMENT_ENUM_TO_LABEL[g.segment];
-      if (label) countBySeg.set(label, g._count._all);
-    }
-
-    // Map farmerId → segment label so we can bucket the revenue sums.
-    const enriched = await prisma.farmer.findMany({
-      where: { segment: { not: null } },
-      select: { id: true, segment: true },
-    });
-    const segByFarmer = new Map<number, SegmentLabel>();
-    for (const f of enriched) {
-      if (f.segment) {
-        const label = SEGMENT_ENUM_TO_LABEL[f.segment];
-        if (label) segByFarmer.set(f.id, label);
-      }
-    }
-    const revBySeg = new Map<SegmentLabel, number>();
-    for (const r of segRevenue) {
-      const label = segByFarmer.get(r.farmerId);
-      if (!label) continue;
-      revBySeg.set(label, (revBySeg.get(label) ?? 0) + (r._sum.amountNum ?? 0));
-    }
+    // ── Segment summary cards: global counts + revenue (cached; identical for
+    //    every user and independent of the table filters below).
+    const summary = await getSegmentSummary();
+    registeredTotal = summary.registeredTotal;
 
     cards = SEGMENT_LABELS.map((label) => {
-      const rev = revBySeg.get(label) ?? 0;
+      const rev = summary.revByLabel[label] ?? 0;
       return {
         label,
-        count: countBySeg.get(label) ?? 0,
+        count: summary.countByLabel[label] ?? 0,
         color: SEGMENT_COLORS[label],
         revenue: `₹${Math.round(rev / 1000).toLocaleString("en-IN")}K total revenue`,
       };
@@ -132,9 +97,15 @@ export default async function FarmersPage({
         orderBy: { id: "asc" },
         skip: (page - 1) * PAGE_SIZE,
         take: PAGE_SIZE,
-        include: {
+        select: {
+          id: true,
+          name: true,
+          mobile: true,
+          village: true,
+          crop: true,
+          segment: true,
+          status: true,
           store: { select: { id: true, name: true } },
-          sales: { select: { amountNum: true } },
           visits: {
             select: { visitedAt: true, date: true },
             orderBy: { visitedAt: "desc" },
@@ -145,13 +116,25 @@ export default async function FarmersPage({
     ]);
     total = count;
 
+    // LTV for just this page's farmers — one bounded aggregate instead of
+    // loading every sale row per farmer via `include`.
+    const pageIds = farmers.map((f) => f.id);
+    const ltvRows = pageIds.length
+      ? await prisma.sale.groupBy({
+          by: ["farmerId"],
+          where: { farmerId: { in: pageIds } },
+          _sum: { amountNum: true },
+        })
+      : [];
+    const ltvById = new Map(ltvRows.map((r) => [r.farmerId, r._sum.amountNum ?? 0]));
+
     rows = farmers.map((f): FarmerRowVM => {
       const segLabel: SegmentLabel | null = f.segment
         ? SEGMENT_ENUM_TO_LABEL[f.segment] ?? null
         : null;
       const seg = statusColor(segLabel);
 
-      const ltvNum = f.sales.reduce((a, s) => a + (s.amountNum ?? 0), 0);
+      const ltvNum = ltvById.get(f.id) ?? 0;
       const lastVisit = f.visits[0];
       const lastVisitLabel = lastVisit?.visitedAt
         ? shortDate(lastVisit.visitedAt)

@@ -1,9 +1,10 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getPersona } from "@/lib/session";
+import { STATS_TAG } from "@/lib/stats";
 import {
   LEAD_LABEL_TO_ENUM,
   SEGMENT_ENUM_TO_LABEL,
@@ -178,6 +179,8 @@ export async function submitVisitAction(
 
     revalidatePath("/visits");
     revalidatePath("/dashboard");
+    // Farmer count / segment summary may have changed — bust the cached stats.
+    revalidateTag(STATS_TAG);
   } catch {
     // Tolerate a missing/empty DB — still route the officer onward.
   }

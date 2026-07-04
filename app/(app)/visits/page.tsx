@@ -52,28 +52,31 @@ export default async function VisitRepoPage({
   let typeOptions: string[] = [];
 
   try {
-    // Build filter options from the full visit set (independent of active filters).
-    const [allVisits, allStores] = await Promise.all([
+    // Filter option lists (independent of active filters). Use DISTINCT queries
+    // so these read only the unique officer/purpose values (index-backed) rather
+    // than scanning the entire visit table on every load.
+    const [officerRows, typeRows, allStores] = await Promise.all([
       prisma.visit.findMany({
-        select: { officerName: true, purpose: true },
+        where: { officerName: { not: null } },
+        select: { officerName: true },
+        distinct: ["officerName"],
+        orderBy: { officerName: "asc" },
+      }),
+      prisma.visit.findMany({
+        where: { purpose: { not: null } },
+        select: { purpose: true },
+        distinct: ["purpose"],
+        orderBy: { purpose: "asc" },
       }),
       prisma.store.findMany({ select: { name: true } }),
     ]);
 
-    officerOptions = Array.from(
-      new Set(
-        allVisits
-          .map((v) => v.officerName)
-          .filter((n): n is string => !!n),
-      ),
-    ).sort();
-    typeOptions = Array.from(
-      new Set(
-        allVisits
-          .map((v) => v.purpose)
-          .filter((p): p is string => !!p),
-      ),
-    ).sort();
+    officerOptions = officerRows
+      .map((v) => v.officerName)
+      .filter((n): n is string => !!n);
+    typeOptions = typeRows
+      .map((v) => v.purpose)
+      .filter((p): p is string => !!p);
     storeOptions = Array.from(
       new Set(allStores.map((s) => shortStoreName(s.name)).filter(Boolean)),
     ).sort();

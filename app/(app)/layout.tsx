@@ -1,26 +1,12 @@
 import { redirect } from "next/navigation";
 import { getRole, getPersona } from "@/lib/session";
 import { getSession } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { getHeaderCounts } from "@/lib/stats";
 import { Sidebar } from "@/components/shell/Sidebar";
-import { Header, type HeaderCounts } from "@/components/shell/Header";
+import { Header } from "@/components/shell/Header";
 import type { RoleKey } from "@/lib/roles";
 
 export const dynamic = "force-dynamic";
-
-async function getCounts(): Promise<HeaderCounts> {
-  try {
-    const [farmers, activeUsers, projects, activeProjects] = await Promise.all([
-      prisma.farmer.count(),
-      prisma.user.count({ where: { active: true, approvalStatus: "APPROVED" } }),
-      prisma.project.count(),
-      prisma.project.count({ where: { status: "ACTIVE" } }),
-    ]);
-    return { farmers, activeUsers, projects, activeProjects };
-  } catch {
-    return { farmers: 1284, activeUsers: 5, projects: 5, activeProjects: 2 };
-  }
-}
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession();
@@ -29,7 +15,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const [role, persona, counts] = await Promise.all([
     getRole(),
     getPersona(),
-    getCounts(),
+    getHeaderCounts(),
   ]);
 
   const isAdmin = session.isAdmin;
