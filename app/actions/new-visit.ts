@@ -4,8 +4,14 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getPersona } from "@/lib/session";
-import { LEAD_LABEL_TO_ENUM, type LeadStatusLabel } from "@/lib/segments";
-import type { VisitForm } from "@/components/new-visit/types";
+import {
+  LEAD_LABEL_TO_ENUM,
+  SEGMENT_ENUM_TO_LABEL,
+  LEAD_ENUM_TO_LABEL,
+  type LeadStatusLabel,
+} from "@/lib/segments";
+import { inr } from "@/lib/format";
+import type { VisitForm, FarmerLookupResult } from "@/components/new-visit/types";
 
 /** Map the wizard lead-status label to the Prisma LeadStatus enum (best effort). */
 function leadEnum(label: string): string | undefined {
@@ -13,32 +19,98 @@ function leadEnum(label: string): string | undefined {
 }
 
 /**
- * Persist a New Visit: upsert a Farmer (by mobile, when supplied) and create the
- * Visit log entry, then audit + redirect to the dashboard. Wrapped so a missing
- * DB cannot crash the wizard — on failure we still route to /dashboard.
+ * Look up a registered farmer by mobile number (across ALL farmers) so the wizard
+ * can autofill and edit the existing record. Prefers the enriched (DEMO) row when
+ * a number is shared.
  */
-export async function submitVisitAction(form: VisitForm): Promise<void> {
+export async function lookupFarmerByMobile(mobile: string): Promise<FarmerLookupResult> {
+  const m = mobile.trim();
+  if (m.length < 10) return { found: false };
+  try {
+    const f = await prisma.farmer.findFirst({
+      where: { mobile: m },
+      orderBy: [{ source: "asc" }, { id: "asc" }], // DEMO before REAL
+      select: {
+        id: true,
+        name: true,
+        village: true,
+        district: true,
+        crop: true,
+        segment: true,
+        leadStatus: true,
+      },
+    });
+    if (!f) return { found: false };
+
+    const [agg, lastVisit] = await Promise.all([
+      prisma.sale.aggregate({ where: { farmerId: f.id }, _sum: { amountNum: true } }),
+      prisma.visit.findFirst({
+        where: { farmerId: f.id },
+        orderBy: [{ visitedAt: "desc" }, { id: "desc" }],
+        select: { date: true },
+      }),
+    ]);
+
+    return {
+      found: true,
+      farmer: {
+        id: f.id,
+        name: f.name,
+        village: f.village ?? "",
+        district: f.district ?? "",
+        mainCrop: f.crop ?? "",
+        segmentLabel: f.segment ? SEGMENT_ENUM_TO_LABEL[f.segment] ?? null : null,
+        leadStatusLabel: f.leadStatus ? LEAD_ENUM_TO_LABEL[f.leadStatus] ?? null : null,
+        ltv: agg._sum.amountNum ? inr(agg._sum.amountNum) : "—",
+        lastVisit: lastVisit?.date ?? "—",
+      },
+    };
+  } catch {
+    return { found: false };
+  }
+}
+
+/**
+ * Persist a New Visit. When `editingFarmerId` is supplied (an existing farmer was
+ * pulled up by mobile) the farmer record is UPDATED; otherwise a farmer is created
+ * (or matched by mobile). Then the Visit log entry is created. Tolerant of a
+ * missing DB — always routes onward.
+ */
+export async function submitVisitAction(
+  form: VisitForm,
+  editingFarmerId?: number | null,
+): Promise<void> {
   const persona = await getPersona();
   const officerName = persona.name;
 
   try {
     let farmerId: number | undefined;
     const mobile = form.mobile.trim();
+    const lead = leadEnum(form.leadStatus);
 
-    if (mobile.length > 0) {
+    const editData = {
+      name: form.name || undefined,
+      village: form.village || null,
+      district: form.district || null,
+      crop: form.mainCrop || null,
+      issues: form.currentProblem,
+      ...(lead ? { leadStatus: lead as never } : {}),
+      ...(mobile ? { mobile } : {}),
+    };
+
+    if (editingFarmerId) {
+      // Edit the pulled-up record directly.
+      const updated = await prisma.farmer.update({
+        where: { id: editingFarmerId },
+        data: editData,
+      });
+      farmerId = updated.id;
+    } else if (mobile.length > 0) {
       const existing = await prisma.farmer.findFirst({ where: { mobile } });
-      const lead = leadEnum(form.leadStatus);
       if (existing) {
         const updated = await prisma.farmer.update({
           where: { id: existing.id },
-          data: {
-            name: form.name || existing.name,
-            village: form.village || existing.village,
-            district: form.district || existing.district,
-            crop: form.mainCrop || existing.crop,
-            issues: form.currentProblem,
-            ...(lead ? { leadStatus: lead as never } : {}),
-          },
+          data: editData,
         });
         farmerId = updated.id;
       } else {
@@ -52,7 +124,7 @@ export async function submitVisitAction(form: VisitForm): Promise<void> {
             crop: form.mainCrop || null,
             issues: form.currentProblem,
             ...(lead ? { leadStatus: lead as never } : {}),
-            source: "DEMO",
+            source: "REAL",
           },
         });
         farmerId = created.id;
@@ -89,16 +161,18 @@ export async function submitVisitAction(form: VisitForm): Promise<void> {
         dairyServices: form.dairyServices,
         whatsappAvail: form.whatsappAvail,
         visitedAt: new Date(),
-        source: "DEMO",
+        source: "REAL",
       },
     });
 
     await prisma.auditLog.create({
       data: {
         actor: officerName,
-        action: "CREATE",
+        action: editingFarmerId ? "UPDATE" : "CREATE",
         entity: "Visit",
-        detail: `New visit logged${form.name ? ` for ${form.name}` : ""}`,
+        detail: `${editingFarmerId ? "Updated farmer + logged visit" : "New visit logged"}${
+          form.name ? ` for ${form.name}` : ""
+        }`,
       },
     });
 

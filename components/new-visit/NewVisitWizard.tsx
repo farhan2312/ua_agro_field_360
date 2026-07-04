@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { Avatar } from "@/components/ui";
 import { Toggle } from "@/components/interactive";
@@ -12,8 +12,8 @@ import {
 } from "@/lib/segments";
 import { ChipGroup } from "./ChipGroup";
 import { VILLAGES, DISTRICTS, type WizardOptions } from "./field-options";
-import { INITIAL_FORM, type VisitForm, type LookupFarmer } from "./types";
-import { submitVisitAction } from "@/app/actions/new-visit";
+import { INITIAL_FORM, type VisitForm, type FarmerLookup } from "./types";
+import { submitVisitAction, lookupFarmerByMobile } from "@/app/actions/new-visit";
 
 const STEP_LABELS = [
   "Farmer & Location",
@@ -64,12 +64,10 @@ function WarnTriangle() {
 
 export function NewVisitWizard({
   options,
-  farmers,
   primaryIdLabel = "Mobile Number",
   visitReasonRequired = true,
 }: {
   options: WizardOptions;
-  farmers: LookupFarmer[];
   primaryIdLabel?: string;
   visitReasonRequired?: boolean;
 }) {
@@ -84,21 +82,57 @@ export function NewVisitWizard({
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
       set(key, e.target.value as VisitForm[typeof key]);
 
-  /* ── Mobile lookup (spec §3) ── */
-  const lookup = useMemo(() => {
+  /* ── Server-side mobile lookup → autofill + edit mode ── */
+  const [lookupStatus, setLookupStatus] = useState<"idle" | "loading" | "found" | "notfound">("idle");
+  const [foundFarmer, setFoundFarmer] = useState<FarmerLookup | null>(null);
+  const [editingFarmerId, setEditingFarmerId] = useState<number | null>(null);
+  const [, startLookup] = useTransition();
+  const lastQueried = useRef<string>("");
+
+  useEffect(() => {
     const m = form.mobile.trim();
-    if (m.length < 10) return { found: false, noMatch: false, farmer: null as LookupFarmer | null, idx: -1 };
-    const idx = farmers.findIndex((f) => f.mobile === m);
-    return idx >= 0
-      ? { found: true, noMatch: false, farmer: farmers[idx], idx }
-      : { found: false, noMatch: true, farmer: null, idx: -1 };
-  }, [form.mobile, farmers]);
+    if (m.length < 10) {
+      setLookupStatus("idle");
+      setFoundFarmer(null);
+      setEditingFarmerId(null);
+      lastQueried.current = "";
+      return;
+    }
+    if (m === lastQueried.current) return;
+    setLookupStatus("loading");
+    const t = setTimeout(() => {
+      lastQueried.current = m;
+      startLookup(async () => {
+        const res = await lookupFarmerByMobile(m);
+        if (res.found && res.farmer) {
+          const fa = res.farmer;
+          setFoundFarmer(fa);
+          setEditingFarmerId(fa.id);
+          setLookupStatus("found");
+          // Autofill the identity fields from the existing record (editable).
+          setForm((prev) => ({
+            ...prev,
+            name: fa.name || prev.name,
+            village: fa.village || prev.village,
+            district: fa.district || prev.district,
+            mainCrop: fa.mainCrop || prev.mainCrop,
+            leadStatus: fa.leadStatusLabel || prev.leadStatus,
+          }));
+        } else {
+          setFoundFarmer(null);
+          setEditingFarmerId(null);
+          setLookupStatus("notfound");
+        }
+      });
+    }, 450);
+    return () => clearTimeout(t);
+  }, [form.mobile]);
 
   const visitReasonStar = visitReasonRequired ? " *" : "";
 
   const next = () => setStep((s) => Math.min(s + 1, 4));
   const prev = () => setStep((s) => Math.max(s - 1, 0));
-  const submit = () => startTransition(() => void submitVisitAction(form));
+  const submit = () => startTransition(() => void submitVisitAction(form, editingFarmerId));
 
   return (
     <div className="mx-auto max-w-[800px] animate-fadeUp">
@@ -140,7 +174,7 @@ export function NewVisitWizard({
             <div className="mb-5 rounded-[13px] border-[1.5px] border-[#A5D6A7] bg-gradient-to-br from-[#F1F8F1] to-[#E8F5E9] p-5">
               <div className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.7px] text-[#2E7D32]">
                 <PlusBadge />
-                {primaryIdLabel} — Unique Identifier *
+                {primaryIdLabel} *
               </div>
               <input
                 type="tel"
@@ -151,50 +185,52 @@ export function NewVisitWizard({
                 className="w-full rounded-[10px] border-2 border-[#C8E6C9] bg-white px-4 py-[13px] text-[16px] tracking-[1px] outline-none focus:border-[#2E7D32] focus:ring-[3px] focus:ring-[#2E7D32]/[0.12]"
               />
               <div className="mt-[7px] text-[11px] text-[#757575]">
-                Used as the unique identifier for this farmer record
+                {lookupStatus === "loading"
+                  ? "Looking up farmer…"
+                  : "Enter a registered number to pull up and edit that farmer's details."}
               </div>
             </div>
 
-            {/* Returning farmer card */}
-            {lookup.found && lookup.farmer && (
+            {/* Returning farmer card — details autofilled below, editable */}
+            {lookupStatus === "found" && foundFarmer && (
               <div className="mb-[18px] rounded-xl border-[1.5px] border-[#A5D6A7] bg-[#E8F5E9] px-4 py-3.5">
                 <div className="mb-2.5 flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.7px] text-[#2E7D32]">
                   <CheckBadge />
-                  Returning Farmer Found
+                  Returning farmer — editing existing record
                 </div>
                 <div className="mb-3 flex items-center gap-3">
                   <Avatar
                     size={40}
-                    initials={initials(lookup.farmer.name)}
-                    background={avatarColor(lookup.idx)}
+                    initials={initials(foundFarmer.name)}
+                    background={avatarColor(foundFarmer.id)}
                   />
                   <div className="flex-1">
                     <div className="text-[14.5px] font-bold text-[#1A1C1A]">
-                      {lookup.farmer.name}
+                      {foundFarmer.name}
                     </div>
                     <div className="mt-0.5 text-[11.5px] text-[#616161]">
-                      {[lookup.farmer.village, lookup.farmer.district]
+                      {[foundFarmer.village, foundFarmer.district]
                         .filter(Boolean)
                         .join(", ") || "—"}
                     </div>
                   </div>
-                  {lookup.farmer.segmentLabel && (
+                  {foundFarmer.segmentLabel && (
                     <span
                       className="rounded-full px-2.5 py-[3px] text-[10.5px] font-bold"
                       style={{
-                        background: SEGMENT_BGS[lookup.farmer.segmentLabel as SegmentLabel] ?? "#F5F5F5",
-                        color: SEGMENT_COLORS[lookup.farmer.segmentLabel as SegmentLabel] ?? "#9E9E9E",
+                        background: SEGMENT_BGS[foundFarmer.segmentLabel as SegmentLabel] ?? "#F5F5F5",
+                        color: SEGMENT_COLORS[foundFarmer.segmentLabel as SegmentLabel] ?? "#9E9E9E",
                       }}
                     >
-                      {lookup.farmer.segmentLabel}
+                      {foundFarmer.segmentLabel}
                     </span>
                   )}
                 </div>
                 <div className="mb-3 grid grid-cols-3 gap-2">
                   {[
-                    { label: "Crop", value: lookup.farmer.crop ?? "—", green: false },
-                    { label: "Last Visit", value: "—", green: false },
-                    { label: "Lifetime Value", value: "—", green: true },
+                    { label: "Crop", value: foundFarmer.mainCrop || "—", green: false },
+                    { label: "Last Visit", value: foundFarmer.lastVisit, green: false },
+                    { label: "Lifetime Value", value: foundFarmer.ltv, green: true },
                   ].map((cell) => (
                     <div key={cell.label} className="rounded-lg bg-white px-2.5 py-2">
                       <div className="text-[9px] font-semibold uppercase text-[#9E9E9E]">
@@ -209,8 +245,12 @@ export function NewVisitWizard({
                     </div>
                   ))}
                 </div>
+                <div className="mb-2.5 text-[11px] text-[#2E7D32]">
+                  Details are autofilled below — edit any field and submit to update this farmer&apos;s
+                  record.
+                </div>
                 <Link
-                  href={`/farmers/${lookup.farmer.id}`}
+                  href={`/farmers/${foundFarmer.id}`}
                   className="block rounded-lg bg-[#2E7D32] py-[9px] text-center text-[12px] font-semibold text-white hover:bg-[#1B5E20]"
                 >
                   View Full Profile →
@@ -219,7 +259,7 @@ export function NewVisitWizard({
             )}
 
             {/* New farmer banner */}
-            {lookup.noMatch && (
+            {lookupStatus === "notfound" && (
               <div className="mb-[18px] flex items-center gap-2 rounded-[10px] border-[1.5px] border-[#FFE082] bg-[#FFF8E1] px-3.5 py-[11px]">
                 <WarnTriangle />
                 <span className="text-[12px] font-medium text-[#795548]">
@@ -252,27 +292,35 @@ export function NewVisitWizard({
               </div>
               <div>
                 <FieldLabel>Village *</FieldLabel>
-                <select
+                <input
+                  type="text"
+                  list="nv-villages"
+                  placeholder="Village"
                   value={form.village}
                   onChange={onText("village")}
-                  className="w-full rounded-[10px] border-[1.5px] border-[#E0E0E0] bg-white px-3.5 py-[11px] text-[14px] outline-none focus:border-[#2E7D32]"
-                >
+                  className="w-full rounded-[10px] border-[1.5px] border-[#E0E0E0] px-3.5 py-[11px] text-[14px] outline-none focus:border-[#2E7D32]"
+                />
+                <datalist id="nv-villages">
                   {VILLAGES.map((v) => (
-                    <option key={v} value={v}>{v}</option>
+                    <option key={v} value={v} />
                   ))}
-                </select>
+                </datalist>
               </div>
               <div>
                 <FieldLabel>District</FieldLabel>
-                <select
+                <input
+                  type="text"
+                  list="nv-districts"
+                  placeholder="District"
                   value={form.district}
                   onChange={onText("district")}
-                  className="w-full rounded-[10px] border-[1.5px] border-[#E0E0E0] bg-white px-3.5 py-[11px] text-[14px] outline-none focus:border-[#2E7D32]"
-                >
+                  className="w-full rounded-[10px] border-[1.5px] border-[#E0E0E0] px-3.5 py-[11px] text-[14px] outline-none focus:border-[#2E7D32]"
+                />
+                <datalist id="nv-districts">
                   {DISTRICTS.map((d) => (
-                    <option key={d} value={d}>{d}</option>
+                    <option key={d} value={d} />
                   ))}
-                </select>
+                </datalist>
               </div>
             </div>
 

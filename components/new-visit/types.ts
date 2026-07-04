@@ -68,13 +68,20 @@ export const INITIAL_FORM: VisitForm = {
   followUpDate: "",
 };
 
-/** Lightweight farmer row used by the Step-0 mobile lookup. */
-export interface LookupFarmer {
+/** Full record returned by the server-side mobile lookup (for autofill + edit). */
+export interface FarmerLookup {
   id: number;
   name: string;
-  mobile: string | null;
-  village: string | null;
-  district: string | null;
-  crop: string | null;
+  village: string;
+  district: string;
+  mainCrop: string;
   segmentLabel: string | null;
+  leadStatusLabel: string | null;
+  ltv: string; // formatted ₹ or "—"
+  lastVisit: string; // display date or "—"
+}
+
+export interface FarmerLookupResult {
+  found: boolean;
+  farmer?: FarmerLookup;
 }
