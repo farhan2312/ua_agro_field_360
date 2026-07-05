@@ -68,6 +68,55 @@ function WarnTriangle() {
   );
 }
 
+/* ── Products & Issues step: grouped section scaffolding ── */
+function BoxIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+      <path d="M3.27 6.96 12 12.01l8.73-5.05M12 22.08V12" />
+    </svg>
+  );
+}
+function AlertIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  );
+}
+
+/** Macro-group heading (icon badge + title) for the Products & Issues step. */
+function GroupHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
+  return (
+    <div className="mb-3 flex items-center gap-2">
+      <span className="flex h-6 w-6 items-center justify-center rounded-[7px] bg-[#E8F5E9] text-[#2E7D32]">
+        {icon}
+      </span>
+      <div className="text-[13.5px] font-extrabold tracking-[0.2px] text-[#1A1C1A]">{title}</div>
+    </div>
+  );
+}
+
+/** A titled, bordered card that visually separates one chip group from the next. */
+function SectionCard({
+  title,
+  className = "",
+  children,
+}: {
+  title: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={`rounded-[14px] border border-[#ECEFEC] bg-[#FAFBFA] p-4 ${className}`}>
+      <div className="mb-2.5 text-[12px] font-bold text-[#3A3A3A]">{title}</div>
+      {children}
+    </div>
+  );
+}
+
 export function NewVisitWizard({
   options,
   primaryIdLabel = "Mobile Number",
@@ -438,28 +487,27 @@ export function NewVisitWizard({
               />
             </div>
 
-            <div className="mb-5 grid grid-cols-2 items-start gap-4">
-              <div>
-                <FieldLabel>Soil Type</FieldLabel>
-                <ChipGroupWithOther
-                  size="sm"
-                  fieldKey="soil"
-                  options={options.soilType}
-                  value={form.soil}
-                  onChange={setChip("soil", "soil")}
-                  detail={form.otherText.soil ?? ""}
-                  onDetail={(t) => setOtherText("soil", t)}
-                />
-              </div>
-              <div>
-                <FieldLabel>Soil Testing</FieldLabel>
-                <Toggle
-                  ariaLabel="Soil Testing"
-                  checked={form.soilTesting === "Required"}
-                  onChange={(v) => set("soilTesting", v ? "Required" : "Not Required")}
-                  labels={{ on: "Required", off: "Not Required" }}
-                />
-              </div>
+            <div className="mb-5">
+              <FieldLabel>Soil Type</FieldLabel>
+              <ChipGroupWithOther
+                size="sm"
+                fieldKey="soil"
+                options={options.soilType}
+                value={form.soil}
+                onChange={setChip("soil", "soil")}
+                detail={form.otherText.soil ?? ""}
+                onDetail={(t) => setOtherText("soil", t)}
+              />
+            </div>
+
+            <div className="mb-5 flex items-center gap-3.5">
+              <div className="text-[12px] font-semibold text-[#616161]">Soil Testing</div>
+              <Toggle
+                ariaLabel="Soil Testing"
+                checked={form.soilTesting === "Required"}
+                onChange={(v) => set("soilTesting", v ? "Required" : "Not Required")}
+                labels={{ on: "Required", off: "Not Required" }}
+              />
             </div>
 
             <div className="mb-5">
@@ -516,17 +564,6 @@ export function NewVisitWizard({
                 <Toggle checked={form.cropInsured} onChange={(v) => set("cropInsured", v)} />
               </div>
             </div>
-
-            <div>
-              <FieldLabel>Other Crops & Vegetables (free text)</FieldLabel>
-              <input
-                type="text"
-                placeholder="e.g. Coriander, Garlic..."
-                value={form.otherCrops}
-                onChange={onText("otherCrops")}
-                className="w-full rounded-[10px] border-[1.5px] border-[#E0E0E0] px-3.5 py-2.5 text-[13px] outline-none focus:border-[#2E7D32]"
-              />
-            </div>
           </div>
         )}
 
@@ -534,39 +571,73 @@ export function NewVisitWizard({
         {step === 2 && (
           <div>
             <div className="mb-5 text-[18px] font-bold text-[#1A1C1A]">Products & Issues</div>
-            {(
-              [
-                ["Products Currently Using", "product", true],
-                ["Products Required", "productRequired", true],
-                ["Current Problem", "currentProblem", true],
-                ["Crop Risk", "cropRisk", true],
-                ["Danger Zone", "dangerZone", false],
-              ] as const
-            ).map(([label, key, hasOther], i, arr) => (
-              <div key={key} className={i < arr.length - 1 ? "mb-[18px]" : ""}>
-                <FieldLabel>{label}</FieldLabel>
-                {hasOther ? (
-                  <ChipGroupWithOther
-                    multi
-                    size="sm"
-                    fieldKey={key}
-                    options={options[key]}
-                    value={form[key]}
-                    onChange={setChip(key, key)}
-                    detail={form.otherText[key] ?? ""}
-                    onDetail={(t) => setOtherText(key, t)}
-                  />
-                ) : (
-                  <ChipGroup
-                    multi
-                    size="sm"
-                    options={options[key]}
-                    value={form[key]}
-                    onChange={(v) => set(key, v)}
-                  />
-                )}
-              </div>
-            ))}
+
+            {/* Products */}
+            <GroupHeader icon={<BoxIcon />} title="Products" />
+            <div className="mb-6 grid grid-cols-2 gap-4">
+              <SectionCard title="Currently Using">
+                <ChipGroupWithOther
+                  multi
+                  size="sm"
+                  fieldKey="product"
+                  options={options.product}
+                  value={form.product}
+                  onChange={setChip("product", "product")}
+                  detail={form.otherText.product ?? ""}
+                  onDetail={(t) => setOtherText("product", t)}
+                />
+              </SectionCard>
+              <SectionCard title="Required">
+                <ChipGroupWithOther
+                  multi
+                  size="sm"
+                  fieldKey="productRequired"
+                  options={options.productRequired}
+                  value={form.productRequired}
+                  onChange={setChip("productRequired", "productRequired")}
+                  detail={form.otherText.productRequired ?? ""}
+                  onDetail={(t) => setOtherText("productRequired", t)}
+                />
+              </SectionCard>
+            </div>
+
+            {/* Issues & Risks */}
+            <GroupHeader icon={<AlertIcon />} title="Issues & Risks" />
+            <div className="grid grid-cols-2 gap-4">
+              <SectionCard title="Current Problem">
+                <ChipGroupWithOther
+                  multi
+                  size="sm"
+                  fieldKey="currentProblem"
+                  options={options.currentProblem}
+                  value={form.currentProblem}
+                  onChange={setChip("currentProblem", "currentProblem")}
+                  detail={form.otherText.currentProblem ?? ""}
+                  onDetail={(t) => setOtherText("currentProblem", t)}
+                />
+              </SectionCard>
+              <SectionCard title="Crop Risk">
+                <ChipGroupWithOther
+                  multi
+                  size="sm"
+                  fieldKey="cropRisk"
+                  options={options.cropRisk}
+                  value={form.cropRisk}
+                  onChange={setChip("cropRisk", "cropRisk")}
+                  detail={form.otherText.cropRisk ?? ""}
+                  onDetail={(t) => setOtherText("cropRisk", t)}
+                />
+              </SectionCard>
+              <SectionCard title="Danger Zone" className="col-span-2">
+                <ChipGroup
+                  multi
+                  size="sm"
+                  options={options.dangerZone}
+                  value={form.dangerZone}
+                  onChange={(v) => set("dangerZone", v)}
+                />
+              </SectionCard>
+            </div>
           </div>
         )}
 
