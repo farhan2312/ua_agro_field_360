@@ -317,7 +317,7 @@ export function NewVisitWizard({
                 {i + 1}
               </div>
               <div
-                className="whitespace-nowrap text-[11.5px]"
+                className="hidden whitespace-nowrap text-[11.5px] sm:block"
                 style={{ color: textColor, fontWeight: i === step ? 600 : 400 }}
               >
                 {label}
@@ -329,7 +329,7 @@ export function NewVisitWizard({
       </div>
 
       {/* B. Form card */}
-      <div className="rounded-2xl border border-black/[0.03] bg-white p-8 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+      <div className="rounded-2xl border border-black/[0.03] bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] sm:p-8">
         {/* ── STEP 0 ── */}
         {step === 0 && (
           <div>

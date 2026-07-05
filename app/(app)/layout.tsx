@@ -31,9 +31,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         isAdmin={isAdmin}
         impersonating={impersonating}
       />
-      <div className="flex min-h-screen flex-1 flex-col lg:ml-64">
+      {/*
+        min-w-0 is load-bearing: flex items default to min-width:auto, so without it this
+        column refuses to shrink below its widest child and any element wider than the phone
+        (a min-w-[Npx] table wrapper, a non-wrapping stepper, a long unbreakable token) balloons
+        the whole page — mobile browsers then render it zoomed out. overflow-x-clip on <main> is
+        the safety net. Wide content must scroll inside its own overflow-x-auto wrapper.
+      */}
+      <div className="flex min-h-screen min-w-0 flex-1 flex-col lg:ml-64">
         <Header role={role} counts={counts} />
-        <main className="flex-1 px-4 py-5 pb-24 lg:px-8 lg:py-7 lg:pb-7">{children}</main>
+        <main className="flex-1 overflow-x-clip px-4 py-5 pb-24 lg:px-8 lg:py-7 lg:pb-7">{children}</main>
       </div>
       <MobileNav
         role={role}
