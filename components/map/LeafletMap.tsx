@@ -7,6 +7,7 @@ import type { MapLayerKey } from "@/lib/map-layers";
 import { initials } from "@/lib/format";
 import type { MapFarmer, MapStore } from "./types";
 import { colorFor } from "./layer-util";
+import { HeatLayer, type HeatPoint } from "./HeatLayer";
 
 // Center on Uttar Pradesh (covers Barabanki / Amethi / Raebareli / Lakhimpur Kheri).
 const UP_CENTER: [number, number] = [27.3, 81.3];
@@ -28,22 +29,22 @@ function farmerIcon(f: MapFarmer, color: string, selected: boolean, dimmed: bool
 }
 
 function storeIcon(s: MapStore, selected: boolean, dimmed: boolean): L.DivIcon {
-  const border = selected ? 3 : 2;
-  const shadow = selected
-    ? `0 0 0 4px ${s.color}55, 0 4px 14px rgba(0,0,0,0.4)`
-    : "0 3px 8px rgba(0,0,0,0.3)";
-  const scale = selected ? 1.12 : dimmed ? 0.82 : 1;
-  const opacity = dimmed ? 0.4 : 1;
   const bg = dimmed ? "#9E9E9E" : s.color;
+  const scale = selected ? 1.08 : dimmed ? 0.9 : 1;
+  const opacity = dimmed ? 0.55 : 1;
+  const ring = selected ? `0 0 0 3px ${s.color}66, ` : "";
+  // Auto-sizing pill: the marker shrinks to fit its content (icon + code), so
+  // the store code can never overflow the pin. `iconSize:undefined` lets the
+  // element shrink-wrap; the inner translate(-50%,-100%) anchors the tail tip.
   const html = `
-    <div style="transform:translate(-50%,-100%) scale(${scale});opacity:${opacity};transition:opacity .2s;">
-      <div style="width:36px;height:36px;border-radius:8px;background:${bg};border:${border}px solid #fff;box-shadow:${shadow};display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1px;">
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="#fff"><path d="M1 5.5l1-3h10l1 3v1H1V5.5z" opacity="0.9"></path><rect x="2" y="6.5" width="10" height="6" rx="0.5" fill="#fff"></rect><rect x="5" y="8.5" width="4" height="4" rx="0.5" fill="${bg}"></rect></svg>
-        <span style="font-size:7px;font-weight:800;color:#fff;line-height:1;letter-spacing:0.3px;">${s.code}</span>
+    <div style="display:inline-block;text-align:center;transform:translate(-50%,-100%) scale(${scale});opacity:${opacity};transition:opacity .2s;">
+      <div style="display:inline-flex;align-items:center;gap:4px;height:21px;padding:0 8px 0 6px;border-radius:11px;background:${bg};border:2px solid #fff;box-shadow:${ring}0 2px 6px rgba(0,0,0,0.28);white-space:nowrap;">
+        <svg width="10" height="10" viewBox="0 0 14 14" fill="#fff"><path d="M1 5.5l1-3h10l1 3v1H1V5.5z" opacity="0.95"></path><rect x="2" y="6.5" width="10" height="6" rx="0.5"></rect><rect x="5" y="8.5" width="4" height="4" rx="0.5" fill="${bg}"></rect></svg>
+        <span style="font-size:9.5px;font-weight:800;color:#fff;line-height:1;letter-spacing:0.2px;">${s.code}</span>
       </div>
-      <div style="width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:7px solid ${bg};margin:0 auto;"></div>
+      <div style="width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:6px solid ${bg};margin:0 auto;"></div>
     </div>`;
-  return L.divIcon({ html, className: "ua-store-pin", iconSize: [36, 36], iconAnchor: [0, 0] });
+  return L.divIcon({ html, className: "ua-store-pin", iconSize: undefined, iconAnchor: [0, 0] });
 }
 
 /** Pans/zooms the map to fit the selected stores (or all when none) when `fitNonce` changes. */
@@ -89,6 +90,7 @@ export interface LeafletMapProps {
   layer: MapLayerKey;
   selectedStoreIds: number[];
   showStorePins: boolean;
+  showHeat: boolean;
   selectedFarmerId: number | null;
   fitNonce: number;
   onSelectFarmer: (f: MapFarmer) => void;
@@ -102,12 +104,27 @@ export default function LeafletMap({
   selectedStoreIds,
   fitNonce,
   showStorePins,
+  showHeat,
   selectedFarmerId,
   onSelectFarmer,
   onToggleStore,
 }: LeafletMapProps) {
   const hasSelection = selectedStoreIds.length > 0;
   const selSet = useMemo(() => new Set(selectedStoreIds), [selectedStoreIds]);
+
+  // Farmer-density heat points: sqrt-scaled so a few very large stores don't
+  // wash out the rest (counts range ~0–6.5k, median ~560).
+  const heatPoints = useMemo<HeatPoint[]>(
+    () =>
+      stores
+        .filter((s) => s.farmerCount > 0)
+        .map((s) => ({ lat: s.lat, lng: s.lng, weight: Math.sqrt(s.farmerCount) })),
+    [stores],
+  );
+  const heatMax = useMemo(
+    () => heatPoints.reduce((m, p) => Math.max(m, p.weight), 0),
+    [heatPoints],
+  );
 
   const farmerMarkers = useMemo(
     () =>
@@ -159,6 +176,7 @@ export default function LeafletMap({
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       <MapController stores={stores} selectedStoreIds={selectedStoreIds} fitNonce={fitNonce} />
+      <HeatLayer points={heatPoints} max={heatMax} show={showHeat} />
       {farmerMarkers}
       {showStorePins && storeMarkers}
     </MapContainer>

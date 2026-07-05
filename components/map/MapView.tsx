@@ -30,6 +30,7 @@ export function MapView({
   const [layer, setLayer] = useState<MapLayerKey>("segment");
   const [selectedStoreIds, setSelectedStoreIds] = useState<Set<number>>(new Set());
   const [showStorePins, setShowStorePins] = useState(true);
+  const [showHeat, setShowHeat] = useState(true);
   const [selectedFarmerId, setSelectedFarmerId] = useState<number | null>(null);
   const [fitNonce, setFitNonce] = useState(0);
 
@@ -119,6 +120,18 @@ export function MapView({
         </button>
         <button
           type="button"
+          onClick={() => setShowHeat((v) => !v)}
+          className={cn(
+            "flex items-center gap-1.5 rounded-[20px] border-[1.5px] px-3.5 py-1.5 text-[11.5px] font-semibold",
+            showHeat
+              ? "border-[#C8E6C9] bg-[#E8F5E9] text-[#2E7D32]"
+              : "border-[#E0E0E0] bg-[#F5F5F5] text-[#616161] hover:bg-[#EEEEEE]",
+          )}
+        >
+          🔥 Heatmap
+        </button>
+        <button
+          type="button"
           onClick={() => setShowStorePins((v) => !v)}
           className={cn(
             "flex items-center gap-1.5 rounded-[20px] border-[1.5px] px-3.5 py-1.5 text-[11.5px] font-semibold",
@@ -151,6 +164,7 @@ export function MapView({
               selectedStoreIds={selectedIdList}
               fitNonce={fitNonce}
               showStorePins={showStorePins}
+              showHeat={showHeat}
               selectedFarmerId={selectedFarmerId}
               onSelectFarmer={(f) => setSelectedFarmerId(f.id)}
               onToggleStore={(id) => toggleStore(id, true)}
@@ -170,6 +184,21 @@ export function MapView({
 
       {/* Legend */}
       <div className="mt-3.5 flex flex-wrap items-center gap-1.5 rounded-[12px] border border-black/[0.03] bg-white px-[18px] py-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+        {showHeat && (
+          <div className="mr-3 flex items-center gap-2 border-r border-[#EEE] pr-3">
+            <span className="text-[9.5px] font-bold uppercase tracking-[0.7px] text-[#9E9E9E]">
+              🔥 Farmer Density
+            </span>
+            <span
+              className="h-[10px] w-[80px] rounded-full"
+              style={{
+                background:
+                  "linear-gradient(90deg,#1B5E20,#66BB6A,#D4E157,#FFB300,#E53935)",
+              }}
+            />
+            <span className="text-[10px] text-[#9E9E9E]">fewer → more</span>
+          </div>
+        )}
         <div className="mr-1.5 flex-none text-[9.5px] font-bold uppercase tracking-[0.7px] text-[#9E9E9E]">
           👤 {activeLayerLabel}
         </div>

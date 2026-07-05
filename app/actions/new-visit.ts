@@ -138,8 +138,10 @@ export async function submitVisitAction(
         officerName,
         purpose: form.visitPurpose || null,
         type: form.visitPurpose || null,
-        gpsLat: 27.1767,
-        gpsLng: 78.0081,
+        visitMode: form.visitMode,
+        // Only a field visit records the farmer's location; a store visit never does.
+        gpsLat: form.visitMode === "field" ? form.gpsLat : null,
+        gpsLng: form.visitMode === "field" ? form.gpsLng : null,
         soilType: form.soil || null,
         soilTesting: form.soilTesting || null,
         waterSource: form.waterSource,

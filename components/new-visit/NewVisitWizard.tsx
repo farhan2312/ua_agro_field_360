@@ -223,6 +223,44 @@ export function NewVisitWizard({
     return () => clearTimeout(t);
   }, [form.mobile]);
 
+  /* ── Device geolocation — captured only for a field visit ── */
+  const [geoStatus, setGeoStatus] = useState<"idle" | "locating" | "done" | "error">("idle");
+  const geoMounted = useRef(true);
+  useEffect(() => () => {
+    geoMounted.current = false;
+  }, []);
+
+  useEffect(() => {
+    if (form.visitMode !== "field") {
+      // At-store: never record the farmer's location.
+      setGeoStatus("idle");
+      setForm((f) =>
+        f.gpsLat === null && f.gpsLng === null ? f : { ...f, gpsLat: null, gpsLng: null },
+      );
+      return;
+    }
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setGeoStatus("error");
+      return;
+    }
+    setGeoStatus("locating");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        if (!geoMounted.current) return;
+        setForm((f) => ({
+          ...f,
+          gpsLat: Number(pos.coords.latitude.toFixed(6)),
+          gpsLng: Number(pos.coords.longitude.toFixed(6)),
+        }));
+        setGeoStatus("done");
+      },
+      () => {
+        if (geoMounted.current) setGeoStatus("error");
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
+    );
+  }, [form.visitMode]);
+
   const visitReasonStar = visitReasonRequired ? " *" : "";
 
   const next = () => setStep((s) => Math.min(s + 1, 4));
@@ -296,6 +334,36 @@ export function NewVisitWizard({
         {step === 0 && (
           <div>
             <div className="mb-5 text-[18px] font-bold text-[#1A1C1A]">Farmer & Location</div>
+
+            {/* Visit type — controls whether the farmer's GPS is recorded */}
+            <div className="mb-5">
+              <FieldLabel>Visit Type</FieldLabel>
+              <div className="inline-flex rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] p-1">
+                {(
+                  [
+                    ["field", "🚜 Field Visit"],
+                    ["store", "🏪 At Store"],
+                  ] as const
+                ).map(([mode, label]) => {
+                  const active = form.visitMode === mode;
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => set("visitMode", mode)}
+                      className="rounded-[8px] px-4 py-2 text-[12.5px] font-semibold transition-colors"
+                      style={{
+                        background: active ? "#FFFFFF" : "transparent",
+                        color: active ? "#2E7D32" : "#9E9E9E",
+                        boxShadow: active ? "0 1px 3px rgba(0,0,0,0.12)" : "none",
+                      }}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
             {/* Primary ID hero */}
             <div className="mb-5 rounded-[13px] border-[1.5px] border-[#A5D6A7] bg-gradient-to-br from-[#F1F8F1] to-[#E8F5E9] p-5">
@@ -462,13 +530,43 @@ export function NewVisitWizard({
               />
             </div>
 
-            <div className="flex items-center gap-2.5 rounded-[10px] bg-[#F5F7F5] px-[18px] py-3.5">
-              <div className="h-2 w-2 rounded-full bg-[#2E7D32]" />
-              <div className="text-[12px] text-[#616161]">
-                GPS Location:{" "}
-                <span className="font-semibold text-[#2E7D32]">27.1767° N, 78.0081° E</span> — Confirmed
+            {form.visitMode === "field" ? (
+              <div className="flex items-center gap-2.5 rounded-[10px] bg-[#F5F7F5] px-[18px] py-3.5">
+                <div
+                  className="h-2 w-2 flex-none rounded-full"
+                  style={{
+                    background:
+                      geoStatus === "done"
+                        ? "#2E7D32"
+                        : geoStatus === "error"
+                          ? "#C62828"
+                          : "#F9A825",
+                  }}
+                />
+                <div className="text-[12px] text-[#616161]">
+                  {geoStatus === "locating" && "Getting your location…"}
+                  {geoStatus === "idle" && "Preparing location…"}
+                  {geoStatus === "error" &&
+                    "Location unavailable — enable GPS / location permission to record it."}
+                  {geoStatus === "done" && form.gpsLat != null && form.gpsLng != null && (
+                    <>
+                      GPS Location:{" "}
+                      <span className="font-semibold text-[#2E7D32]">
+                        {form.gpsLat.toFixed(4)}° N, {form.gpsLng.toFixed(4)}° E
+                      </span>{" "}
+                      — Confirmed
+                    </>
+                  )}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="flex items-center gap-2.5 rounded-[10px] border border-[#FFE082] bg-[#FFF8E1] px-[18px] py-3.5">
+                <div className="h-2 w-2 flex-none rounded-full bg-[#F9A825]" />
+                <div className="text-[12px] text-[#795548]">
+                  Filling in from the store — the farmer&apos;s location won&apos;t be recorded.
+                </div>
+              </div>
+            )}
           </div>
         )}
 

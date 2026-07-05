@@ -203,6 +203,7 @@ model Visit {
   leadStatus  LeadStatus?
 
   // New-Visit wizard captured fields
+  visitMode       String? // "field" (GPS recorded) | "store" (no farmer location)
   gpsLat          Float?
   gpsLng          Float?
   soilType        String?

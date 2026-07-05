@@ -7,6 +7,11 @@ export interface VisitForm {
   village: string;
   district: string;
   visitPurpose: string;
+  /** "field" records the device GPS; "store" (filling in from the store) records no farmer location. */
+  visitMode: "field" | "store";
+  /** Captured device location for a field visit (null for a store visit or if unavailable). */
+  gpsLat: number | null;
+  gpsLng: number | null;
   // Step 1 — Land & Crops
   landHolding: string;
   soil: string;
@@ -52,6 +57,9 @@ export const INITIAL_FORM: VisitForm = {
   village: "Chandpur",
   district: "Agra",
   visitPurpose: "",
+  visitMode: "field",
+  gpsLat: null,
+  gpsLng: null,
   landHolding: "",
   soil: "",
   soilTesting: "Not Required",

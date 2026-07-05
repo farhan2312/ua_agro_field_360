@@ -33,7 +33,7 @@ export interface MapStore {
   color: string;
   lat: number;
   lng: number;
-  /** Count of plotted (lat/lng) farmers attached to this store. */
+  /** Total farmers attached to this store — drives the density heatmap weight. */
   farmerCount: number;
 }
 

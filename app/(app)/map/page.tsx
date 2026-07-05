@@ -56,7 +56,8 @@ export default async function MapViewPage() {
           name: true,
           lat: true,
           lng: true,
-          _count: { select: { farmers: { where: { lat: { not: null } } } } },
+          // Real total farmers per store — drives the farmer-density heatmap.
+          _count: { select: { farmers: true } },
         },
         orderBy: { id: "asc" },
       }),
