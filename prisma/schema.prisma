@@ -103,6 +103,7 @@ model User {
   gradA          String?
   gradB          String?
   email          String?        @unique
+  workEmail      String? // employee's work email from the master data (non-unique; for notifications later)
   employeeCode   String?        @unique // login identifier (e.g. "UA999")
   passwordHash   String? // bcrypt hash (null for legacy/demo display rows)
   mustChangePassword Boolean    @default(false) // force a reset on first login

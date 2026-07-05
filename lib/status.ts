@@ -36,6 +36,14 @@ export const USER_STATUS_META: Record<string, ColorPair> = {
   Inactive: { bg: "#FFF3E0", c: "#E65100" },
 };
 
+/** Store status chips (Store Management tab). */
+export const STORE_STATUS_META: Record<string, ColorPair> = {
+  Active: { bg: "#E8F5E9", c: "#2E7D32" },
+  Closed: { bg: "#FFEBEE", c: "#C62828" },
+  Vacant: { bg: "#F5F5F5", c: "#9E9E9E" },
+  "H.O.": { bg: "#F3E5F5", c: "#7B1FA2" },
+};
+
 /** Audit-log action chips. */
 export const AUDIT_ACTION_META: Record<string, ColorPair> = {
   CREATE: { bg: "#E8F5E9", c: "#2E7D32" },

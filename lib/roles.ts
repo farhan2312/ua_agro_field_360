@@ -85,6 +85,14 @@ export const REQUESTABLE_ROLES: { key: RoleKey; label: string }[] = [
   { key: "central", label: "Central Team" },
 ];
 
+/** Roles a System Admin may assign when creating/editing a user (all four). */
+export const ADMIN_ROLE_CHOICES: { key: RoleKey; label: string }[] = [
+  { key: "officer", label: "Agri Officer" },
+  { key: "regional", label: "Regional Manager" },
+  { key: "central", label: "Central Admin" },
+  { key: "sysadmin", label: "System Admin" },
+];
+
 /** Which views each role may access (from the showX flags in renderVals). */
 export const NAV_VISIBILITY: Record<string, (r: RoleKey) => boolean> = {
   dashboard: () => true,

@@ -1,23 +1,21 @@
 import { prisma } from "@/lib/prisma";
 import { getRole } from "@/lib/session";
 import { initials } from "@/lib/format";
-import { storeColor } from "@/lib/store-utils";
+import { shortStoreName, storeColor } from "@/lib/store-utils";
 import { PRISMA_TO_KEY, roleLabel, type RoleKey } from "@/lib/roles";
 import { UserManagementScreen } from "@/components/users/UserManagementScreen";
 import { PendingApprovals, type PendingUser } from "@/components/users/PendingApprovals";
-import type { UserRow, StoreRow } from "@/components/users/types";
+import type {
+  UserRow,
+  OfficerLite,
+  StoreMgmtRow,
+  StoreMgmtData,
+} from "@/components/users/types";
 
 export const dynamic = "force-dynamic";
 
-/** Store accent colours, keyed by code, matching the original design. */
-const STORE_COLOR_BY_CODE: Record<string, string> = {
-  AGRO0012: "#1565C0", // Ram Nagar
-  AGRO0015: "#2E7D32", // Haidergarh
-  AGRO0018: "#E65100", // Tiloi
-  AGRO0019: "#7B1FA2", // Shivgarh
-  AGRO0028: "#F57F17", // Sanda Farm
-  AGRO0031: "#C62828", // Aliganj
-};
+/** A store counts as operational (should have an officer) only when Active. */
+const isActive = (status: string) => status.trim().toLowerCase() === "active";
 
 async function loadPending(): Promise<PendingUser[]> {
   try {
@@ -41,98 +39,163 @@ async function loadPending(): Promise<PendingUser[]> {
   }
 }
 
-async function loadData(): Promise<{
-  users: UserRow[];
-  stores: StoreRow[];
-  totals: { stores: number; farmersMapped: number; officers: number };
-}> {
+async function loadUsers(): Promise<UserRow[]> {
   try {
-    const [dbUsers, dbStores] = await Promise.all([
-      prisma.user.findMany({
-        where: { approvalStatus: "APPROVED" },
-        orderBy: { id: "asc" },
-      }),
-      prisma.store.findMany({
-        // Only the curated demo stores carry the rich master-data view.
-        where: { source: "REAL", code: { in: Object.keys(STORE_COLOR_BY_CODE) } },
-        orderBy: { id: "asc" },
-        include: {
-          employees: { orderBy: { id: "asc" }, select: { name: true } },
-          farmers: {
-            where: { source: "DEMO" },
-            orderBy: { id: "asc" },
-            select: { name: true },
-          },
-        },
-      }),
-    ]);
-
-    const users: UserRow[] = dbUsers.map((u) => ({
+    const dbUsers = await prisma.user.findMany({
+      where: { approvalStatus: "APPROVED" },
+      orderBy: { id: "asc" },
+    });
+    return dbUsers.map((u) => ({
       id: u.id,
       init: u.initials ?? initials(u.name),
       name: u.name,
       email: u.employeeCode ?? u.email ?? "",
+      employeeCode: u.employeeCode ?? "",
+      mobile: u.mobile ?? "",
+      workEmail: u.workEmail ?? "",
       roleLabel: u.roleLabel ?? "",
+      roleKey: PRISMA_TO_KEY[u.role] ?? "officer",
       grad: `linear-gradient(135deg, ${u.gradA ?? "#2E7D32"}, ${u.gradB ?? "#66BB6A"})`,
       territory: u.territory ?? "",
       lastActive: u.lastActive ?? "",
       visitsMtd: u.visitsMtd ?? "—",
       status: u.active ? "Active" : "Inactive",
     }));
+  } catch {
+    return [];
+  }
+}
 
-    const stores: StoreRow[] = dbStores.map((s) => ({
-      id: s.id,
-      name: s.name,
-      color: STORE_COLOR_BY_CODE[s.code] ?? storeColor(s.id),
-      address: s.address ?? "",
-      district: s.zone ?? "",
-      ao1: s.employees[0]?.name ?? "",
-      ao2: s.employees[1]?.name ?? "",
-      farmerCount: s.farmers.length,
-      farmerNames: s.farmers.map((f) => f.name).join(", "),
-    }));
+const EMPTY_STORE_ADMIN: StoreMgmtData = {
+  rows: [],
+  allOfficers: [],
+  unassignedOfficers: [],
+  regionals: [],
+  totals: {
+    total: 0, active: 0, mapped: 0, unmapped: 0, closed: 0,
+    officersAssigned: 0, officersUnassigned: 0, farmersMapped: 0,
+  },
+};
 
-    const officerNames = new Set<string>();
-    stores.forEach((s) => {
-      if (s.ao1) officerNames.add(s.ao1);
-      if (s.ao2) officerNames.add(s.ao2);
+async function loadStoreMgmt(): Promise<StoreMgmtData> {
+  try {
+    const [stores, asr, regional, groups] = await Promise.all([
+      prisma.store.findMany({
+        orderBy: [{ status: "asc" }, { name: "asc" }],
+        select: {
+          id: true, code: true, name: true, status: true, zone: true,
+          address: true, regionalManager: true, lat: true, lng: true,
+        },
+      }),
+      prisma.user.findMany({
+        where: { role: "ASR", approvalStatus: "APPROVED" },
+        orderBy: { name: "asc" },
+        select: {
+          id: true, name: true, employeeCode: true, storeId: true,
+          zone: true, active: true, initials: true, gradA: true, gradB: true,
+        },
+      }),
+      prisma.user.findMany({
+        where: { role: "REGIONAL", approvalStatus: "APPROVED" },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true, zone: true },
+      }),
+      prisma.farmer.groupBy({ by: ["storeId"], _count: { _all: true } }),
+    ]);
+
+    const farmerByStore = new Map<number, number>();
+    let farmersMapped = 0;
+    for (const g of groups) {
+      if (g.storeId != null) {
+        farmerByStore.set(g.storeId, g._count._all);
+        farmersMapped += g._count._all;
+      }
+    }
+    const validStoreIds = new Set(stores.map((s) => s.id));
+
+    const toOfficer = (u: (typeof asr)[number]): OfficerLite => ({
+      id: u.id,
+      name: u.name,
+      code: u.employeeCode ?? "",
+      init: u.initials ?? initials(u.name),
+      grad: `linear-gradient(135deg, ${u.gradA ?? "#1565C0"}, ${u.gradB ?? "#42A5F5"})`,
+      active: u.active,
+      zone: u.zone ?? "",
+      storeId: u.storeId,
+    });
+    const allOfficers = asr.map(toOfficer);
+    const officersByStore = new Map<number, OfficerLite[]>();
+    const unassignedOfficers: OfficerLite[] = [];
+    for (const o of allOfficers) {
+      if (o.storeId != null && validStoreIds.has(o.storeId)) {
+        const arr = officersByStore.get(o.storeId);
+        if (arr) arr.push(o);
+        else officersByStore.set(o.storeId, [o]);
+      } else {
+        unassignedOfficers.push(o); // unassigned or dangling (points at a deleted store)
+      }
+    }
+
+    const rows: StoreMgmtRow[] = stores.map((s) => {
+      const officers = officersByStore.get(s.id) ?? [];
+      return {
+        id: s.id,
+        code: s.code,
+        name: s.name,
+        shortName: shortStoreName(s.name),
+        status: s.status,
+        zone: s.zone ?? "",
+        address: s.address ?? "",
+        regionalManager: s.regionalManager ?? "",
+        lat: s.lat,
+        lng: s.lng,
+        hasGps: s.lat != null && s.lng != null,
+        color: storeColor(s.id),
+        farmerCount: farmerByStore.get(s.id) ?? 0,
+        officers,
+        unmapped: isActive(s.status) && !officers.some((o) => o.active),
+      };
     });
 
+    const activeCount = stores.filter((s) => isActive(s.status)).length;
+    const officersAssigned = allOfficers.filter(
+      (o) => o.storeId != null && validStoreIds.has(o.storeId),
+    ).length;
+
     return {
-      users,
-      stores,
+      rows,
+      allOfficers,
+      unassignedOfficers,
+      regionals: regional.map((r) => ({ id: r.id, name: r.name, zone: r.zone ?? "" })),
       totals: {
-        stores: stores.length,
-        farmersMapped: stores.reduce((n, s) => n + s.farmerCount, 0),
-        officers: officerNames.size,
+        total: stores.length,
+        active: activeCount,
+        mapped: rows.filter((r) => !r.unmapped && isActive(r.status)).length,
+        unmapped: rows.filter((r) => r.unmapped).length,
+        closed: stores.length - activeCount,
+        officersAssigned,
+        officersUnassigned: unassignedOfficers.length,
+        farmersMapped,
       },
     };
   } catch {
-    return {
-      users: [],
-      stores: [],
-      totals: { stores: 0, farmersMapped: 0, officers: 0 },
-    };
+    return EMPTY_STORE_ADMIN;
   }
 }
 
 export default async function UsersPage() {
   const role = await getRole();
   const canEdit = role === "sysadmin";
-  const [{ users, stores, totals }, pending] = await Promise.all([
-    loadData(),
+  const [users, storeAdmin, pending] = await Promise.all([
+    loadUsers(),
+    loadStoreMgmt(),
     canEdit ? loadPending() : Promise.resolve([]),
   ]);
 
   return (
     <>
       {canEdit && <PendingApprovals pending={pending} />}
-      <UserManagementScreen
-        users={users}
-        stores={stores}
-        storeTotals={totals}
-        canEdit={canEdit}
-      />
+      <UserManagementScreen users={users} storeAdmin={storeAdmin} canEdit={canEdit} />
     </>
   );
 }

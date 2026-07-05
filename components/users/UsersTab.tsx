@@ -1,14 +1,25 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { ROLE_META, USER_STATUS_META } from "@/lib/status";
 import { EmptyState } from "@/components/ui";
+import { Modal, ModalHeader } from "@/components/interactive";
+import { deleteUserAction } from "@/app/actions/users";
 import { EditPencil } from "./EditPencil";
-import { EditUserModal } from "./EditUserModal";
+import { UserFormModal } from "./UserFormModal";
 import type { UserRow } from "./types";
 
 const GRID =
-  "grid grid-cols-[1.4fr_1fr_1fr_0.8fr_0.6fr_0.5fr_80px] px-[22px] items-center";
+  "grid grid-cols-[1.4fr_1fr_1fr_0.8fr_0.6fr_0.5fr_130px] px-[22px] items-center";
+
+function TrashIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2m2 0v14a1 1 0 01-1 1H7a1 1 0 01-1-1V6" />
+      <path d="M10 11v6M14 11v6" />
+    </svg>
+  );
+}
 
 /** Whole user row is dimmed when inactive; visits text greyed. */
 function rowColors(status: string) {
@@ -55,6 +66,20 @@ export function UsersTab({
   canEdit: boolean;
 }) {
   const [editing, setEditing] = useState<UserRow | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [deleting, setDeleting] = useState<UserRow | null>(null);
+  const [delErr, setDelErr] = useState<string | null>(null);
+  const [delPending, startDelete] = useTransition();
+
+  const confirmDelete = () => {
+    if (!deleting) return;
+    setDelErr(null);
+    startDelete(async () => {
+      const res = await deleteUserAction(deleting.id);
+      if (res.ok) setDeleting(null);
+      else setDelErr(res.error ?? "Delete failed");
+    });
+  };
 
   return (
     <div>
@@ -63,12 +88,15 @@ export function UsersTab({
         <div className="text-[13px] text-[#757575]">
           Manage user accounts, roles, and territory assignments
         </div>
-        <button
-          type="button"
-          className="cursor-pointer rounded-[10px] bg-[#2E7D32] px-[22px] py-[9px] text-[13px] font-semibold text-white hover:bg-[#1B5E20]"
-        >
-          + Add User
-        </button>
+        {canEdit && (
+          <button
+            type="button"
+            onClick={() => setCreating(true)}
+            className="cursor-pointer rounded-[10px] bg-[#2E7D32] px-[22px] py-[9px] text-[13px] font-semibold text-white hover:bg-[#1B5E20]"
+          >
+            + Add User
+          </button>
+        )}
       </div>
 
       {/* Table card */}
@@ -142,16 +170,27 @@ export function UsersTab({
                   </span>
                 </div>
                 {/* Actions */}
-                <div>
+                <div className="flex items-center gap-1.5">
                   {canEdit && (
-                    <button
-                      type="button"
-                      onClick={() => setEditing(ur)}
-                      className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-[#F5F7F5] px-[10px] py-[5px] text-[11px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9]"
-                    >
-                      <EditPencil />
-                      Edit
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setEditing(ur)}
+                        className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-[#F5F7F5] px-[10px] py-[5px] text-[11px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9]"
+                      >
+                        <EditPencil />
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setDelErr(null); setDeleting(ur); }}
+                        aria-label={`Delete ${ur.name}`}
+                        title="Delete user"
+                        className="inline-flex cursor-pointer items-center justify-center rounded-lg bg-[#FDECEA] px-[8px] py-[6px] text-[#C62828] hover:bg-[#F9DCD8]"
+                      >
+                        <TrashIcon />
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -179,8 +218,43 @@ export function UsersTab({
         ))}
       </div>
 
-      {editing && (
-        <EditUserModal user={editing} onClose={() => setEditing(null)} />
+      {creating && <UserFormModal user={null} onClose={() => setCreating(false)} />}
+      {editing && <UserFormModal user={editing} onClose={() => setEditing(null)} />}
+
+      {deleting && (
+        <Modal open onClose={() => setDeleting(null)}>
+          <ModalHeader
+            eyebrow="SYSTEM ADMIN · DELETE"
+            eyebrowColor="#C62828"
+            title={`Delete ${deleting.name}?`}
+            subtitle={deleting.email}
+            onClose={() => setDeleting(null)}
+          />
+          <div className="px-6 py-5">
+            <div className="text-[13px] leading-[1.6] text-ink-600">
+              This permanently removes the account and its login access. This can&apos;t be undone.
+            </div>
+            {delErr && <div className="mt-3 text-[12px] text-danger">{delErr}</div>}
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleting(null)}
+                disabled={delPending}
+                className="rounded-[10px] border border-line bg-white px-[18px] py-[9px] text-[13px] font-semibold text-ink-600 hover:bg-surface-150 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                disabled={delPending}
+                className="rounded-[10px] bg-[#C62828] px-[22px] py-[9px] text-[13px] font-semibold text-white hover:bg-[#B71C1C] disabled:opacity-50"
+              >
+                {delPending ? "Deleting…" : "Delete User"}
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );

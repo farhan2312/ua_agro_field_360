@@ -4,9 +4,15 @@ export interface UserRow {
   id: number;
   init: string;
   name: string;
+  /** Display sub-line under the name (the employee code). */
   email: string;
+  employeeCode: string;
+  mobile: string;
+  workEmail: string;
   /** Display role label, e.g. "Agri Officer". */
   roleLabel: string;
+  /** Persona role key: "officer" | "regional" | "central" | "sysadmin". */
+  roleKey: string;
   /** linear-gradient(...) string for the avatar. */
   grad: string;
   territory: string;
@@ -16,19 +22,64 @@ export interface UserRow {
   status: string;
 }
 
-export interface StoreRow {
+/** A lightweight agri-officer (ASR user) for the store-management pick lists. */
+export interface OfficerLite {
   id: number;
   name: string;
-  /** Store accent colour (hex). */
-  color: string;
+  code: string;
+  init: string;
+  /** linear-gradient(...) avatar. */
+  grad: string;
+  active: boolean;
+  /** Their region (for same-zone candidate ranking). */
+  zone: string;
+  /** The store this officer is currently mapped to (null = unassigned). */
+  storeId: number | null;
+}
+
+/** A store row for the all-stores management table. */
+export interface StoreMgmtRow {
+  id: number;
+  code: string;
+  name: string;
+  shortName: string;
+  status: string;
+  zone: string;
   address: string;
-  district: string;
-  /** Agri Officer 1 full name (may be ""). */
-  ao1: string;
-  /** Agri Officer 2 full name (may be ""). */
-  ao2: string;
-  /** Count of mapped (demo) farmers. */
+  regionalManager: string;
+  lat: number | null;
+  lng: number | null;
+  hasGps: boolean;
+  color: string;
   farmerCount: number;
-  /** Comma-joined mapped farmer names. */
-  farmerNames: string;
+  officers: OfficerLite[];
+  /** Operational store with no active officer. */
+  unmapped: boolean;
+}
+
+/** A regional manager option (for the store RM picker). */
+export interface RegionalOption {
+  id: number;
+  name: string;
+  zone: string;
+}
+
+export interface StoreTotals {
+  total: number;
+  active: number;
+  mapped: number;
+  unmapped: number;
+  closed: number;
+  officersAssigned: number;
+  officersUnassigned: number;
+  farmersMapped: number;
+}
+
+/** Everything the Store Management tab needs. */
+export interface StoreMgmtData {
+  rows: StoreMgmtRow[];
+  allOfficers: OfficerLite[];
+  unassignedOfficers: OfficerLite[];
+  regionals: RegionalOption[];
+  totals: StoreTotals;
 }

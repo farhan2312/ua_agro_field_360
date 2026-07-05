@@ -4,7 +4,7 @@ import { useState } from "react";
 import { cn } from "@/lib/cn";
 import { UsersTab } from "./UsersTab";
 import { StoresTab } from "./StoresTab";
-import type { UserRow, StoreRow } from "./types";
+import type { UserRow, StoreMgmtData } from "./types";
 
 type SubTab = "users" | "stores";
 
@@ -15,13 +15,11 @@ const TABS: { id: SubTab; label: string }[] = [
 
 export function UserManagementScreen({
   users,
-  stores,
-  storeTotals,
+  storeAdmin,
   canEdit,
 }: {
   users: UserRow[];
-  stores: StoreRow[];
-  storeTotals: { stores: number; farmersMapped: number; officers: number };
+  storeAdmin: StoreMgmtData;
   canEdit: boolean;
 }) {
   const [tab, setTab] = useState<SubTab>("users");
@@ -51,7 +49,7 @@ export function UserManagementScreen({
       {tab === "users" ? (
         <UsersTab rows={users} canEdit={canEdit} />
       ) : (
-        <StoresTab rows={stores} canEdit={canEdit} totals={storeTotals} />
+        <StoresTab data={storeAdmin} canEdit={canEdit} />
       )}
     </div>
   );
