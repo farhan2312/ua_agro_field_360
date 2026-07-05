@@ -56,7 +56,7 @@ export function FarmerDetailPanel({
       : "#9E9E9E";
 
   return (
-    <div className="flex h-[564px] w-[284px] flex-none flex-col overflow-y-auto border-l border-[#F0F0F0] bg-white">
+    <div className="absolute inset-0 z-[1200] flex w-full flex-col overflow-y-auto border-l border-[#F0F0F0] bg-white lg:static lg:inset-auto lg:z-auto lg:h-[564px] lg:w-[284px] lg:flex-none">
       {/* Header */}
       <div className="flex flex-none items-center justify-between border-b border-[#F5F5F5] px-[18px] py-4">
         <div className="text-[13.5px] font-bold text-[#1A1C1A]">Farmer Details</div>

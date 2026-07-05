@@ -165,7 +165,7 @@ export function FarmerEditModal({
         onClose={onClose}
       />
       <form onSubmit={onSubmit}>
-        <div className="grid grid-cols-2 gap-[14px]">
+        <div className="grid grid-cols-1 gap-[14px] sm:grid-cols-2">
           <Field label="Farmer Name">
             <TextInput value={name} onChange={(e) => setName(e.target.value)} />
           </Field>

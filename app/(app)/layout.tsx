@@ -3,6 +3,7 @@ import { getRole, getPersona } from "@/lib/session";
 import { getSession } from "@/lib/auth";
 import { getHeaderCounts } from "@/lib/stats";
 import { Sidebar } from "@/components/shell/Sidebar";
+import { MobileNav } from "@/components/shell/MobileNav";
 import { Header } from "@/components/shell/Header";
 import type { RoleKey } from "@/lib/roles";
 
@@ -30,10 +31,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         isAdmin={isAdmin}
         impersonating={impersonating}
       />
-      <div className="ml-64 flex min-h-screen flex-1 flex-col">
+      <div className="flex min-h-screen flex-1 flex-col lg:ml-64">
         <Header role={role} counts={counts} />
-        <main className="flex-1 px-8 py-7">{children}</main>
+        <main className="flex-1 px-4 py-5 pb-24 lg:px-8 lg:py-7 lg:pb-7">{children}</main>
       </div>
+      <MobileNav
+        role={role}
+        persona={persona}
+        isAdmin={isAdmin}
+        impersonating={impersonating}
+      />
     </div>
   );
 }

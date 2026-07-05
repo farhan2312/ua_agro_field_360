@@ -38,7 +38,7 @@ function donutGradient(crops: typeof CROPS): string {
 /* ── KPI cards grid (over kpiData) ── */
 function KpiCardGrid({ kpi }: { kpi: KpiData }) {
   return (
-    <div className="mb-6 grid grid-cols-4 gap-[18px]">
+    <div className="mb-6 grid grid-cols-2 gap-[18px] lg:grid-cols-4">
       {KPI_CARDS.map((k) => (
         <Card key={k.key} className="p-[22px] pb-[18px]">
           <div className="text-[11px] font-semibold uppercase tracking-[0.8px] text-[#9E9E9E]">
@@ -215,7 +215,7 @@ function TopCropsDonut({ centerValue }: { centerValue: string }) {
 /* ── Smart Insights ── */
 function SmartInsights() {
   return (
-    <div className="grid grid-cols-4 gap-3.5">
+    <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
       {INSIGHTS.map((ins) => (
         <Card
           key={ins.title}
@@ -249,12 +249,12 @@ export function AnalyticsOverview({
     <>
       <KpiCardGrid kpi={kpi} />
 
-      <div className="mb-[18px] grid grid-cols-[1.6fr_1fr] gap-[18px]">
+      <div className="mb-[18px] grid grid-cols-1 gap-[18px] lg:grid-cols-[1.6fr_1fr]">
         <VisitActivityChart />
         <LeadFunnel />
       </div>
 
-      <div className="mb-[18px] grid grid-cols-[1.6fr_1fr] gap-[18px]">
+      <div className="mb-[18px] grid grid-cols-1 gap-[18px] lg:grid-cols-[1.6fr_1fr]">
         <RecentVisits recent={recent} />
         <TopCropsDonut centerValue={cropTotal} />
       </div>

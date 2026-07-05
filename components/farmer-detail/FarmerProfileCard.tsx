@@ -55,7 +55,7 @@ export function FarmerProfileCard({ farmer }: { farmer: FarmerDetail }) {
           </div>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-2.5">
+      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
         <DetailRow label="Land" value={`${farmer.land || "0"} acres`} />
         <DetailRow label="Crop" value={farmer.crop} />
         <DetailRow label="Season" value={farmer.season} />

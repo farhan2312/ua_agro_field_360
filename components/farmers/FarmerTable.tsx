@@ -76,6 +76,8 @@ function FarmerTableRow({ row }: { row: FarmerRowVM }) {
 export function FarmerTable({ rows }: { rows: FarmerRowVM[] }) {
   return (
     <div className="bg-white rounded-2xl shadow-[0_1px_3px_rgba(0,0,0,0.04)] border border-black/[0.03] overflow-hidden">
+      <div className="overflow-x-auto">
+      <div className="min-w-[880px] lg:min-w-0">
       {/* Header row */}
       <div
         className={`${GRID} px-[22px] py-3.5 bg-[#FAFAFA] border-b border-[#F0F0F0] text-[10.5px] font-semibold text-[#9E9E9E] uppercase tracking-[0.5px]`}
@@ -98,6 +100,8 @@ export function FarmerTable({ rows }: { rows: FarmerRowVM[] }) {
       ) : (
         rows.map((row) => <FarmerTableRow key={row.id} row={row} />)
       )}
+      </div>
+      </div>
     </div>
   );
 }

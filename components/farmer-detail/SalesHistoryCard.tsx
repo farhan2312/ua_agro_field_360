@@ -10,7 +10,8 @@ export function SalesHistoryCard({ sales }: { sales: FarmerSale[] }) {
         Sales / Invoice History
       </div>
       {sales.length > 0 ? (
-        <>
+        <div className="overflow-x-auto">
+          <div className="min-w-[440px] lg:min-w-0">
           <div
             className={`${GRID} py-2.5 border-b border-[#F0F0F0] text-[10px] font-semibold text-[#9E9E9E] uppercase tracking-[0.4px]`}
           >
@@ -32,7 +33,8 @@ export function SalesHistoryCard({ sales }: { sales: FarmerSale[] }) {
               <div className="text-[11px] text-[#9E9E9E]">{sale.store}</div>
             </div>
           ))}
-        </>
+          </div>
+        </div>
       ) : (
         <div className="p-7 text-center text-[#BDBDBD] text-[13px]">
           No purchase history yet

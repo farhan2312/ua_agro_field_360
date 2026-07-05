@@ -101,6 +101,8 @@ export function UsersTab({
 
       {/* Table card */}
       <div className="overflow-hidden rounded-[14px] border border-black/[0.03] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+        <div className="overflow-x-auto">
+        <div className="min-w-[840px] lg:min-w-0">
         <div
           className={`${GRID} border-b border-[#F0F0F0] bg-[#FAFAFA] py-[14px] text-[10.5px] font-semibold uppercase tracking-[0.5px] text-[#9E9E9E]`}
         >
@@ -197,10 +199,12 @@ export function UsersTab({
             );
           })
         )}
+        </div>
+        </div>
       </div>
 
       {/* Role permissions summary */}
-      <div className="mt-5 grid grid-cols-4 gap-[14px]">
+      <div className="mt-5 grid grid-cols-1 gap-[14px] sm:grid-cols-2 lg:grid-cols-4">
         {ROLE_CARDS.map((c) => (
           <div
             key={c.title}

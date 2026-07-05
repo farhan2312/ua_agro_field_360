@@ -24,7 +24,8 @@ export function LeadsBoard({ columns }: { columns: LeadColumnData[] }) {
           hint="Lead cards appear here once farmers are assigned a lead status."
         />
       ) : (
-        <div className="grid grid-cols-5 gap-3.5">
+        <div className="overflow-x-auto">
+        <div className="grid min-w-[760px] grid-cols-4 gap-3.5 lg:min-w-0 lg:grid-cols-5">
           {columns.map((col) => (
             <LeadColumn
               key={col.key}
@@ -34,6 +35,7 @@ export function LeadsBoard({ columns }: { columns: LeadColumnData[] }) {
               items={col.items}
             />
           ))}
+        </div>
         </div>
       )}
     </div>

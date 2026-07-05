@@ -40,19 +40,19 @@ export default function AnalyticsPage({
       <HeroKpiBanner />
 
       {/* Row 1: Heatmap + ASR Leaderboard */}
-      <div className="grid grid-cols-[1.2fr_1fr] gap-[18px] mb-[18px]">
+      <div className="grid grid-cols-1 gap-[18px] mb-[18px] lg:grid-cols-[1.2fr_1fr]">
         <ProblemHeatmap heatmap={HEATMAP} />
         <AsrLeaderboard asrs={ASRS} />
       </div>
 
       {/* Row 2: Regional Performance + Conversion Funnel */}
-      <div className="grid grid-cols-2 gap-[18px] mb-[18px]">
+      <div className="grid grid-cols-1 gap-[18px] mb-[18px] lg:grid-cols-2">
         <RegionalPerformance regions={REGIONS} />
         <ConversionFunnel steps={FUNNEL} />
       </div>
 
       {/* Row 3: Land Segmentation + Data Quality */}
-      <div className="grid grid-cols-2 gap-[18px] mb-[18px]">
+      <div className="grid grid-cols-1 gap-[18px] mb-[18px] lg:grid-cols-2">
         <LandSegmentation segments={LAND_SEGMENTS} />
         <DataQualityScore quality={DATA_QUALITY} />
       </div>

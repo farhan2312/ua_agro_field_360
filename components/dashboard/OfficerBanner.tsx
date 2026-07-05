@@ -47,7 +47,7 @@ export function OfficerBanner() {
         </div>
       </div>
 
-      <div className="mb-5 grid grid-cols-2 gap-[18px]">
+      <div className="mb-5 grid grid-cols-1 gap-[18px] lg:grid-cols-2">
         <Card className="p-[22px]">
           <div className="mb-3.5 text-[15px] font-bold text-[#1A1C1A]">
             Today&apos;s Schedule

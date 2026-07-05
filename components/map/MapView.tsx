@@ -155,7 +155,7 @@ export function MapView({
           />
         </div>
 
-        <div className="flex min-w-0 flex-1 overflow-hidden rounded-[14px] border border-black/[0.04] bg-white shadow-card">
+        <div className="relative flex min-w-0 flex-1 overflow-hidden rounded-[14px] border border-black/[0.04] bg-white shadow-card">
           <div className="relative h-[420px] min-w-0 flex-1 overflow-hidden lg:h-[520px]">
             <MapCanvas
               farmers={farmers}

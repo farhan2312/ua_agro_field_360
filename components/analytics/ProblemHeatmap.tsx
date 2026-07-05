@@ -41,7 +41,8 @@ export function ProblemHeatmap({ heatmap }: { heatmap: HeatmapData }) {
       {crops.length === 0 ? (
         <EmptyState title="No problem reports" hint="No crop × issue data for this period." />
       ) : (
-        <>
+        <div className="overflow-x-auto">
+          <div className="min-w-[380px] lg:min-w-0">
           {/* Header row */}
           <div className="grid grid-cols-[80px_repeat(5,1fr)] gap-[3px] mb-[3px]">
             <div />
@@ -78,7 +79,8 @@ export function ProblemHeatmap({ heatmap }: { heatmap: HeatmapData }) {
               })}
             </div>
           ))}
-        </>
+          </div>
+        </div>
       )}
     </AnalyticsCard>
   );

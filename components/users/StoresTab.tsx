@@ -114,7 +114,7 @@ export function StoresTab({ data, canEdit }: { data: StoreMgmtData; canEdit: boo
   return (
     <div>
       {/* KPI strip */}
-      <div className="mb-4 grid grid-cols-5 gap-[12px]">
+      <div className="mb-4 grid grid-cols-2 gap-[12px] sm:grid-cols-3 lg:grid-cols-5">
         <KpiCard value={totals.total} label="Total Stores" />
         <KpiCard value={totals.active} label="Active" />
         <KpiCard value={totals.unmapped} label="⚠ Unmapped" accent="#E65100" onClick={() => setFilter("unmapped")} />
@@ -163,6 +163,8 @@ export function StoresTab({ data, canEdit }: { data: StoreMgmtData; canEdit: boo
 
       {/* Table */}
       <div className="overflow-hidden rounded-[14px] border border-black/[0.03] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+        <div className="overflow-x-auto">
+        <div className="min-w-[920px] lg:min-w-0">
         <div className={`${GRID} border-b border-[#F0F0F0] bg-[#FAFAFA] py-[12px] text-[10.5px] font-semibold uppercase tracking-[0.5px] text-[#9E9E9E]`}>
           <div />
           <div>Store</div>
@@ -261,6 +263,8 @@ export function StoresTab({ data, canEdit }: { data: StoreMgmtData; canEdit: boo
             );
           })
         )}
+        </div>
+        </div>
       </div>
 
       {creating && (

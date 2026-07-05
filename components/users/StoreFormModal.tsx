@@ -55,7 +55,7 @@ export function StoreFormModal({
         onClose={onClose}
       />
       <div className="px-6 py-5">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label className={labelCls}>Store Code *</label>
             <input className={inputCls} value={code} onChange={(e) => setCode(e.target.value)} placeholder="e.g. AGRO0123" />

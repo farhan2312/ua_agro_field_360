@@ -36,19 +36,21 @@ export function Header({ role, counts }: { role: RoleKey; counts: HeaderCounts }
   const isAdmin = role === "sysadmin";
 
   return (
-    <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-line-warm bg-white px-8">
-      <div>
-        <div className="text-xl font-bold text-ink">{title}</div>
-        {subtitle && <div className="mt-px text-[11.5px] text-ink-muted">{subtitle}</div>}
+    <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-3 border-b border-line-warm bg-white px-4 lg:px-8">
+      <div className="min-w-0">
+        <div className="truncate text-lg font-bold text-ink lg:text-xl">{title}</div>
+        {subtitle && <div className="mt-px truncate text-[11.5px] text-ink-muted">{subtitle}</div>}
       </div>
 
-      <div className="flex items-center gap-3">
-        <SyncBadge />
+      <div className="flex flex-none items-center gap-2 lg:gap-3">
+        <span className="hidden sm:inline-flex">
+          <SyncBadge />
+        </span>
 
         {isAdmin && (
-          <span className="inline-flex items-center gap-1.5 rounded-[20px] border border-gold-200 bg-orange-50 px-3.5 py-1.5 text-[11px] font-semibold text-orange">
+          <span className="inline-flex items-center gap-1.5 rounded-[20px] border border-gold-200 bg-orange-50 px-2.5 py-1.5 text-[11px] font-semibold text-orange lg:px-3.5">
             <ShieldIcon className="text-orange" />
-            Admin Mode
+            <span className="hidden sm:inline">Admin Mode</span>
           </span>
         )}
 

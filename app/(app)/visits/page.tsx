@@ -155,6 +155,8 @@ export default async function VisitRepoPage({
       />
 
       <div className="rounded-[14px] border border-black/[0.03] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)] overflow-hidden">
+        <div className="overflow-x-auto">
+        <div className="min-w-[860px] lg:min-w-0">
         <div className="grid grid-cols-[0.5fr_1.4fr_0.8fr_0.8fr_0.8fr_0.7fr_0.6fr_0.6fr] px-[22px] py-[13px] bg-[#FAFAFA] border-b border-[#F0F0F0] text-[10.5px] font-semibold text-[#9E9E9E] uppercase tracking-[0.5px]">
           <div>Date</div>
           <div>Farmer</div>
@@ -178,6 +180,8 @@ export default async function VisitRepoPage({
             </Link>
           ))
         )}
+        </div>
+        </div>
       </div>
     </div>
   );

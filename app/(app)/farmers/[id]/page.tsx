@@ -143,7 +143,7 @@ export default async function FarmerDetailPage({
       <BackLink />
 
       {/* Top grid — Profile + Store + 2 KPI minis */}
-      <div className="grid grid-cols-4 gap-4 mb-[18px]">
+      <div className="grid grid-cols-1 gap-4 mb-[18px] sm:grid-cols-2 lg:grid-cols-4">
         <FarmerProfileCard farmer={detail} />
         {detail.store && <StoreAssignmentCard store={detail.store} />}
         <KpiMini
@@ -161,7 +161,7 @@ export default async function FarmerDetailPage({
       </div>
 
       {/* Middle grid — Sales History + Visit Log */}
-      <div className="grid grid-cols-[1.2fr_1fr] gap-[18px] mb-[18px]">
+      <div className="grid grid-cols-1 gap-[18px] mb-[18px] lg:grid-cols-[1.2fr_1fr]">
         <SalesHistoryCard sales={detail.sales} />
         <VisitReportsCard visits={detail.visitLog} count={detail.visitCount} />
       </div>

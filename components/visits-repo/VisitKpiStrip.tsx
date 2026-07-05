@@ -71,7 +71,7 @@ export function VisitKpiStrip({
 }) {
   const values = { total, followup, officers, farmers };
   return (
-    <div className="grid grid-cols-4 gap-[14px] mb-5">
+    <div className="grid grid-cols-2 gap-[14px] mb-5 lg:grid-cols-4">
       {KPIS.map((k) => (
         <div
           key={k.key}

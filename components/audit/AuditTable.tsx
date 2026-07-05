@@ -49,6 +49,8 @@ export function AuditTable({ rows }: { rows: AuditRowData[] }) {
   return (
     <div className="animate-fadeUp">
       <div className="overflow-hidden rounded-[14px] border border-black/[0.03] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+        <div className="overflow-x-auto">
+        <div className="min-w-[680px] lg:min-w-0">
         <div
           className={cn(
             GRID,
@@ -73,6 +75,8 @@ export function AuditTable({ rows }: { rows: AuditRowData[] }) {
             <AuditRow key={row.id} row={row} isLast={i === rows.length - 1} />
           ))
         )}
+        </div>
+        </div>
       </div>
     </div>
   );

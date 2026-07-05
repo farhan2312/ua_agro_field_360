@@ -21,7 +21,7 @@ export function SegmentSummaryCards({ cards }: { cards: SegmentCardVM[] }) {
   }
 
   return (
-    <div className="grid grid-cols-4 gap-[14px] mb-5">
+    <div className="grid grid-cols-2 gap-[14px] mb-5 lg:grid-cols-4">
       {cards.map((sc) => (
         <button
           key={sc.label}

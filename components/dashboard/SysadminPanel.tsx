@@ -33,7 +33,7 @@ export function SysadminPanel({
 }) {
   return (
     <>
-      <div className="mb-5 grid grid-cols-4 gap-[18px]">
+      <div className="mb-5 grid grid-cols-2 gap-[18px] lg:grid-cols-4">
         {SYS_KPI_CARDS.map((c) => (
           <Card key={c.label} className="p-[22px]">
             <div className="text-[11px] font-semibold uppercase tracking-[0.8px] text-[#9E9E9E]">
@@ -54,7 +54,7 @@ export function SysadminPanel({
 
       <EditKpiButton kpi={kpi} />
 
-      <div className="grid grid-cols-2 gap-[18px]">
+      <div className="grid grid-cols-1 gap-[18px] lg:grid-cols-2">
         <Card className="p-[22px]">
           <div className="mb-3.5 text-[15px] font-bold text-[#1A1C1A]">
             Quick Actions

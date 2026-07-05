@@ -57,7 +57,7 @@ export function EditKpiButton({ kpi }: { kpi: KpiData }) {
           subtitle="Override the headline dashboard metrics"
           onClose={() => setOpen(false)}
         />
-        <div className="grid grid-cols-2 gap-4 px-6 py-5">
+        <div className="grid grid-cols-1 gap-4 px-6 py-5 sm:grid-cols-2">
           {FIELDS.map((f) => (
             <label key={f.key} className="flex flex-col gap-1.5">
               <span className="text-[11px] font-semibold uppercase tracking-[0.5px] text-ink-500">

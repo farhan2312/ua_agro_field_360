@@ -158,7 +158,7 @@ function NewProjectForm({
   return (
     <div className="mb-5 rounded-[14px] border-2 border-dashed border-[#2E7D32] bg-white p-6 shadow-sm">
       <div className="mb-4 text-[15px] font-bold text-[#1A1C1A]">Create New Project / Action</div>
-      <div className="mb-[14px] grid grid-cols-2 gap-[14px]">
+      <div className="mb-[14px] grid grid-cols-1 gap-[14px] lg:grid-cols-2">
         <div>
           <div className={labelCls}>Project Title *</div>
           <input

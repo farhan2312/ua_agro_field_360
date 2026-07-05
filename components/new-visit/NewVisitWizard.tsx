@@ -464,7 +464,7 @@ export function NewVisitWizard({
             )}
 
             {/* Farmer details grid */}
-            <div className="mb-[18px] grid grid-cols-2 gap-4">
+            <div className="mb-[18px] grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <FieldLabel>Farmer Name *</FieldLabel>
                 <input
@@ -648,7 +648,7 @@ export function NewVisitWizard({
               />
             </div>
 
-            <div className="mb-5 grid grid-cols-2 gap-4">
+            <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <FieldLabel>Season *</FieldLabel>
                 <ChipGroup
@@ -672,7 +672,7 @@ export function NewVisitWizard({
 
             {/* Products */}
             <GroupHeader icon={<BoxIcon />} title="Products" />
-            <div className="mb-6 grid grid-cols-2 gap-4">
+            <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <SectionCard title="Currently Using">
                 <ChipGroupWithOther
                   multi
@@ -701,7 +701,7 @@ export function NewVisitWizard({
 
             {/* Issues & Risks */}
             <GroupHeader icon={<AlertIcon />} title="Issues & Risks" />
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <SectionCard title="Current Problem">
                 <ChipGroupWithOther
                   multi

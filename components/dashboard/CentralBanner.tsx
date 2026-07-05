@@ -47,7 +47,7 @@ export function CentralBanner() {
   return (
     <>
       <div
-        className="mb-5 grid grid-cols-5 gap-5 rounded-[14px] px-7 py-[22px] text-white"
+        className="mb-5 grid grid-cols-2 gap-5 rounded-[14px] px-5 py-[18px] text-white lg:grid-cols-5 lg:px-7 lg:py-[22px]"
         style={{ background: "linear-gradient(135deg,#4A148C,#7B1FA2,#9C27B0)" }}
       >
         {ORG_STATS.map((s) => (
@@ -61,7 +61,7 @@ export function CentralBanner() {
         ))}
       </div>
 
-      <div className="mb-5 grid grid-cols-2 gap-[18px]">
+      <div className="mb-5 grid grid-cols-1 gap-[18px] lg:grid-cols-2">
         <Card className="p-[22px]">
           <div className="mb-3.5 text-[15px] font-bold text-[#1A1C1A]">
             Region-wise Performance
@@ -125,7 +125,7 @@ export function CentralBanner() {
         </Card>
       </div>
 
-      <div className="mb-5 grid grid-cols-3 gap-3.5">
+      <div className="mb-5 grid grid-cols-1 gap-3.5 sm:grid-cols-3">
         {ALERT_CARDS.map((c) => (
           <Card
             key={c.label}

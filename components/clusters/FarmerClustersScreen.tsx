@@ -57,7 +57,7 @@ export function FarmerClustersScreen({ clusters, farmers, stores }: Props) {
       {hasNoCluster ? (
         <EmptyClusters onCreate={() => setModalOpen(true)} />
       ) : (
-        <div className="grid grid-cols-[1.1fr_1.6fr] gap-[18px]">
+        <div className="grid grid-cols-1 gap-[18px] lg:grid-cols-[1.1fr_1.6fr]">
           {/* Left — cluster list */}
           <div className="flex flex-col gap-[10px]">
             {clusters.map((c) => (

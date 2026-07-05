@@ -11,7 +11,7 @@ const CELLS = [
 
 export function HeroKpiBanner() {
   return (
-    <div className="rounded-[14px] px-7 py-[22px] mb-5 grid grid-cols-4 gap-5 text-white bg-[linear-gradient(135deg,#1B5E20,#2E7D32,#43A047)]">
+    <div className="rounded-[14px] px-5 py-[18px] mb-5 grid grid-cols-2 gap-5 text-white bg-[linear-gradient(135deg,#1B5E20,#2E7D32,#43A047)] lg:px-7 lg:py-[22px] lg:grid-cols-4">
       {CELLS.map((c) => (
         <div key={c.label}>
           <div className="text-[10px] opacity-70 uppercase tracking-[0.8px] mb-1.5">

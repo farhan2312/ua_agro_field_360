@@ -50,7 +50,7 @@ export function FarmerFilterBar({
   }
 
   return (
-    <div className="flex gap-3 mb-4 items-center">
+    <div className="flex flex-wrap gap-3 mb-4 items-center">
       <input
         type="text"
         placeholder="Search by name, village, or mobile..."
