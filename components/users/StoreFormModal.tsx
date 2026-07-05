@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
 import { createStoreAction, updateStoreAction } from "@/app/actions/stores";
 import type { StoreMgmtRow, RegionalOption } from "./types";
@@ -27,12 +27,33 @@ export function StoreFormModal({
   const [name, setName] = useState(store?.name ?? "");
   const [status, setStatus] = useState(store?.status || "Active");
   const [zone, setZone] = useState(store?.zone ?? "");
-  const [regionalManager, setRM] = useState(store?.regionalManager ?? "");
+  // The stored RM is a free-text name that may (case/space-insensitively) match an
+  // approved regional-manager account, or be an imported "unverified" name. Canonicalise
+  // to the account's exact name when it matches so the <select> value lines up with an option.
+  const rmMatch = regionals.find(
+    (r) => r.name.trim().toUpperCase() === (store?.regionalManager ?? "").trim().toUpperCase(),
+  );
+  const [regionalManager, setRM] = useState(
+    rmMatch ? rmMatch.name : store?.regionalManager ?? "",
+  );
   const [address, setAddress] = useState(store?.address ?? "");
   const [lat, setLat] = useState(store?.lat != null ? String(store.lat) : "");
   const [lng, setLng] = useState(store?.lng != null ? String(store.lng) : "");
   const [err, setErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
+
+  // Names of the real regional-manager accounts (normalised, matching the StoresTab badge).
+  const rmNormSet = useMemo(
+    () => new Set(regionals.map((r) => r.name.trim().toUpperCase())),
+    [regionals],
+  );
+  // The store's original RM name when it has no matching account. Preserved as a reselectable
+  // <option> for the whole edit session (derived from the INITIAL value, not the live selection),
+  // so picking a real manager can always be undone without silently dropping the imported name.
+  const initialUnverifiedRM = useMemo(() => {
+    const raw = (store?.regionalManager ?? "").trim();
+    return raw && !rmNormSet.has(raw.toUpperCase()) ? raw : "";
+  }, [store, rmNormSet]);
 
   function submit() {
     setErr(null);
@@ -81,10 +102,22 @@ export function StoreFormModal({
           </div>
           <div>
             <label className={labelCls}>Regional Manager</label>
-            <input className={inputCls} value={regionalManager} onChange={(e) => setRM(e.target.value)} list="sfm-rms" placeholder="name" />
-            <datalist id="sfm-rms">
-              {regionals.map((r) => <option key={r.id} value={r.name} />)}
-            </datalist>
+            <select className={inputCls} value={regionalManager} onChange={(e) => setRM(e.target.value)}>
+              <option value="">— Unassigned —</option>
+              {initialUnverifiedRM && (
+                <option value={initialUnverifiedRM}>{initialUnverifiedRM} — keep (unverified)</option>
+              )}
+              {regionals.map((r) => (
+                <option key={r.id} value={r.name}>
+                  {r.zone ? `${r.name} · ${r.zone}` : r.name}
+                </option>
+              ))}
+            </select>
+            {regionals.length === 0 && (
+              <div className="mt-1 text-[10.5px] text-ink-muted">
+                No approved regional-manager accounts yet — approve one in the Users tab to assign it here.
+              </div>
+            )}
           </div>
           <div className="col-span-2">
             <label className={labelCls}>Address</label>
