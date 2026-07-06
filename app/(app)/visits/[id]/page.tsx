@@ -24,9 +24,38 @@ type VisitRow = {
   purpose: string | null;
   notes: string | null;
   officerName: string | null;
+  visitMode: string | null;
   gpsLat: number | null;
   gpsLng: number | null;
   segment: string | null;
+  // Captured wizard fields
+  soilType: string | null;
+  soilTesting: string | null;
+  waterSource: string[];
+  mainCrop: string | null;
+  crops: string[];
+  otherCrops: string | null;
+  season: string | null;
+  cropInsured: boolean;
+  landHoldingUnit: string | null;
+  products: string[];
+  productRequired: string[];
+  currentProblem: string[];
+  cropRisk: string[];
+  dangerZone: string[];
+  annualExpense: string | null;
+  purchaseFreq: string | null;
+  otherShops: string | null;
+  fpoMember: boolean;
+  fpoName: string | null;
+  contractFarming: boolean;
+  contractDetail: string | null;
+  dairyServices: boolean;
+  dairyDetail: string | null;
+  whatsappAvail: boolean;
+  whatsappNumber: string | null;
+  photos: string[];
+  voiceNotes: string[];
   farmer: {
     id: number;
     name: string;
@@ -52,9 +81,89 @@ function gpsString(lat: number | null, lng: number | null): { text: string; veri
   return { text: "Not captured", verified: false };
 }
 
-export default async function VisitDetailPage({ params }: { params: { id: string } }) {
+/** A full, human display date: prefer the stored display string, else format visitedAt. */
+function displayDate(dateStr: string | null, visitedAt: Date | null): string {
+  if (dateStr && dateStr.trim()) return dateStr.trim();
+  if (visitedAt)
+    return visitedAt.toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  return "";
+}
+
+/** An empty-but-valid detail record (used when the DB is unavailable pre-seed). */
+function emptyDetail(id: number, justCreated: boolean): VisitDetailData {
+  return {
+    vid: `VIS-${String(id).padStart(4, "0")}`,
+    date: "",
+    purpose: "",
+    notes: "",
+    officer: "",
+    village: "",
+    district: "",
+    crop: "",
+    land: "",
+    segment: "",
+    storeName: "",
+    typeColor: visitTypeColor(null),
+    storeColor: "#9E9E9E",
+    followup: "None",
+    followupBg: "#E8F5E9",
+    followupColor: "#2E7D32",
+    segBg: "#F5F5F5",
+    segColor: "#757575",
+    farmerName: "",
+    farmerMobile: "",
+    init: "",
+    avatarBg: "#2E7D32",
+    farmerId: null,
+    recs: recommendationsFor(null),
+    gps: "Not captured",
+    gpsVerified: false,
+    mainCrop: "",
+    crops: [],
+    otherCrops: "",
+    soilType: "",
+    soilTesting: "",
+    waterSource: [],
+    season: "",
+    cropInsured: false,
+    landHolding: "",
+    products: [],
+    productRequired: [],
+    currentProblem: [],
+    cropRisk: [],
+    dangerZone: [],
+    annualExpense: "",
+    purchaseFreq: "",
+    otherShops: "",
+    fpoMember: false,
+    fpoName: "",
+    contractFarming: false,
+    contractDetail: "",
+    dairyServices: false,
+    dairyDetail: "",
+    whatsappAvail: false,
+    whatsappNumber: "",
+    photos: [],
+    voiceNotes: [],
+    visitMode: "",
+    justCreated,
+  };
+}
+
+export default async function VisitDetailPage({
+  params,
+  searchParams,
+}: {
+  params: { id: string };
+  searchParams?: { created?: string };
+}) {
   const id = Number(params.id);
   if (!Number.isInteger(id) || id <= 0) notFound();
+  const justCreated = searchParams?.created === "1";
 
   let visit: VisitRow | null = null;
   let dbError = false;
@@ -68,9 +177,37 @@ export default async function VisitDetailPage({ params }: { params: { id: string
         purpose: true,
         notes: true,
         officerName: true,
+        visitMode: true,
         gpsLat: true,
         gpsLng: true,
         segment: true,
+        soilType: true,
+        soilTesting: true,
+        waterSource: true,
+        mainCrop: true,
+        crops: true,
+        otherCrops: true,
+        season: true,
+        cropInsured: true,
+        landHoldingUnit: true,
+        products: true,
+        productRequired: true,
+        currentProblem: true,
+        cropRisk: true,
+        dangerZone: true,
+        annualExpense: true,
+        purchaseFreq: true,
+        otherShops: true,
+        fpoMember: true,
+        fpoName: true,
+        contractFarming: true,
+        contractDetail: true,
+        dairyServices: true,
+        dairyDetail: true,
+        whatsappAvail: true,
+        whatsappNumber: true,
+        photos: true,
+        voiceNotes: true,
         farmer: {
           select: {
             id: true,
@@ -90,63 +227,32 @@ export default async function VisitDetailPage({ params }: { params: { id: string
     dbError = true;
   }
 
-  if (dbError) {
-    // DB unavailable (pre-seed) — render an empty-but-valid layout rather than crashing.
-    const empty: VisitDetailData = {
-      vid: `VIS-${String(id).padStart(4, "0")}`,
-      date: "",
-      purpose: "",
-      notes: "",
-      officer: "",
-      village: "",
-      district: "",
-      crop: "",
-      land: "",
-      segment: "",
-      storeName: "",
-      typeColor: visitTypeColor(null),
-      storeColor: "#9E9E9E",
-      followup: "None",
-      followupBg: "#E8F5E9",
-      followupColor: "#2E7D32",
-      segBg: "#F5F5F5",
-      segColor: "#757575",
-      farmerName: "",
-      farmerMobile: "",
-      init: "",
-      avatarBg: "#2E7D32",
-      farmerId: null,
-      recs: recommendationsFor(null),
-      gps: "Not captured",
-      gpsVerified: false,
-      year: "",
-    };
-    return <VisitDetailView data={empty} />;
-  }
-
+  if (dbError) return <VisitDetailView data={emptyDetail(id, justCreated)} />;
   if (!visit) notFound();
 
   // Segment: prefer the visit's own segment, fall back to the farmer's.
   const segEnum = visit.segment ?? visit.farmer?.segment ?? null;
-  const segLabel: SegmentLabel | "" = segEnum
-    ? SEGMENT_ENUM_TO_LABEL[segEnum] ?? ""
-    : "";
+  const segLabel: SegmentLabel | "" = segEnum ? SEGMENT_ENUM_TO_LABEL[segEnum] ?? "" : "";
 
   const needsFollowup = followupNeeded(visit.purpose);
-  const year = visit.visitedAt ? String(visit.visitedAt.getFullYear()) : "2026";
-
   const gps = gpsString(visit.gpsLat, visit.gpsLng);
+
+  // Header "Crop"/"Land" reflect what THIS visit captured, falling back to the farmer record.
+  const headerCrop = visit.mainCrop || visit.farmer?.crop || "";
+  const headerLand =
+    visit.landHoldingUnit ||
+    (visit.farmer?.land != null ? `${visit.farmer.land} acres` : "");
 
   const data: VisitDetailData = {
     vid: `VIS-${String(visit.id).padStart(4, "0")}`,
-    date: visit.date ?? "",
+    date: displayDate(visit.date, visit.visitedAt),
     purpose: visit.purpose ?? "",
     notes: visit.notes ?? "",
     officer: visit.officerName ?? "",
     village: visit.farmer?.village ?? "",
     district: visit.farmer?.district ?? "",
-    crop: visit.farmer?.crop ?? "",
-    land: visit.farmer?.land != null ? String(visit.farmer.land) : "",
+    crop: headerCrop,
+    land: headerLand,
     segment: segLabel,
     storeName: shortStoreName(visit.store?.name),
     typeColor: visitTypeColor(visit.purpose),
@@ -164,7 +270,35 @@ export default async function VisitDetailPage({ params }: { params: { id: string
     recs: recommendationsFor(visit.purpose),
     gps: gps.text,
     gpsVerified: gps.verified,
-    year,
+    mainCrop: visit.mainCrop ?? "",
+    crops: visit.crops ?? [],
+    otherCrops: visit.otherCrops ?? "",
+    soilType: visit.soilType ?? "",
+    soilTesting: visit.soilTesting ?? "",
+    waterSource: visit.waterSource ?? [],
+    season: visit.season ?? "",
+    cropInsured: visit.cropInsured,
+    landHolding: visit.landHoldingUnit ?? "",
+    products: visit.products ?? [],
+    productRequired: visit.productRequired ?? [],
+    currentProblem: visit.currentProblem ?? [],
+    cropRisk: visit.cropRisk ?? [],
+    dangerZone: visit.dangerZone ?? [],
+    annualExpense: visit.annualExpense ?? "",
+    purchaseFreq: visit.purchaseFreq ?? "",
+    otherShops: visit.otherShops ?? "",
+    fpoMember: visit.fpoMember,
+    fpoName: visit.fpoName ?? "",
+    contractFarming: visit.contractFarming,
+    contractDetail: visit.contractDetail ?? "",
+    dairyServices: visit.dairyServices,
+    dairyDetail: visit.dairyDetail ?? "",
+    whatsappAvail: visit.whatsappAvail,
+    whatsappNumber: visit.whatsappNumber ?? "",
+    photos: visit.photos ?? [],
+    voiceNotes: visit.voiceNotes ?? [],
+    visitMode: visit.visitMode ?? "",
+    justCreated,
   };
 
   return <VisitDetailView data={data} />;

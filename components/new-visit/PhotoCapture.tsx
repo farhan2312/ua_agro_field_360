@@ -62,6 +62,7 @@ export function PhotoCapture({
 }) {
   const [cameraOpen, setCameraOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [facing, setFacing] = useState<"environment" | "user">("environment");
   const streamRef = useRef<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
@@ -105,7 +106,7 @@ export function PhotoCapture({
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
+        video: { facingMode: facing },
       });
       // The user may have left step 4 while the permission prompt was open.
       if (!mountedRef.current) {
@@ -118,6 +119,32 @@ export function PhotoCapture({
       // Camera denied/unavailable. We can't reopen the native capture input here
       // (the user gesture is consumed across the await), so guide to Gallery.
       setError("Camera unavailable. Use Gallery, or allow camera access in your browser settings.");
+    }
+  };
+
+  // Flip between the rear (environment) and front (user) camera while the preview
+  // is open — acquire a fresh stream, then swap it onto the live <video>.
+  const switchCamera = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) return;
+    const nextFacing = facing === "environment" ? "user" : "environment";
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: nextFacing },
+      });
+      if (!mountedRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      stopStream();
+      streamRef.current = stream;
+      setFacing(nextFacing);
+      const v = videoRef.current;
+      if (v) {
+        v.srcObject = stream;
+        void v.play().catch(() => {});
+      }
+    } catch {
+      setError("Could not switch camera — this device may have only one.");
     }
   };
 
@@ -215,14 +242,24 @@ export function PhotoCapture({
 
       <Modal open={cameraOpen} onClose={closeCamera} className="max-w-[540px]">
         <div className="p-4">
-          <div className="mb-3 overflow-hidden rounded-xl bg-black">
+          <div className="relative mb-3 overflow-hidden rounded-xl bg-black">
             <video
               ref={videoRef}
               autoPlay
               playsInline
               muted
               className="max-h-[62vh] w-full object-contain"
+              style={{ transform: facing === "user" ? "scaleX(-1)" : undefined }}
             />
+            <button
+              type="button"
+              onClick={switchCamera}
+              aria-label="Switch camera"
+              title="Switch camera"
+              className="absolute right-3 top-3 flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-[18px] text-white hover:bg-black/70"
+            >
+              ⟳
+            </button>
           </div>
           <div className="flex gap-2">
             <button

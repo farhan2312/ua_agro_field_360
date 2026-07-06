@@ -83,6 +83,7 @@ export async function submitVisitAction(
 ): Promise<void> {
   const persona = await getPersona();
   const officerName = persona.name;
+  let newVisitId: number | undefined;
 
   try {
     let farmerId: number | undefined;
@@ -132,10 +133,15 @@ export async function submitVisitAction(
       }
     }
 
-    await prisma.visit.create({
+    const createdVisit = await prisma.visit.create({
       data: {
         farmerId,
         officerName,
+        date: new Date().toLocaleDateString("en-GB", {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        }),
         purpose: form.visitPurpose || null,
         type: form.visitPurpose || null,
         visitMode: form.visitMode,
@@ -180,6 +186,7 @@ export async function submitVisitAction(
         source: "REAL",
       },
     });
+    newVisitId = createdVisit.id;
 
     await prisma.auditLog.create({
       data: {
@@ -200,5 +207,9 @@ export async function submitVisitAction(
     // Tolerate a missing/empty DB — still route the officer onward.
   }
 
-  redirect("/dashboard");
+  // Confirm the submission by landing on the freshly-logged visit (the detail page
+  // shows a success banner when ?created=1). Falls back to the dashboard if the DB
+  // write was skipped (missing/empty DB).
+  if (newVisitId) redirect(`/visits/${newVisitId}?created=1`);
+  redirect("/dashboard?visitLogged=1");
 }

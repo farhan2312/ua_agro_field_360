@@ -17,7 +17,7 @@ import { BucketSlider } from "./BucketSlider";
 import { OtherReveal } from "./OtherReveal";
 import { PhotoCapture } from "./PhotoCapture";
 import { VoiceRecorder } from "./VoiceRecorder";
-import { VILLAGES, DISTRICTS, type WizardOptions } from "./field-options";
+import type { WizardOptions } from "./field-options";
 import { INITIAL_FORM, type VisitForm, type FarmerLookup } from "./types";
 import { submitVisitAction, lookupFarmerByMobile } from "@/app/actions/new-visit";
 
@@ -119,10 +119,16 @@ function SectionCard({
 
 export function NewVisitWizard({
   options,
+  districts,
+  villages,
+  visitReasons,
   primaryIdLabel = "Mobile Number",
   visitReasonRequired = true,
 }: {
   options: WizardOptions;
+  districts: string[];
+  villages: string[];
+  visitReasons: string[];
   primaryIdLabel?: string;
   visitReasonRequired?: boolean;
 }) {
@@ -152,9 +158,10 @@ export function NewVisitWizard({
   const setService = (key: ServiceKey, on: boolean) =>
     setForm((f) => {
       const serviceDetail = { ...f.serviceDetail };
+      // Clear the detail when a service is switched off. Never auto-fill the
+      // WhatsApp number from the mobile — the officer confirms it explicitly
+      // (a "Same as mobile" shortcut is offered on the field).
       if (!on) serviceDetail[key] = "";
-      else if (key === "whatsappAvail" && !serviceDetail.whatsappAvail)
-        serviceDetail.whatsappAvail = f.mobile;
       return { ...f, [key]: on, serviceDetail } as VisitForm;
     });
 
@@ -230,6 +237,42 @@ export function NewVisitWizard({
     geoMounted.current = false;
   }, []);
 
+  // Best-effort reverse geocode (no API key). Fills Village/District from GPS when
+  // they're still empty — the officer can always edit. Silently no-ops offline.
+  async function fillPlaceFromGps(lat: number, lng: number) {
+    try {
+      const res = await fetch(
+        `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`,
+      );
+      if (!res.ok) return;
+      const j = (await res.json()) as {
+        locality?: string;
+        city?: string;
+        principalSubdivision?: string;
+        localityInfo?: {
+          administrative?: { name?: string; description?: string; adminLevel?: number }[];
+        };
+      };
+      if (!geoMounted.current) return;
+      const admin = j.localityInfo?.administrative ?? [];
+      const distEntry =
+        admin.find((a) => /district/i.test(a.description ?? "")) ??
+        admin.find((a) => a.adminLevel === 5);
+      const rawDistrict = (distEntry?.name ?? j.principalSubdivision ?? "").trim();
+      const matched = districts.find(
+        (d) => d.trim().toLowerCase() === rawDistrict.toLowerCase(),
+      );
+      const locality = (j.locality || j.city || "").trim();
+      setForm((f) => ({
+        ...f,
+        village: f.village.trim() ? f.village : locality,
+        district: f.district.trim() ? f.district : matched ?? f.district,
+      }));
+    } catch {
+      /* best-effort — ignore reverse-geocode failures */
+    }
+  }
+
   useEffect(() => {
     if (form.visitMode !== "field") {
       // At-store: never record the farmer's location.
@@ -247,12 +290,11 @@ export function NewVisitWizard({
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         if (!geoMounted.current) return;
-        setForm((f) => ({
-          ...f,
-          gpsLat: Number(pos.coords.latitude.toFixed(6)),
-          gpsLng: Number(pos.coords.longitude.toFixed(6)),
-        }));
+        const lat = Number(pos.coords.latitude.toFixed(6));
+        const lng = Number(pos.coords.longitude.toFixed(6));
+        setForm((f) => ({ ...f, gpsLat: lat, gpsLng: lng }));
         setGeoStatus("done");
+        void fillPlaceFromGps(lat, lng);
       },
       () => {
         if (geoMounted.current) setGeoStatus("error");
@@ -262,6 +304,14 @@ export function NewVisitWizard({
   }, [form.visitMode]);
 
   const visitReasonStar = visitReasonRequired ? " *" : "";
+
+  // Indian mobile: exactly 10 digits, first digit 6–9 (rejects 0000000000, 1234567890, etc.)
+  const mobileValid = /^[6-9]\d{9}$/.test(form.mobile);
+  const step0Valid =
+    mobileValid &&
+    form.name.trim() !== "" &&
+    form.village.trim() !== "" &&
+    (!visitReasonRequired || form.visitPurpose.trim() !== "");
 
   const next = () => setStep((s) => Math.min(s + 1, 4));
   const prev = () => setStep((s) => Math.max(s - 1, 0));
@@ -374,15 +424,25 @@ export function NewVisitWizard({
               <input
                 type="tel"
                 inputMode="numeric"
+                maxLength={10}
                 placeholder="Enter 10-digit mobile number"
                 value={form.mobile}
-                onChange={onText("mobile")}
-                className="w-full rounded-[10px] border-2 border-[#C8E6C9] bg-white px-4 py-[13px] text-[16px] tracking-[1px] outline-none focus:border-[#2E7D32] focus:ring-[3px] focus:ring-[#2E7D32]/[0.12]"
+                onChange={(e) => set("mobile", e.target.value.replace(/\D/g, "").slice(0, 10))}
+                className={`w-full rounded-[10px] border-2 bg-white px-4 py-[13px] text-[16px] tracking-[1px] outline-none focus:ring-[3px] focus:ring-[#2E7D32]/[0.12] ${
+                  form.mobile && !mobileValid
+                    ? "border-[#EF9A9A] focus:border-[#C62828]"
+                    : "border-[#C8E6C9] focus:border-[#2E7D32]"
+                }`}
               />
-              <div className="mt-[7px] text-[11px] text-[#757575]">
-                {lookupStatus === "loading"
-                  ? "Looking up farmer…"
-                  : "Enter a registered number to pull up and edit that farmer's details."}
+              <div
+                className="mt-[7px] text-[11px]"
+                style={{ color: form.mobile && !mobileValid ? "#C62828" : "#757575" }}
+              >
+                {form.mobile && !mobileValid
+                  ? "Enter a valid 10-digit mobile number starting with 6, 7, 8 or 9."
+                  : lookupStatus === "loading"
+                    ? "Looking up farmer…"
+                    : "Enter a registered number to pull up and edit that farmer's details."}
               </div>
             </div>
 
@@ -496,38 +556,44 @@ export function NewVisitWizard({
                   className="w-full rounded-[10px] border-[1.5px] border-[#E0E0E0] px-3.5 py-[11px] text-[14px] outline-none focus:border-[#2E7D32]"
                 />
                 <datalist id="nv-villages">
-                  {VILLAGES.map((v) => (
+                  {villages.map((v) => (
                     <option key={v} value={v} />
                   ))}
                 </datalist>
               </div>
               <div>
                 <FieldLabel>District</FieldLabel>
-                <input
-                  type="text"
-                  list="nv-districts"
-                  placeholder="District"
+                <select
                   value={form.district}
                   onChange={onText("district")}
-                  className="w-full rounded-[10px] border-[1.5px] border-[#E0E0E0] px-3.5 py-[11px] text-[14px] outline-none focus:border-[#2E7D32]"
-                />
-                <datalist id="nv-districts">
-                  {DISTRICTS.map((d) => (
-                    <option key={d} value={d} />
+                  className="w-full rounded-[10px] border-[1.5px] border-[#E0E0E0] bg-white px-3.5 py-[11px] text-[14px] outline-none focus:border-[#2E7D32]"
+                >
+                  <option value="">Select district…</option>
+                  {form.district && !districts.includes(form.district) && (
+                    <option value={form.district}>{form.district}</option>
+                  )}
+                  {districts.map((d) => (
+                    <option key={d} value={d}>{d}</option>
                   ))}
-                </datalist>
+                </select>
               </div>
             </div>
 
             <div className="mb-4">
               <FieldLabel>Visit Reason{visitReasonStar}</FieldLabel>
-              <input
-                type="text"
-                placeholder="e.g. Crop inspection, Product demo, Follow-up..."
+              <select
                 value={form.visitPurpose}
                 onChange={onText("visitPurpose")}
-                className="w-full rounded-[10px] border-[1.5px] border-[#E0E0E0] px-3.5 py-[11px] text-[14px] outline-none focus:border-[#2E7D32]"
-              />
+                className="w-full rounded-[10px] border-[1.5px] border-[#E0E0E0] bg-white px-3.5 py-[11px] text-[14px] outline-none focus:border-[#2E7D32]"
+              >
+                <option value="">Select a reason…</option>
+                {form.visitPurpose && !visitReasons.includes(form.visitPurpose) && (
+                  <option value={form.visitPurpose}>{form.visitPurpose}</option>
+                )}
+                {visitReasons.map((r) => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
             </div>
 
             {form.visitMode === "field" ? (
@@ -577,11 +643,10 @@ export function NewVisitWizard({
 
             <div className="mb-5">
               <FieldLabel>Land Holding *</FieldLabel>
-              <BucketSlider
+              <ChipGroup
                 options={options.landHolding}
                 value={form.landHolding}
                 onChange={(v) => set("landHolding", v)}
-                ariaLabel="Land Holding"
               />
             </div>
 
@@ -802,6 +867,18 @@ export function NewVisitWizard({
                     placeholder={ph}
                     inputMode={key === "whatsappAvail" ? "numeric" : undefined}
                   />
+                  {key === "whatsappAvail" &&
+                    form.whatsappAvail &&
+                    mobileValid &&
+                    form.serviceDetail.whatsappAvail !== form.mobile && (
+                      <button
+                        type="button"
+                        onClick={() => setServiceDetail("whatsappAvail", form.mobile)}
+                        className="mt-2 text-[11px] font-semibold text-[#2E7D32] hover:underline"
+                      >
+                        Same as mobile ({form.mobile})
+                      </button>
+                    )}
                 </div>
               ))}
             </div>
@@ -881,7 +958,13 @@ export function NewVisitWizard({
             <button
               type="button"
               onClick={next}
-              className="rounded-[10px] bg-[#2E7D32] px-8 py-[11px] text-[13px] font-semibold text-white hover:bg-[#1B5E20] active:scale-[0.97]"
+              disabled={step === 0 && !step0Valid}
+              title={
+                step === 0 && !step0Valid
+                  ? "Enter a valid mobile, farmer name, village and visit reason to continue."
+                  : undefined
+              }
+              className="rounded-[10px] bg-[#2E7D32] px-8 py-[11px] text-[13px] font-semibold text-white hover:bg-[#1B5E20] active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-[#2E7D32]"
             >
               Continue
             </button>

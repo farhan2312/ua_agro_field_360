@@ -87,11 +87,29 @@ export const FALLBACK_OPTIONS: Record<FieldKey, string[]> = {
   ],
 };
 
-/** Step-0 <select> options (geo master in the prototype). */
+/** Step-0 geo fallbacks (used only when the DB has no farmers to derive from). */
 export const VILLAGES = [
   "Chandpur", "Barauli", "Khandauli", "Fatehabad", "Sikandra", "Shamsabad",
 ];
 export const DISTRICTS = ["Agra", "Firozabad", "Mainpuri", "Etah", "Mathura"];
+
+/**
+ * Canonical Visit Reason list. A controlled dropdown (not free text) so the same
+ * reason isn't stored under a dozen spelling variants. "Other" is the escape hatch.
+ */
+export const VISIT_REASONS = [
+  "Crop Inspection",
+  "Product Demonstration",
+  "Follow-up Visit",
+  "New Farmer Registration",
+  "Advisory / Recommendation",
+  "Complaint / Issue Resolution",
+  "Order Booking",
+  "Payment Collection",
+  "Soil Testing",
+  "Scheme / Subsidy Info",
+  "Other",
+];
 
 /** Resolved option lists handed to the client wizard (one array per FieldKey). */
 export type WizardOptions = Record<FieldKey, string[]>;

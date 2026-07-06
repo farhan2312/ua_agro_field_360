@@ -30,7 +30,36 @@ export interface VisitDetailData {
   recs: RecCard[];
   gps: string;
   gpsVerified: boolean;
-  year: string;
+  // Captured wizard data
+  mainCrop: string;
+  crops: string[];
+  otherCrops: string;
+  soilType: string;
+  soilTesting: string;
+  waterSource: string[];
+  season: string;
+  cropInsured: boolean;
+  landHolding: string;
+  products: string[];
+  productRequired: string[];
+  currentProblem: string[];
+  cropRisk: string[];
+  dangerZone: string[];
+  annualExpense: string;
+  purchaseFreq: string;
+  otherShops: string;
+  fpoMember: boolean;
+  fpoName: string;
+  contractFarming: boolean;
+  contractDetail: string;
+  dairyServices: boolean;
+  dairyDetail: string;
+  whatsappAvail: boolean;
+  whatsappNumber: string;
+  photos: string[];
+  voiceNotes: string[];
+  visitMode: string;
+  justCreated: boolean;
 }
 
 const CARD =
@@ -45,9 +74,71 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+/** A label with a wrapping chip list (for the multi-select captured arrays). */
+function ChipField({ label, items }: { label: string; items: string[] }) {
+  if (!items || items.length === 0) return null;
+  return (
+    <div>
+      <div className="text-[10px] text-[#9E9E9E] font-semibold uppercase">{label}</div>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {items.map((t, i) => (
+          <span
+            key={i}
+            className="rounded-full bg-[#F5F7F5] px-2.5 py-[3px] text-[11.5px] text-[#424242]"
+          >
+            {t}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mb-4 text-[15px] font-bold text-[#1A1C1A]">{children}</div>
+  );
+}
+
 export function VisitDetailView({ data }: { data: VisitDetailData }) {
+  const hasLandCrops =
+    !!(data.soilType || data.soilTesting || data.season || data.otherCrops) ||
+    data.waterSource.length > 0 ||
+    data.crops.length > 0 ||
+    data.cropInsured;
+  const hasProductsIssues =
+    data.products.length > 0 ||
+    data.productRequired.length > 0 ||
+    data.currentProblem.length > 0 ||
+    data.cropRisk.length > 0 ||
+    data.dangerZone.length > 0;
+  const hasCommercial =
+    !!(data.annualExpense || data.purchaseFreq || data.otherShops) ||
+    data.fpoMember ||
+    data.contractFarming ||
+    data.dairyServices ||
+    data.whatsappAvail;
+
   return (
     <div className="motion-safe:animate-[fadeUp_0.4s_ease-out]">
+      {/* Success banner (shown right after a submission) */}
+      {data.justCreated && (
+        <div className="mb-5 flex flex-wrap items-center gap-2.5 rounded-[12px] border border-[#A5D6A7] bg-[#E8F5E9] px-4 py-3">
+          <svg width="18" height="18" viewBox="0 0 20 20" fill="#2E7D32">
+            <path d="M10 1a9 9 0 100 18 9 9 0 000-18zm4.2 6.7l-5 5a.75.75 0 01-1.06 0l-2.3-2.3a.75.75 0 011.06-1.06l1.77 1.77 4.47-4.47a.75.75 0 011.06 1.06z" />
+          </svg>
+          <span className="text-[13.5px] font-semibold text-[#2E7D32]">
+            Visit logged successfully.
+          </span>
+          <Link
+            href="/visits/new"
+            className="ml-auto rounded-[10px] bg-[#2E7D32] px-3.5 py-1.5 text-[12px] font-semibold text-white hover:bg-[#1B5E20]"
+          >
+            Log another visit
+          </Link>
+        </div>
+      )}
+
       {/* Back nav */}
       <Link
         href="/visits"
@@ -67,7 +158,7 @@ export function VisitDetailView({ data }: { data: VisitDetailData }) {
             <div className="flex items-center justify-between mb-4">
               <div>
                 <div className="text-[10.5px] font-bold text-[#9E9E9E] uppercase tracking-[0.7px] mb-1">
-                  Visit ID · {data.date}
+                  Visit ID{data.date ? ` · ${data.date}` : ""}
                 </div>
                 <div className="text-[18px] font-bold text-[#1A1C1A]">{data.vid}</div>
               </div>
@@ -82,17 +173,21 @@ export function VisitDetailView({ data }: { data: VisitDetailData }) {
             {/* Visit-type badge */}
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] bg-[#F5F7F5] mb-4">
               <div className="w-[10px] h-[10px] rounded-full" style={{ background: data.typeColor }} />
-              <span className="text-[13px] font-semibold text-[#1A1C1A]">{data.purpose}</span>
+              <span className="text-[13px] font-semibold text-[#1A1C1A]">
+                {data.purpose || "Visit"}
+              </span>
+              {data.visitMode && (
+                <span className="text-[11px] font-semibold text-[#9E9E9E]">
+                  · {data.visitMode === "store" ? "At Store" : "Field Visit"}
+                </span>
+              )}
             </div>
 
             {/* Field rows */}
             <div className="flex flex-col border border-[#F0F0F0] rounded-[10px] overflow-hidden">
               <div className="grid grid-cols-2 px-[14px] py-[9px] bg-[#FAFAFA] border-b border-[#F5F5F5]">
                 <Field label="Officer">{data.officer || "—"}</Field>
-                <Field label="Date">
-                  {data.date}
-                  {data.date && data.year ? `, ${data.year}` : data.year}
-                </Field>
+                <Field label="Date">{data.date || "—"}</Field>
               </div>
               <div className="grid grid-cols-2 px-[14px] py-[9px] border-b border-[#F5F5F5]">
                 <Field label="Village">{data.village || "—"}</Field>
@@ -100,7 +195,7 @@ export function VisitDetailView({ data }: { data: VisitDetailData }) {
               </div>
               <div className="grid grid-cols-2 px-[14px] py-[9px] bg-[#FAFAFA] border-b border-[#F5F5F5]">
                 <Field label="Crop">{data.crop || "—"}</Field>
-                <Field label="Land">{data.land ? `${data.land} acres` : "—"}</Field>
+                <Field label="Land">{data.land || "—"}</Field>
               </div>
               <div className="grid grid-cols-2 px-[14px] py-[9px]">
                 <div>
@@ -148,7 +243,9 @@ export function VisitDetailView({ data }: { data: VisitDetailData }) {
               </div>
               <div>
                 <div className="text-[15px] font-bold text-[#1A1C1A]">{data.farmerName || "—"}</div>
-                <div className="text-[11.5px] text-[#9E9E9E] mt-[2px]">{data.farmerMobile}</div>
+                <div className="text-[11.5px] text-[#9E9E9E] mt-[2px]">
+                  {data.farmerMobile || "No mobile on record"}
+                </div>
               </div>
             </div>
             {data.farmerId != null ? (
@@ -234,6 +331,94 @@ export function VisitDetailView({ data }: { data: VisitDetailData }) {
           </div>
         </div>
       </div>
+
+      {/* ── Captured detail sections (full width) ── */}
+      {hasLandCrops && (
+        <div className={`${CARD} p-[22px] mt-[14px]`}>
+          <SectionTitle>Land &amp; Crop Details</SectionTitle>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-4">
+            {data.soilType && <Field label="Soil Type">{data.soilType}</Field>}
+            {data.soilTesting && <Field label="Soil Testing">{data.soilTesting}</Field>}
+            {data.season && <Field label="Season">{data.season}</Field>}
+            <Field label="Crop Insured">{data.cropInsured ? "Yes" : "No"}</Field>
+            {data.otherCrops && <Field label="Other Crops">{data.otherCrops}</Field>}
+          </div>
+          {(data.waterSource.length > 0 || data.crops.length > 0) && (
+            <div className="mt-4 flex flex-col gap-4">
+              <ChipField label="Water Source" items={data.waterSource} />
+              <ChipField label="Crops Grown" items={data.crops} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {hasProductsIssues && (
+        <div className={`${CARD} p-[22px] mt-[14px]`}>
+          <SectionTitle>Products &amp; Issues</SectionTitle>
+          <div className="flex flex-col gap-4">
+            <ChipField label="Products Currently Using" items={data.products} />
+            <ChipField label="Products Required" items={data.productRequired} />
+            <ChipField label="Current Problems" items={data.currentProblem} />
+            <ChipField label="Crop Risks" items={data.cropRisk} />
+            <ChipField label="Danger Zone" items={data.dangerZone} />
+          </div>
+        </div>
+      )}
+
+      {hasCommercial && (
+        <div className={`${CARD} p-[22px] mt-[14px]`}>
+          <SectionTitle>Commercial &amp; Services</SectionTitle>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-4">
+            {data.annualExpense && <Field label="Annual Expense">{data.annualExpense}</Field>}
+            {data.purchaseFreq && <Field label="Purchase Frequency">{data.purchaseFreq}</Field>}
+            {data.otherShops && <Field label="Other Shops">{data.otherShops}</Field>}
+            {data.fpoMember && <Field label="FPO Member">{data.fpoName || "Yes"}</Field>}
+            {data.contractFarming && (
+              <Field label="Contract Farming">{data.contractDetail || "Yes"}</Field>
+            )}
+            {data.dairyServices && (
+              <Field label="Dairy Services">{data.dairyDetail || "Yes"}</Field>
+            )}
+            {data.whatsappAvail && (
+              <Field label="WhatsApp Number">{data.whatsappNumber || "—"}</Field>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Photos */}
+      {data.photos.length > 0 && (
+        <div className={`${CARD} p-[22px] mt-[14px]`}>
+          <SectionTitle>Photos ({data.photos.length})</SectionTitle>
+          <div className="flex flex-wrap gap-2.5">
+            {data.photos.map((src, i) => (
+              <a
+                key={i}
+                href={src}
+                target="_blank"
+                rel="noreferrer"
+                className="block h-24 w-24 overflow-hidden rounded-[10px] border border-[#E0E0E0]"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={src} alt={`Visit photo ${i + 1}`} className="h-full w-full object-cover" />
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Voice Notes */}
+      {data.voiceNotes.length > 0 && (
+        <div className={`${CARD} p-[22px] mt-[14px]`}>
+          <SectionTitle>Voice Notes ({data.voiceNotes.length})</SectionTitle>
+          <div className="flex flex-col gap-2.5">
+            {data.voiceNotes.map((src, i) => (
+              // eslint-disable-next-line jsx-a11y/media-has-caption
+              <audio key={i} src={src} controls className="w-full" />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
