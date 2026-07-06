@@ -28,7 +28,7 @@ const LEAD: Record<string, "NEW" | "CONTACTED" | "FOLLOWUP" | "CONVERTED" | "DOR
 };
 const PROJ: Record<string, "PLANNED" | "ACTIVE" | "COMPLETED"> = {
   planned: "PLANNED",
-  active: "ACTIVE",
+  active: "ACTIVE",  
   completed: "COMPLETED",
 };
 const MONTHS: Record<string, number> = {

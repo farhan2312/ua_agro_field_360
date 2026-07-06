@@ -1,11 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import {
-  MAP_LAYER_PILLS,
-  LEGEND_META,
-  type MapLayerKey,
-} from "@/lib/map-layers";
+import { LEGEND_META, type MapLayerKey } from "@/lib/map-layers";
 import { cn } from "@/lib/cn";
 import { EmptyState } from "@/components/ui";
 import type { MapFarmer, MapStore, StoreListItem } from "./types";
@@ -14,9 +10,6 @@ import { MapCanvas } from "./MapCanvas";
 import { FarmerDetailPanel } from "./FarmerDetailPanel";
 import { StoreList } from "./StoreList";
 import { StoreFarmersPanel } from "./StoreFarmersPanel";
-
-const LABEL_CHIP =
-  "mr-1 flex-none text-[10.5px] font-bold uppercase tracking-[0.8px] text-[#9E9E9E]";
 
 export function MapView({
   farmers,
@@ -27,7 +20,7 @@ export function MapView({
   stores: MapStore[];
   allStores: StoreListItem[];
 }) {
-  const [layer, setLayer] = useState<MapLayerKey>("segment");
+  const [layer] = useState<MapLayerKey>("segment");
   const [selectedStoreIds, setSelectedStoreIds] = useState<Set<number>>(new Set());
   const [showStorePins, setShowStorePins] = useState(true);
   const [showHeat, setShowHeat] = useState(true);
@@ -86,32 +79,12 @@ export function MapView({
 
   return (
     <div className="animate-[fadeUp_0.4s_ease-out]">
-      {/* Layer controls */}
+      {/* Map display controls */}
       <div className="mb-2.5 flex flex-wrap items-center gap-2">
-        <div className={LABEL_CHIP}>Map Layer:</div>
-        {MAP_LAYER_PILLS.map((ml) => {
-          const active = ml.key === layer;
-          return (
-            <button
-              key={ml.key}
-              type="button"
-              onClick={() => setLayer(ml.key)}
-              className="flex items-center gap-1.5 rounded-[20px] border-[1.5px] px-3.5 py-1.5 text-[12px] font-semibold transition-all hover:opacity-85"
-              style={{
-                background: active ? "#1A3A1A" : "#FFFFFF",
-                color: active ? "#FFFFFF" : "#616161",
-                borderColor: active ? "#1A3A1A" : "#E0E0E0",
-              }}
-            >
-              <span className="h-2 w-2 rounded-[2px]" style={{ background: ml.swatch }} />
-              {ml.label}
-            </button>
-          );
-        })}
         <button
           type="button"
           onClick={fitToSelection}
-          className="ml-auto flex items-center gap-1.5 rounded-[20px] border-[1.5px] border-[#E0E0E0] bg-white px-3.5 py-1.5 text-[11.5px] font-semibold text-[#616161] hover:bg-[#F5F5F5]"
+          className="flex items-center gap-1.5 rounded-[20px] border-[1.5px] border-[#E0E0E0] bg-white px-3.5 py-1.5 text-[11.5px] font-semibold text-[#616161] hover:bg-[#F5F5F5]"
         >
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
             <path d="M1 4V1h3M8 1h3v3M11 8v3H8M4 11H1V8" />
