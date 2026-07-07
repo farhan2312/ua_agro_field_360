@@ -1,0 +1,100 @@
+/** CRM pilot — exclusive campaign segments + crop tags (shared client/server). */
+
+export const CAMPAIGN_SEGMENTS = [
+  "HNI", "POTENTIAL_HNI", "REGULAR", "AT_RISK", "NEW", "LAPSED",
+] as const;
+export type CampaignSegment = (typeof CAMPAIGN_SEGMENTS)[number];
+
+export interface SegMeta {
+  label: string;
+  priority: number;
+  color: string;
+  bg: string;
+  /** Default outreach medium from the sample communication plan. */
+  medium: string;
+}
+
+export const SEGMENT_META: Record<string, SegMeta> = {
+  HNI:           { label: "HNI",           priority: 1, color: "#2E7D32", bg: "#E8F5E9", medium: "1:1 or Call" },
+  POTENTIAL_HNI: { label: "Potential HNI", priority: 2, color: "#1565C0", bg: "#E3F2FD", medium: "1:1 or Call" },
+  REGULAR:       { label: "Regular",       priority: 3, color: "#00897B", bg: "#E0F2F1", medium: "Whatsapp" },
+  AT_RISK:       { label: "At Risk",       priority: 4, color: "#E65100", bg: "#FFF3E0", medium: "Whatsapp + Call" },
+  NEW:           { label: "New",           priority: 5, color: "#7B1FA2", bg: "#F3E5F5", medium: "Whatsapp" },
+  LAPSED:        { label: "Lapsed",        priority: 6, color: "#616161", bg: "#EEEEEE", medium: "Whatsapp + Call" },
+  OTHER:         { label: "Other",         priority: 7, color: "#9E9E9E", bg: "#F5F5F5", medium: "Whatsapp" },
+};
+
+export function segMeta(seg: string | null | undefined): SegMeta {
+  return (seg && SEGMENT_META[seg]) || SEGMENT_META.OTHER;
+}
+
+/** Display order for matrix columns / filters (value tiers first, then lifecycle). */
+export const SEGMENT_COLUMNS: string[] = ["HNI", "POTENTIAL_HNI", "REGULAR", "AT_RISK", "NEW", "LAPSED"];
+
+export const CROP_GROUPS = [
+  { key: "maize", label: "Maize" },
+  { key: "potato", label: "Potato" },
+  { key: "both", label: "Maize + Potato" },
+] as const;
+export type CropGroupKey = (typeof CROP_GROUPS)[number]["key"];
+
+export const CROP_LABEL: Record<string, string> = { maize: "Maize", potato: "Potato" };
+
+/** The 6 default communication-plan rows (seeded into CommTemplate; editable in-app). */
+export const DEFAULT_COMM_TEMPLATES: {
+  segment: CampaignSegment; priority: number; medium: string; offer: string; timingLabel: string; template: string;
+}[] = [
+  {
+    segment: "HNI", priority: 1, medium: "1:1 or Call",
+    offer: "Advance booking + 5% discount", timingLabel: "Jul 20 – Aug 6",
+    template:
+      "[Naam]ji, aapke pichle season ke Maize crop ke liye — is baar Dekalb DKC 9108 ka naya lot aaya hai. Advance booking pe 3% discount available hai. Kya main aapke liye 10 bag reserve kar doon?",
+  },
+  {
+    segment: "POTENTIAL_HNI", priority: 2, medium: "1:1 or Call",
+    offer: "Advance booking + special 5% discount if they reach \"gold\" tier", timingLabel: "Jul 20 – Aug 6",
+    template:
+      "[Naam]ji, aap hamare top customers mein se ek hain. Is maize season mein sirf ₹[gap] aur khareedein aur hamare Gold Tier mein aa jaayein — phir har purchase par 5% extra discount milega hamesha.",
+  },
+  {
+    segment: "REGULAR", priority: 3, medium: "Whatsapp",
+    offer: "Bundle offer", timingLabel: "Week of Aug 1",
+    template:
+      "[Naam]ji, maize season shuru ho raha hai. Pichli baar aapne [last item] liya tha. Is baar seed ke saath NPK 16-16-16 bhi ready rakhein — turant delivery available hai. [Store name] pe aayein ya call karein.",
+  },
+  {
+    segment: "AT_RISK", priority: 4, medium: "Whatsapp + Call",
+    offer: "5% re-engagement discount", timingLabel: "Week of Aug 1 (Whatsapp) · Week of Aug 7 (call)",
+    template:
+      "[Naam]ji, kaafi time ho gaya! Maize ki buwai shuru hone wali hai — stock limited hai. Aapke liye ek special offer: pehli visit pe 5% off on Maize seeds. Aaj hi aayein ya call karein: [number].",
+  },
+  {
+    segment: "NEW", priority: 5, medium: "Whatsapp",
+    offer: "Starter Maize bundle + 5% discount if buying within 6 months of 1st purchase", timingLabel: "Week of Aug 1",
+    template:
+      "[Naam]ji, UA Agro mein swagat hai! Maize ki successful buwai ke liye 3 cheezein zaroori hain: achha seed + basal fertilizer + stem borer protection. Hamare paas complete package hai — aur special discount agar aap [date] tak khareedein.",
+  },
+  {
+    segment: "LAPSED", priority: 6, medium: "Whatsapp + Call",
+    offer: "5% discount + consultation offer", timingLabel: "Week of Aug 1 (Whatsapp) · Week of Aug 7 (call)",
+    template:
+      "[Naam]ji, mujhe pata chala aapne pichle 12 mahine se humse nahi kharida. Kya koi problem thi? Is season ke liye — Maize Dekalb 9108 fresh stock aaya hai, 5% discount aur consultation ke saath. Ek baar zaroor milein.",
+  },
+];
+
+const inr = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
+
+/** Fill a Hindi template's slots for one farmer. */
+export function fillTemplate(
+  template: string,
+  f: { name?: string | null; hniGap?: number | null; lastItem?: string | null; store?: string | null; phone?: string | null; deadline?: string | null },
+): string {
+  const first = (f.name ?? "").trim().split(/\s+/)[0] || "Kisan";
+  return template
+    .replace(/\[Naam\]/g, first)
+    .replace(/\[gap\]/g, f.hniGap != null ? inr(f.hniGap).replace("₹", "") : "—")
+    .replace(/\[last item\]/gi, f.lastItem ?? "apne product")
+    .replace(/\[Store name\]/gi, f.store ?? "hamare store")
+    .replace(/\[number\]/gi, f.phone ?? "")
+    .replace(/\[date\]/gi, f.deadline ?? "");
+}

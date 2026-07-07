@@ -154,6 +154,18 @@ model Farmer {
   createdAt  DateTime    @default(now())
   updatedAt  DateTime    @updatedAt
 
+  // ── CRM segmentation (precomputed by scripts/compute-segments.ts, monthly) ──
+  segmentTags       String[]  @default([]) // regular, loyal, at_risk, lapsed, new, hni, potential_hni
+  campaignSegment   String? // exclusive: HNI|POTENTIAL_HNI|REGULAR|AT_RISK|NEW|LAPSED|OTHER
+  cropTags          String[]  @default([]) // maize, potato
+  p12mSpend         Int? // ₹ spend in past 12 months
+  hniGap            Int? // ₹ to reach HNI (for Potential HNI)
+  lastMaizeItem     String?
+  lastMaizeAt       DateTime?
+  lastPotatoItem    String?
+  lastPotatoAt      DateTime?
+  segmentComputedAt DateTime?
+
   sales  Sale[]
   visits Visit[]
 
@@ -163,6 +175,9 @@ model Farmer {
   @@index([leadStatus])
   @@index([mobile]) // exact-match lookup during New Visit intake/edit
   @@index([source]) // DEMO/REAL filters (clusters, users, map)
+  @@index([campaignSegment])
+  @@index([cropTags], type: Gin)
+  @@index([segmentTags], type: Gin)
 }
 
 model Sale {
@@ -185,6 +200,74 @@ model Sale {
   @@index([farmerId])
   @@index([source])
   @@index([soldAt]) // date-sorted analytics/history
+}
+
+/// Log of monthly sales-invoice uploads (admin Sales Import page).
+model SalesImport {
+  id            Int      @id @default(autoincrement())
+  filename      String
+  fileType      String? // csv | xlsx
+  fileSizeKb    Int?
+  uploadedBy    String?
+  status        String   @default("SUCCESS") // SUCCESS | FAILED
+  lineItems     Int?
+  bills         Int?
+  newCustomers  Int?
+  salesInserted Int?
+  skipped       Int?
+  rangeStart    String?
+  rangeEnd      String?
+  error         String?
+  createdAt     DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// ─────────────────────────── CRM Pilot (segmentation campaigns) ───────────────────────────
+
+/// A targeted outreach campaign over a set of campaign segments + crops.
+model Campaign {
+  id             Int              @id @default(autoincrement())
+  name           String
+  startDate      DateTime
+  endDate        DateTime
+  targetSegments String[]         @default([]) // campaign segments included
+  targetCrops    String[]         @default([]) // maize / potato (empty = all)
+  testPct        Int              @default(75)
+  status         String           @default("DRAFT") // DRAFT | ACTIVE | CLOSED
+  createdAt      DateTime         @default(now())
+  members        CampaignMember[]
+}
+
+/// A farmer enrolled in a campaign (test/control split + outreach log).
+model CampaignMember {
+  id         Int       @id @default(autoincrement())
+  campaignId Int
+  campaign   Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  farmerId   Int
+  segment    String // snapshot at enrolment
+  crop       String?
+  group      String // TEST | CONTROL
+  reached    Boolean   @default(false)
+  reachedAt  DateTime?
+  medium     String? // IN_PERSON | CALL | WHATSAPP
+  reachedBy  String?
+
+  @@unique([campaignId, farmerId])
+  @@index([campaignId])
+}
+
+/// Editable communication plan row per campaign segment (WF3).
+model CommTemplate {
+  id          Int      @id @default(autoincrement())
+  segment     String   @unique // HNI | POTENTIAL_HNI | REGULAR | AT_RISK | NEW | LAPSED
+  priority    Int
+  medium      String
+  offer       String
+  timingLabel String
+  template    String   @db.Text // Hindi text with [Naam] [gap] [last item] [Store] [number] [date]
+  active      Boolean  @default(true)
+  updatedAt   DateTime @updatedAt
 }
 
 // A Visit doubles as the per-farmer visit log entry and the Visit Repository record.

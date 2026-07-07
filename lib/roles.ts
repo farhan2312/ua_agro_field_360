@@ -106,7 +106,9 @@ export const NAV_VISIBILITY: Record<string, (r: RoleKey) => boolean> = {
   leads: (r) => r === "regional" || r === "officer" || r === "sysadmin",
   actions: (r) =>
     r === "regional" || r === "central" || r === "officer" || r === "sysadmin",
+  campaigns: (r) => r === "regional" || r === "central" || r === "sysadmin",
   users: (r) => r === "central" || r === "sysadmin",
+  salesImport: (r) => r === "sysadmin",
   settings: (r) => r === "sysadmin",
   audit: (r) => r === "sysadmin",
 };
@@ -169,12 +171,16 @@ export function viewTitle(
       return ["Visit Detail", ""];
     case "users":
       return ["User Management", "4 active users · Role-based access"];
+    case "salesImport":
+      return ["Sales Import", "Upload monthly invoice data"];
     case "settings":
       return ["System Settings", "Configuration & master data"];
     case "audit":
       return ["Audit Log", "System activity & data changes"];
     case "masterData":
       return ["Master Data", "Manage stores, farmers, users & reference lists"];
+    case "campaigns":
+      return ["Campaigns", "Segmented customer targeting & outreach"];
     default:
       return ["Dashboard", ""];
   }

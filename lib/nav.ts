@@ -2,8 +2,8 @@ import { canAccess, type RoleKey } from "./roles";
 
 export type NavId =
   | "dashboard" | "newVisit" | "visitRepo" | "farmers" | "mapView"
-  | "farmerCluster" | "masterData" | "analytics" | "leads" | "actions"
-  | "users" | "settings" | "audit";
+  | "farmerCluster" | "masterData" | "analytics" | "leads" | "actions" | "campaigns"
+  | "users" | "salesImport" | "settings" | "audit";
 
 /** A "view" can also be a detail variant of a nav id (for header titles). */
 export type ViewId = NavId | "farmerDetail" | "visitDetail" | "projectDetail";
@@ -25,10 +25,12 @@ export const MAIN_NAV: NavItem[] = [
   { id: "analytics", label: "Analytics", href: "/analytics" },
   { id: "leads", label: "Lead Pipeline", href: "/leads" },
   { id: "actions", label: "Action Planner", href: "/actions" },
+  { id: "campaigns", label: "Campaigns", href: "/campaigns" },
 ];
 
 export const ADMIN_NAV: NavItem[] = [
   { id: "users", label: "Users", href: "/users" },
+  { id: "salesImport", label: "Sales Import", href: "/imports" },
   { id: "settings", label: "Settings", href: "/settings" },
   { id: "audit", label: "Audit Log", href: "/audit" },
 ];
@@ -65,11 +67,13 @@ export function routeToView(pathname: string): ViewId {
   if (pathname.startsWith("/farmers")) return "farmers";
   if (/^\/actions\/[^/]+/.test(pathname)) return "projectDetail";
   if (pathname.startsWith("/actions")) return "actions";
+  if (pathname.startsWith("/campaigns")) return "campaigns";
   if (pathname.startsWith("/map")) return "mapView";
   if (pathname.startsWith("/clusters")) return "farmerCluster";
   if (pathname.startsWith("/master-data")) return "masterData";
   if (pathname.startsWith("/analytics")) return "analytics";
   if (pathname.startsWith("/leads")) return "leads";
+  if (pathname.startsWith("/imports")) return "salesImport";
   if (pathname.startsWith("/users")) return "users";
   if (pathname.startsWith("/settings")) return "settings";
   if (pathname.startsWith("/audit")) return "audit";
