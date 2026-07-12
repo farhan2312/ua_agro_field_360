@@ -24,7 +24,6 @@ export const MAIN_NAV: NavItem[] = [
   { id: "masterData", label: "Master Data", href: "/master-data" },
   { id: "analytics", label: "Analytics", href: "/analytics" },
   { id: "leads", label: "Lead Pipeline", href: "/leads" },
-  { id: "actions", label: "Action Planner", href: "/actions" },
   { id: "campaigns", label: "Campaigns", href: "/campaigns" },
 ];
 

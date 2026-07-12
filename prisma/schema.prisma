@@ -235,6 +235,8 @@ model Campaign {
   targetCrops    String[]         @default([]) // maize / potato (empty = all)
   testPct        Int              @default(75)
   status         String           @default("DRAFT") // DRAFT | ACTIVE | CLOSED
+  projectId      Int? // Step 3: campaign runs on a project (all its clusters)…
+  clusterId      Int? // …or one specific cluster within it
   createdAt      DateTime         @default(now())
   members        CampaignMember[]
 }
@@ -343,7 +345,8 @@ model Project {
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
 
-  updates ProjectUpdate[]
+  clusters Cluster[] // Step 2: a project bundles 1+ reusable clusters (many-to-many)
+  updates  ProjectUpdate[]
 }
 
 model ProjectUpdate {
@@ -371,6 +374,8 @@ model Cluster {
   createdBy   String?
   source      DataSource @default(DEMO)
   createdAt   DateTime   @default(now())
+
+  projects Project[] // reusable across projects (many-to-many)
 }
 
 // ─────────────────────────── Reference / admin ───────────────────────────

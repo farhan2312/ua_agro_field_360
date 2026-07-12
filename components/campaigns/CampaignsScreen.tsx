@@ -3,15 +3,16 @@
 import { useState, useTransition } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
 import {
-  SEGMENT_COLUMNS, segMeta, fillTemplate, CROP_LABEL,
+  SEGMENT_COLUMNS, segMeta, fillTemplate,
 } from "@/lib/campaign-segments";
 import {
   getSegmentMatrix, getSegmentCustomers, saveCommTemplate, createCampaign, getCampaignUplift,
-  type SegmentMatrix, type CropFilter, type SegmentCustomer, type CampaignListItem, type UpliftRow, type ClusterVM,
+  type SegmentMatrix, type CropFilter, type SegmentCustomer, type CampaignListItem, type UpliftRow, type ClusterVM, type ProjectVM,
 } from "@/app/actions/campaigns";
 import { createClusterFromCriteria } from "@/app/actions/cluster-builder";
 import type { ClusterCriteria } from "@/lib/cluster-rules";
 import { ClustersTab } from "./ClustersTab";
+import { ProjectsTab } from "./ProjectsTab";
 
 export interface CommTemplateVM {
   segment: string; priority: number; medium: string; offer: string; timingLabel: string; template: string;
@@ -256,26 +257,32 @@ function CommPlanTab({ templates }: { templates: CommTemplateVM[] }) {
 }
 
 /* ══════════════════ Campaigns + tracking (WF4) ══════════════════ */
-function CampaignsTab({ campaigns }: { campaigns: CampaignListItem[] }) {
-  const [list, setList] = useState(campaigns);
+function CampaignsTab({ campaigns, projects }: { campaigns: CampaignListItem[]; projects: ProjectVM[] }) {
+  const [list] = useState(campaigns);
   const [creating, setCreating] = useState(false);
-  const [name, setName] = useState("Maize Pilot");
+  const [name, setName] = useState("");
   const [startDate, setStart] = useState("2026-07-20");
   const [endDate, setEnd] = useState("2026-08-31");
-  const [segs, setSegs] = useState<string[]>(["HNI", "POTENTIAL_HNI", "AT_RISK", "LAPSED"]);
-  const [crops, setCrops] = useState<string[]>([]);
+  const [projectId, setProjectId] = useState<number | null>(projects[0]?.id ?? null);
+  const [clusterId, setClusterId] = useState<number | null>(null); // null = whole project
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
   const [uplift, setUplift] = useState<UpliftRow[] | null>(null);
 
-  const toggle = (arr: string[], set: (a: string[]) => void, v: string) =>
-    set(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
+  const project = projects.find((p) => p.id === projectId) ?? null;
+  const audience = clusterId
+    ? project?.clusters.find((c) => c.id === clusterId)?.count ?? 0
+    : project?.audienceCount ?? 0;
+
+  const pickProject = (id: number) => { setProjectId(id); setClusterId(null); };
 
   const submit = () => {
+    if (!projectId) { setMsg("Pick a project first."); return; }
+    if (!name.trim()) { setMsg("Name the campaign."); return; }
     setMsg(null);
     start(async () => {
-      const res = await createCampaign({ name, startDate, endDate, segments: segs, crops });
+      const res = await createCampaign({ name, startDate, endDate, projectId, clusterId });
       if (res.ok) { setMsg(`Created "${name}" · ${res.members} farmers enrolled (75/25 test/control).`); setCreating(false); location.reload(); }
       else setMsg(res.error ?? "Failed");
     });
@@ -285,28 +292,43 @@ function CampaignsTab({ campaigns }: { campaigns: CampaignListItem[] }) {
   return (
     <div>
       <div className="mb-3 flex items-center justify-between">
-        <div className="text-[13px] text-[#757575]">Create a campaign; farmers in the chosen segments are auto-split 75% test / 25% control.</div>
-        <button type="button" onClick={() => setCreating((v) => !v)} className="rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white">{creating ? "Close" : "+ New campaign"}</button>
+        <div className="text-[13px] text-[#757575]">Run a campaign on a project (all its clusters) or one cluster inside it. Members are snapshot now and auto-split 75% test / 25% control.</div>
+        <button type="button" onClick={() => setCreating((v) => !v)} disabled={projects.length === 0} className="rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{creating ? "Close" : "+ New campaign"}</button>
       </div>
 
-      {creating && (
+      {projects.length === 0 && (
+        <div className="mb-3 rounded-[10px] border border-[#FFE0B2] bg-[#FFF8E1] px-3.5 py-2.5 text-[12.5px] text-[#8D6E00]">
+          Create a project first (Projects tab) — campaigns run on a project or one of its clusters.
+        </div>
+      )}
+
+      {creating && project && (
         <div className={`${CARD} mb-4 p-[18px]`}>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div><label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Name</label><input className="mt-1 w-full rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" value={name} onChange={(e) => setName(e.target.value)} /></div>
+            <div><label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Name</label><input className="mt-1 w-full rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Kharif HNI Push" /></div>
             <div><label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Start</label><input type="date" className="mt-1 w-full rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" value={startDate} onChange={(e) => setStart(e.target.value)} /></div>
             <div><label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">End</label><input type="date" className="mt-1 w-full rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" value={endDate} onChange={(e) => setEnd(e.target.value)} /></div>
           </div>
-          <div className="mt-3"><div className="mb-1.5 text-[11px] font-semibold uppercase text-[#9E9E9E]">Segments</div>
-            <div className="flex flex-wrap gap-1.5">{SEGMENT_COLUMNS.map((s) => { const on = segs.includes(s); const m = segMeta(s); return (
-              <button key={s} type="button" onClick={() => toggle(segs, setSegs, s)} className="rounded-full border-[1.5px] px-3 py-1 text-[12px] font-semibold" style={{ background: on ? m.bg : "#fff", color: on ? m.color : "#616161", borderColor: on ? m.color : "#E0E0E0" }}>{m.label}</button>
-            ); })}</div>
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Project</label>
+              <select className="mt-1 w-full rounded-lg border border-[#E0E0E0] bg-white px-2.5 py-2 text-[13px]" value={projectId ?? ""} onChange={(e) => pickProject(Number(e.target.value))}>
+                {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Scope</label>
+              <select className="mt-1 w-full rounded-lg border border-[#E0E0E0] bg-white px-2.5 py-2 text-[13px]" value={clusterId ?? ""} onChange={(e) => setClusterId(e.target.value ? Number(e.target.value) : null)}>
+                <option value="">Whole project ({project.clusters.length} clusters)</option>
+                {project.clusters.map((c) => <option key={c.id} value={c.id}>{c.name} · {n(c.count)}</option>)}
+              </select>
+            </div>
           </div>
-          <div className="mt-3"><div className="mb-1.5 text-[11px] font-semibold uppercase text-[#9E9E9E]">Crops (optional)</div>
-            <div className="flex flex-wrap gap-1.5">{["maize", "potato"].map((c) => { const on = crops.includes(c); return (
-              <button key={c} type="button" onClick={() => toggle(crops, setCrops, c)} className="rounded-full border-[1.5px] px-3 py-1 text-[12px] font-semibold" style={{ background: on ? "#E8F5E9" : "#fff", color: on ? "#2E7D32" : "#616161", borderColor: on ? "#2E7D32" : "#E0E0E0" }}>{CROP_LABEL[c]}</button>
-            ); })}</div>
+          <div className="mt-3 flex items-center justify-between rounded-[10px] bg-[#F5F7F5] px-4 py-3">
+            <div className="text-[12px] text-[#616161]">Audience {clusterId ? "(cluster)" : "(project, de-duplicated)"}</div>
+            <div className="text-[18px] font-bold text-[#2E7D32]">{n(audience)}</div>
           </div>
-          <button type="button" onClick={submit} disabled={pending} className="mt-4 rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{pending ? "Creating…" : "Create & enrol"}</button>
+          <button type="button" onClick={submit} disabled={pending || !name.trim()} className="mt-4 rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{pending ? "Creating…" : "Create & enrol"}</button>
         </div>
       )}
       {msg && <div className="mb-3 rounded-[10px] border border-[#A5D6A7] bg-[#E8F5E9] px-3.5 py-2.5 text-[12.5px] font-medium text-[#2E7D32]">{msg}</div>}
@@ -318,7 +340,7 @@ function CampaignsTab({ campaigns }: { campaigns: CampaignListItem[] }) {
           <div key={c.id} className="flex flex-wrap items-center gap-3 border-b border-[#F5F5F5] px-4 py-3">
             <div className="min-w-0 flex-1">
               <div className="text-[13.5px] font-bold text-[#1A1C1A]">{c.name}</div>
-              <div className="text-[11.5px] text-[#9E9E9E]">{c.startDate} → {c.endDate} · {c.segments.map((s) => segMeta(s).label).join(", ")}</div>
+              <div className="text-[11.5px] text-[#9E9E9E]">{c.startDate} → {c.endDate} · {c.target}</div>
             </div>
             <div className="text-[12px] text-[#616161]">{n(c.members)} farmers</div>
             <button type="button" onClick={() => openUplift(c.id)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9]">Uplift</button>
@@ -356,11 +378,11 @@ function CampaignsTab({ campaigns }: { campaigns: CampaignListItem[] }) {
 }
 
 /* ══════════════════ Shell ══════════════════ */
-export function CampaignsScreen({ initialMatrix, templates, campaigns, stores: _stores, clusters, zones }: {
-  initialMatrix: SegmentMatrix; templates: CommTemplateVM[]; campaigns: CampaignListItem[]; stores: StoreLite[]; clusters: ClusterVM[]; zones: string[];
+export function CampaignsScreen({ initialMatrix, templates, campaigns, stores: _stores, clusters, projects, zones }: {
+  initialMatrix: SegmentMatrix; templates: CommTemplateVM[]; campaigns: CampaignListItem[]; stores: StoreLite[]; clusters: ClusterVM[]; projects: ProjectVM[]; zones: string[];
 }) {
-  const [tab, setTab] = useState<"clusters" | "segments" | "comms" | "campaigns">("clusters");
-  const TABS = [["clusters", "Clusters"], ["segments", "Segments"], ["comms", "Comm Plan"], ["campaigns", "Campaigns"]] as const;
+  const [tab, setTab] = useState<"clusters" | "projects" | "segments" | "comms" | "campaigns">("clusters");
+  const TABS = [["clusters", "1 · Clusters"], ["projects", "2 · Projects"], ["campaigns", "3 · Campaigns"], ["segments", "Segments"], ["comms", "Comm Plan"]] as const;
   return (
     <div className="animate-[fadeUp_0.4s_ease-out]">
       <div className="mb-4 inline-flex flex-wrap rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] p-1">
@@ -373,9 +395,10 @@ export function CampaignsScreen({ initialMatrix, templates, campaigns, stores: _
         ))}
       </div>
       {tab === "clusters" && <ClustersTab initial={clusters} zones={zones} />}
+      {tab === "projects" && <ProjectsTab initial={projects} clusters={clusters} />}
       {tab === "segments" && <SegmentsTab initial={initialMatrix} />}
       {tab === "comms" && <CommPlanTab templates={templates} />}
-      {tab === "campaigns" && <CampaignsTab campaigns={campaigns} />}
+      {tab === "campaigns" && <CampaignsTab campaigns={campaigns} projects={projects} />}
     </div>
   );
 }

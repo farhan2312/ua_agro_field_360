@@ -172,8 +172,13 @@ export async function resolveClusterFarmers(
   };
 }
 
-/** Resolve just the ids (for campaign enrolment snapshots). Capped for safety. */
+/**
+ * Resolve just the ids (for campaign enrolment snapshots). Capped for safety.
+ * Deterministic order (id asc) so a truncated snapshot is stable across runs;
+ * callers that must not silently truncate should pass a cap above the audience
+ * and check `rows.length === cap` (see createCampaign's ENROLL_CAP guard).
+ */
 export async function resolveClusterIds(c: ClusterCriteria, cap = 50000): Promise<number[]> {
-  const rows = await prisma.farmer.findMany({ where: scopedCriteriaWhere(c), select: { id: true }, take: cap });
+  const rows = await prisma.farmer.findMany({ where: scopedCriteriaWhere(c), select: { id: true }, orderBy: { id: "asc" }, take: cap });
   return rows.map((r) => r.id);
 }
