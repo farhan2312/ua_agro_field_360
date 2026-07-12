@@ -361,9 +361,12 @@ model ProjectUpdate {
 model Cluster {
   id          Int        @id @default(autoincrement())
   name        String
-  layerFilter String? // segment | crop | leadStatus | all
-  criteria    String? // JSON: { layer, layerLabel, layerValue, store, storeName }
-  farmerIds   Int[]      @default([])
+  layerFilter String? // legacy: segment | crop | leadStatus | all
+  criteria    String? // JSON ClusterCriteria (the filter rule) — see lib/cluster-rules.ts
+  description String? // auto-generated human summary of the rule
+  origin      String? // map | segment | analytics (which builder created it)
+  mode        String     @default("static") // dynamic (resolve rule live) | static (frozen farmerIds)
+  farmerIds   Int[]      @default([]) // snapshot (static clusters + legacy)
   farmerNames String[]   @default([])
   createdBy   String?
   source      DataSource @default(DEMO)

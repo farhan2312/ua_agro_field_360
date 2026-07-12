@@ -18,6 +18,13 @@ import {
   type CreateClusterInput,
   type CreateClusterResult,
 } from "@/lib/cluster";
+import { shortStoreName } from "@/lib/store-utils";
+import {
+  describeCriteria,
+  resolveClusterCount,
+  resolveClusterIds,
+  type ClusterCriteria,
+} from "@/lib/cluster-rules";
 
 /** Build the Prisma `where` for the selected stores' farmers from the active filters. */
 function buildWhere(storeIds: number[], f: FarmerFilters): Prisma.FarmerWhereInput {
@@ -126,60 +133,73 @@ export async function getStoreFarmers(
   }
 }
 
-export async function createClusterFromSelection(
-  input: CreateClusterInput,
-): Promise<CreateClusterResult> {
+/**
+ * The single dynamic-cluster creator used by every builder (map / segment / analytics).
+ * Stores the filter RULE + an auto description; membership resolves live (mode=dynamic).
+ * A hand-picked set is saved as mode=static with a frozen id snapshot.
+ */
+export async function createClusterFromCriteria(input: {
+  name: string;
+  criteria: ClusterCriteria;
+  origin: "map" | "segment" | "analytics";
+  mode?: "dynamic" | "static";
+}): Promise<CreateClusterResult & { id?: number }> {
   const name = input.name.trim();
   if (!name) return { ok: false, error: "Give the cluster a name." };
-
+  const mode = input.mode ?? "dynamic";
   try {
-    let ids: number[];
-    if (input.allMatching) {
-      const where = buildWhere(input.storeIds, input.filters);
-      const matched = await prisma.farmer.findMany({
-        where,
-        select: { id: true },
-        take: MAX_CLUSTER,
-      });
-      ids = matched.map((m) => m.id);
-    } else {
-      ids = (input.explicitIds ?? []).slice(0, MAX_CLUSTER);
-    }
-    if (ids.length === 0) return { ok: false, error: "No farmers selected." };
-
-    // Store a display sample of names (full list can be thousands).
-    const nameRows = await prisma.farmer.findMany({
-      where: { id: { in: ids.slice(0, 100) } },
-      select: { name: true },
-    });
-
-    const activeFilters = Object.entries(input.filters)
-      .filter(([, v]) => v && String(v).trim())
-      .map(([k, v]) => `${k}: ${v}`);
-
+    const storeNames = input.criteria.storeIds?.length
+      ? new Map(
+          (await prisma.store.findMany({ where: { id: { in: input.criteria.storeIds } }, select: { id: true, name: true } }))
+            .map((s) => [s.id, shortStoreName(s.name)] as const),
+        )
+      : undefined;
+    const description = describeCriteria(input.criteria, storeNames);
+    const count = await resolveClusterCount(input.criteria);
+    if (count === 0) return { ok: false, error: "No farmers match this rule." };
+    const farmerIds = mode === "static" ? await resolveClusterIds(input.criteria, MAX_CLUSTER) : [];
     const persona = await getPersona();
-    const criteria = JSON.stringify({
-      storeIds: input.storeIds,
-      storeName: input.storeName,
-      filters: input.filters,
-      count: ids.length,
-    });
-
-    await prisma.cluster.create({
+    const cluster = await prisma.cluster.create({
       data: {
         name,
-        layerFilter: activeFilters[0] ?? "store",
-        criteria,
-        farmerIds: ids,
-        farmerNames: nameRows.map((n) => n.name),
+        criteria: JSON.stringify(input.criteria),
+        description,
+        origin: input.origin,
+        mode,
+        farmerIds,
+        farmerNames: [],
         createdBy: persona.name,
         source: "REAL",
       },
     });
-
     revalidatePath("/clusters");
-    return { ok: true, count: ids.length };
+    revalidatePath("/campaigns");
+    return { ok: true, count, id: cluster.id };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Failed to create cluster" };
   }
+}
+
+/** Map cluster-builder → dynamic cluster (or hand-picked → static). */
+export async function createClusterFromSelection(
+  input: CreateClusterInput,
+): Promise<CreateClusterResult> {
+  const criteria: ClusterCriteria = {
+    storeIds: input.storeIds,
+    villages: input.filters.villages,
+    crop: input.filters.crop,
+    segment: input.filters.segment,
+    leadStatus: input.filters.leadStatus,
+    category: input.filters.category,
+    q: input.filters.q,
+  };
+  if (!input.allMatching && input.explicitIds?.length) {
+    return createClusterFromCriteria({
+      name: input.name,
+      criteria: { ...criteria, explicitIds: input.explicitIds },
+      origin: "map",
+      mode: "static",
+    });
+  }
+  return createClusterFromCriteria({ name: input.name, criteria, origin: "map", mode: "dynamic" });
 }

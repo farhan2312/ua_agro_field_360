@@ -6,6 +6,7 @@ import { LAYER_LABELS, type MapLayerKey } from "@/lib/map-layers";
 import { SEGMENT_ENUM_TO_LABEL, LEAD_ENUM_TO_LABEL } from "@/lib/segments";
 import { inr } from "@/lib/format";
 import { CLUSTER_PAGE_SIZE, type ClusterMembersResult } from "@/components/clusters/types";
+import { parseCriteria, criteriaToWhere } from "@/lib/cluster-rules";
 
 export interface CreateClusterInput {
   name: string;
@@ -146,13 +147,33 @@ export async function getClusterFarmers(
   try {
     const cluster = await prisma.cluster.findUnique({
       where: { id: clusterId },
-      select: { farmerIds: true },
+      select: { farmerIds: true, criteria: true, mode: true },
     });
     if (!cluster) return { rows: [], total: 0, page, pageSize: CLUSTER_PAGE_SIZE };
 
-    const ids = cluster.farmerIds;
-    const total = ids.length;
-    const pageIds = ids.slice((page - 1) * CLUSTER_PAGE_SIZE, page * CLUSTER_PAGE_SIZE);
+    // Dynamic clusters resolve their rule live; static/legacy use the frozen id snapshot.
+    const crit = cluster.mode === "dynamic" ? parseCriteria(cluster.criteria) : null;
+    let total: number;
+    let pageIds: number[];
+    if (crit) {
+      const where = criteriaToWhere(crit);
+      const [t, idRows] = await Promise.all([
+        prisma.farmer.count({ where }),
+        prisma.farmer.findMany({
+          where,
+          orderBy: { p12mSpend: "desc" },
+          skip: (page - 1) * CLUSTER_PAGE_SIZE,
+          take: CLUSTER_PAGE_SIZE,
+          select: { id: true },
+        }),
+      ]);
+      total = t;
+      pageIds = idRows.map((r) => r.id);
+    } else {
+      const ids = cluster.farmerIds;
+      total = ids.length;
+      pageIds = ids.slice((page - 1) * CLUSTER_PAGE_SIZE, page * CLUSTER_PAGE_SIZE);
+    }
     if (pageIds.length === 0) return { rows: [], total, page, pageSize: CLUSTER_PAGE_SIZE };
 
     const [farmers, sums] = await Promise.all([
