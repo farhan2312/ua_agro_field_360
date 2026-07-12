@@ -21,7 +21,7 @@ export function RegionalPerformance({ regions }: { regions: Region[] }) {
             <div className="flex justify-between mb-[5px]">
               <span className="text-[12.5px] font-semibold text-[#1A1C1A]">{r.name}</span>
               <span className="text-[11px] text-[#757575]">
-                {r.visits} visits · {r.conv}% conv
+                {r.visits.toLocaleString("en-IN")} farmers · {r.conv}% active
               </span>
             </div>
             <div className="flex gap-1 h-2">

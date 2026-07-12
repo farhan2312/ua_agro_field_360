@@ -12,7 +12,7 @@ export interface LandSegment {
 export function LandSegmentation({ segments }: { segments: LandSegment[] }) {
   return (
     <AnalyticsCard>
-      <CardTitle>Farmer Segmentation by Land</CardTitle>
+      <CardTitle>Farmer Segmentation by Spend (12M)</CardTitle>
       {segments.length === 0 ? (
         <EmptyState title="No segmentation data" hint="No land-holding data available." />
       ) : (
