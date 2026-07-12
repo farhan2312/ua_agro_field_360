@@ -107,6 +107,8 @@ export const NAV_VISIBILITY: Record<string, (r: RoleKey) => boolean> = {
   actions: (r) =>
     r === "regional" || r === "central" || r === "officer" || r === "sysadmin",
   campaigns: (r) => r === "regional" || r === "central" || r === "sysadmin",
+  products: (r) => r === "regional" || r === "central" || r === "sysadmin",
+  movement: (r) => r === "regional" || r === "central" || r === "sysadmin",
   users: (r) => r === "central" || r === "sysadmin",
   salesImport: (r) => r === "sysadmin",
   settings: (r) => r === "sysadmin",
@@ -181,6 +183,10 @@ export function viewTitle(
       return ["Master Data", "Manage stores, farmers, users & reference lists"];
     case "campaigns":
       return ["Campaigns", "Segmented customer targeting & outreach"];
+    case "products":
+      return ["Product Catalog", "All products sold · categories, pricing & sales"];
+    case "movement":
+      return ["Stock / Movement", "Product velocity & demand signal across stores"];
     default:
       return ["Dashboard", ""];
   }

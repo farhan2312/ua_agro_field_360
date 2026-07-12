@@ -29,6 +29,8 @@ const SHORT: Record<NavId, string> = {
   leads: "Leads",
   actions: "Actions",
   campaigns: "Campaign",
+  products: "Catalog",
+  movement: "Stock",
   users: "Users",
   salesImport: "Import",
   settings: "Settings",

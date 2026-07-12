@@ -74,6 +74,7 @@ model Store {
   farmers   Farmer[]
   employees Employee[]
   visits    Visit[]
+  saleLines SaleLine[]
 
   @@index([zone])
 }
@@ -166,8 +167,9 @@ model Farmer {
   lastPotatoAt      DateTime?
   segmentComputedAt DateTime?
 
-  sales  Sale[]
-  visits Visit[]
+  sales     Sale[]
+  saleLines SaleLine[]
+  visits    Visit[]
 
   @@index([storeCode])
   @@index([storeId])
@@ -197,9 +199,91 @@ model Sale {
   source        DataSource @default(REAL)
   createdAt     DateTime   @default(now())
 
+  lines SaleLine[]
+
   @@index([farmerId])
   @@index([source])
   @@index([soldAt]) // date-sorted analytics/history
+  @@index([invoice]) // Order No lookup during master backfill / line linking
+}
+
+// ─────────────────────────── Product catalog + line-item transactions ───────────────────────────
+
+/// Catalog product — auto-built from the master sales file (distinct Item), admin-editable.
+model Product {
+  id           Int      @id @default(autoincrement())
+  rawName      String   @unique // exact Item string from the source file (import key)
+  name         String // canonical/editable display name (defaults to rawName)
+  mainCategory String?
+  subCategory  String?
+  uom          String? // normalized canonical unit
+  taxRate      Float? // CGST+SGST total %, e.g. 5 / 12 / 18
+  cropTag      String? // derived crop for seeds (wheat/paddy/mustard/maize/potato…)
+  isSeed       Boolean  @default(false)
+  // Rollups (maintained by importer / recompute)
+  lastPrice    Float? // latest unit price seen
+  avgPrice     Float?
+  totalQty     Float    @default(0)
+  totalRevenue Float    @default(0)
+  lineCount    Int      @default(0)
+  firstSoldAt  DateTime?
+  lastSoldAt   DateTime?
+  active       Boolean  @default(true) // admin can deactivate
+  mergedIntoId Int? // admin variant-merge: this product folds into another
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  lines SaleLine[]
+
+  @@index([mainCategory])
+  @@index([subCategory])
+  @@index([cropTag])
+  @@index([active])
+}
+
+/// One product line on a sales bill (from the master file). Sales OUT to farmers.
+model SaleLine {
+  id            Int       @id @default(autoincrement())
+  orderNo       String // bill / invoice number
+  productId     Int
+  product       Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  itemRaw       String // raw Item text (denormalized safety copy)
+  store         String? // Retailer ID (store name from file)
+  storeId       Int? // resolved to Store
+  storeRef      Store?    @relation(fields: [storeId], references: [id])
+  farmerId      Int? // resolved by normalized phone (retained lines always have one)
+  farmer        Farmer?   @relation(fields: [farmerId], references: [id], onDelete: SetNull)
+  saleId        Int? // bill-level Sale this line rolls up into
+  sale          Sale?     @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  qty           Float     @default(0)
+  returnQty     Float     @default(0)
+  uom           String?
+  unitPrice     Float? // totalPrice / qty
+  totalPrice    Float     @default(0) // line total incl GST
+  basic         Float? // pre-tax
+  cgstRate      Float?
+  sgstRate      Float?
+  cgst          Float?
+  sgst          Float?
+  discount      Float?
+  batchNo       String?
+  soldAt        DateTime? // parsed Added Date
+  financialYear String?
+  mainCategory  String?
+  subCategory   String?
+  custName      String?
+  custPhone     String? // normalized
+  b2b           Boolean   @default(false)
+  source        DataSource @default(REAL)
+  createdAt     DateTime  @default(now())
+
+  @@index([productId])
+  @@index([farmerId])
+  @@index([orderNo])
+  @@index([soldAt])
+  @@index([storeId, soldAt])
+  @@index([productId, soldAt])
+  @@index([source])
 }
 
 /// Log of monthly sales-invoice uploads (admin Sales Import page).
