@@ -39,10 +39,16 @@ export function criteriaToWhere(c: ClusterCriteria): Prisma.FarmerWhereInput {
   if (c.cropTags?.length) and.push({ cropTags: { hasSome: c.cropTags } });
   if (c.campaignSegments?.length) and.push({ campaignSegment: { in: c.campaignSegments } });
   else if (c.campaignSegment) and.push({ campaignSegment: c.campaignSegment });
-  if (c.segment && SEGMENT_LABEL_TO_ENUM[c.segment as never])
-    and.push({ segment: SEGMENT_LABEL_TO_ENUM[c.segment as never] as never });
-  if (c.leadStatus && LEAD_LABEL_TO_ENUM[c.leadStatus as never])
-    and.push({ leadStatus: LEAD_LABEL_TO_ENUM[c.leadStatus as never] as never });
+  // Segment / lead labels FAIL CLOSED: an unknown label matches nothing rather than
+  // silently dropping the constraint (which would make the rule over-broad).
+  if (c.segment) {
+    const e = SEGMENT_LABEL_TO_ENUM[c.segment as never];
+    and.push(e ? { segment: e as never } : { id: { in: [] } });
+  }
+  if (c.leadStatus) {
+    const e = LEAD_LABEL_TO_ENUM[c.leadStatus as never];
+    and.push(e ? { leadStatus: e as never } : { id: { in: [] } });
+  }
   if (c.zone) and.push({ zone: c.zone });
   if (c.district) and.push({ district: c.district });
   if (c.category) and.push({ sales: { some: { category: c.category } } });
@@ -61,6 +67,20 @@ export function criteriaToWhere(c: ClusterCriteria): Prisma.FarmerWhereInput {
     });
   }
   return and.length ? { AND: and } : {};
+}
+
+/** True when the rule applies at least one condition (guards "matches everyone" rules). */
+export function hasConditions(c: ClusterCriteria): boolean {
+  return Array.isArray(criteriaToWhere(c).AND);
+}
+
+/**
+ * REAL-scoped where used for ALL live resolution — dynamic clusters never pull in
+ * demo/test farmers, and the source predicate is added on top of the rule's own
+ * conditions (so `hasConditions` still reflects only the user's filters).
+ */
+export function scopedCriteriaWhere(c: ClusterCriteria): Prisma.FarmerWhereInput {
+  return { source: "REAL", ...criteriaToWhere(c) };
 }
 
 /** Human-readable summary of the rule (becomes the cluster description). */
@@ -111,9 +131,9 @@ export interface ClusterFarmerRow {
   lastItem: string | null;
 }
 
-/** Live count of a rule's membership. */
+/** Live count of a rule's membership (REAL farmers only). */
 export function resolveClusterCount(c: ClusterCriteria): Promise<number> {
-  return prisma.farmer.count({ where: criteriaToWhere(c) });
+  return prisma.farmer.count({ where: scopedCriteriaWhere(c) });
 }
 
 /** Live, paginated membership of a rule. */
@@ -122,7 +142,7 @@ export async function resolveClusterFarmers(
   page = 1,
   pageSize = 25,
 ): Promise<{ rows: ClusterFarmerRow[]; total: number }> {
-  const where = criteriaToWhere(c);
+  const where = scopedCriteriaWhere(c);
   const [total, farmers] = await Promise.all([
     prisma.farmer.count({ where }),
     prisma.farmer.findMany({
@@ -154,6 +174,6 @@ export async function resolveClusterFarmers(
 
 /** Resolve just the ids (for campaign enrolment snapshots). Capped for safety. */
 export async function resolveClusterIds(c: ClusterCriteria, cap = 50000): Promise<number[]> {
-  const rows = await prisma.farmer.findMany({ where: criteriaToWhere(c), select: { id: true }, take: cap });
+  const rows = await prisma.farmer.findMany({ where: scopedCriteriaWhere(c), select: { id: true }, take: cap });
   return rows.map((r) => r.id);
 }

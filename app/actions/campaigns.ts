@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { shortStoreName } from "@/lib/store-utils";
 import { SEGMENT_COLUMNS, segMeta } from "@/lib/campaign-segments";
 import { inr } from "@/lib/format";
+import { parseCriteria, resolveClusterCount, hasConditions, type ClusterCriteria } from "@/lib/cluster-rules";
 
 export type CropFilter = "all" | "maize" | "potato" | "both";
 
@@ -104,6 +105,58 @@ export async function getSegmentCustomers(
     lastItem: f.lastMaizeItem ?? f.lastPotatoItem ?? null,
     medium: med,
   }));
+}
+
+/* ─────────────────────────── Clusters (Step 1) ─────────────────────────── */
+
+export interface ClusterVM {
+  id: number;
+  name: string;
+  description: string;
+  count: number;
+  origin: string;
+  mode: string;
+  createdBy: string;
+}
+
+/** All saved clusters with LIVE counts (dynamic clusters re-resolve their rule). */
+export async function listClustersWithCounts(): Promise<ClusterVM[]> {
+  const clusters = await prisma.cluster.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 100,
+    select: { id: true, name: true, description: true, criteria: true, mode: true, origin: true, farmerIds: true, createdBy: true },
+  });
+  return Promise.all(
+    clusters.map(async (c) => {
+      const crit = c.mode === "dynamic" ? parseCriteria(c.criteria) : null;
+      const count = crit ? await resolveClusterCount(crit) : c.farmerIds.length;
+      return {
+        id: c.id,
+        name: c.name,
+        description: c.description ?? "—",
+        count,
+        origin: c.origin ?? "map",
+        mode: c.mode,
+        createdBy: c.createdBy ?? "",
+      };
+    }),
+  );
+}
+
+/** Live count preview for the cluster rule builder (0 for an empty rule). */
+export async function previewClusterCount(criteria: ClusterCriteria): Promise<number> {
+  if (!hasConditions(criteria)) return 0;
+  return resolveClusterCount(criteria);
+}
+
+export async function deleteCluster(id: number): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await prisma.cluster.delete({ where: { id } });
+    revalidatePath("/campaigns");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Delete failed" };
+  }
 }
 
 /* ─────────────────────────── WF3 · Communication plan ─────────────────────────── */

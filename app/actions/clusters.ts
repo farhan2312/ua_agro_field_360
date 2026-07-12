@@ -6,7 +6,7 @@ import { LAYER_LABELS, type MapLayerKey } from "@/lib/map-layers";
 import { SEGMENT_ENUM_TO_LABEL, LEAD_ENUM_TO_LABEL } from "@/lib/segments";
 import { inr } from "@/lib/format";
 import { CLUSTER_PAGE_SIZE, type ClusterMembersResult } from "@/components/clusters/types";
-import { parseCriteria, criteriaToWhere } from "@/lib/cluster-rules";
+import { parseCriteria, scopedCriteriaWhere } from "@/lib/cluster-rules";
 
 export interface CreateClusterInput {
   name: string;
@@ -156,7 +156,7 @@ export async function getClusterFarmers(
     let total: number;
     let pageIds: number[];
     if (crit) {
-      const where = criteriaToWhere(crit);
+      const where = scopedCriteriaWhere(crit);
       const [t, idRows] = await Promise.all([
         prisma.farmer.count({ where }),
         prisma.farmer.findMany({

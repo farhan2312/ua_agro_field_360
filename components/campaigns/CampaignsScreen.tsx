@@ -7,8 +7,11 @@ import {
 } from "@/lib/campaign-segments";
 import {
   getSegmentMatrix, getSegmentCustomers, saveCommTemplate, createCampaign, getCampaignUplift,
-  type SegmentMatrix, type CropFilter, type SegmentCustomer, type CampaignListItem, type UpliftRow,
+  type SegmentMatrix, type CropFilter, type SegmentCustomer, type CampaignListItem, type UpliftRow, type ClusterVM,
 } from "@/app/actions/campaigns";
+import { createClusterFromCriteria } from "@/app/actions/cluster-builder";
+import type { ClusterCriteria } from "@/lib/cluster-rules";
+import { ClustersTab } from "./ClustersTab";
 
 export interface CommTemplateVM {
   segment: string; priority: number; medium: string; offer: string; timingLabel: string; template: string;
@@ -38,6 +41,26 @@ function SegmentsTab({ initial }: { initial: SegmentMatrix }) {
     setCell({ storeId, storeName, seg });
     setRows(null);
     getSegmentCustomers(storeId, seg, crop).then(setRows);
+  };
+
+  const [savedMsg, setSavedMsg] = useState<string | null>(null);
+  const [savingCluster, startSaveCluster] = useTransition();
+  const saveCellAsCluster = () => {
+    if (!cell) return;
+    setSavedMsg(null);
+    const cropTags = crop === "maize" ? ["maize"] : crop === "potato" ? ["potato"] : crop === "both" ? ["maize", "potato"] : undefined;
+    const criteria: ClusterCriteria = {
+      storeIds: cell.storeId != null ? [cell.storeId] : undefined,
+      campaignSegments: [cell.seg],
+      cropTags,
+    };
+    startSaveCluster(async () => {
+      const res = await createClusterFromCriteria({
+        name: `${cell.storeName} · ${segMeta(cell.seg).label}`,
+        criteria, origin: "segment", mode: "dynamic",
+      });
+      setSavedMsg(res.ok ? "✓ Saved as a live cluster — open the Clusters tab." : res.error ?? "Failed");
+    });
   };
 
   return (
@@ -124,6 +147,17 @@ function SegmentsTab({ initial }: { initial: SegmentMatrix }) {
               subtitle={`Recommended: ${segMeta(cell.seg).medium}`}
               onClose={() => setCell(null)}
             />
+            <div className="flex items-center justify-between gap-2 px-5 pt-3">
+              <div className="text-[11.5px] font-medium text-[#2E7D32]">{savedMsg}</div>
+              <button
+                type="button"
+                onClick={saveCellAsCluster}
+                disabled={savingCluster}
+                className="rounded-[8px] bg-[#2E7D32] px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-[#1B5E20] disabled:opacity-50"
+              >
+                {savingCluster ? "Saving…" : "＋ Save as cluster"}
+              </button>
+            </div>
             <div className="max-h-[62vh] overflow-y-auto px-5 py-4">
               {rows == null ? (
                 <div className="py-8 text-center text-[13px] text-[#9E9E9E]">Loading…</div>
@@ -322,14 +356,14 @@ function CampaignsTab({ campaigns }: { campaigns: CampaignListItem[] }) {
 }
 
 /* ══════════════════ Shell ══════════════════ */
-export function CampaignsScreen({ initialMatrix, templates, campaigns, stores: _stores }: {
-  initialMatrix: SegmentMatrix; templates: CommTemplateVM[]; campaigns: CampaignListItem[]; stores: StoreLite[];
+export function CampaignsScreen({ initialMatrix, templates, campaigns, stores: _stores, clusters, zones }: {
+  initialMatrix: SegmentMatrix; templates: CommTemplateVM[]; campaigns: CampaignListItem[]; stores: StoreLite[]; clusters: ClusterVM[]; zones: string[];
 }) {
-  const [tab, setTab] = useState<"segments" | "comms" | "campaigns">("segments");
-  const TABS = [["segments", "Segments"], ["comms", "Comm Plan"], ["campaigns", "Campaigns"]] as const;
+  const [tab, setTab] = useState<"clusters" | "segments" | "comms" | "campaigns">("clusters");
+  const TABS = [["clusters", "Clusters"], ["segments", "Segments"], ["comms", "Comm Plan"], ["campaigns", "Campaigns"]] as const;
   return (
     <div className="animate-[fadeUp_0.4s_ease-out]">
-      <div className="mb-4 inline-flex rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] p-1">
+      <div className="mb-4 inline-flex flex-wrap rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] p-1">
         {TABS.map(([k, label]) => (
           <button key={k} type="button" onClick={() => setTab(k)}
             className="rounded-[8px] px-4 py-2 text-[12.5px] font-semibold transition-colors"
@@ -338,6 +372,7 @@ export function CampaignsScreen({ initialMatrix, templates, campaigns, stores: _
           </button>
         ))}
       </div>
+      {tab === "clusters" && <ClustersTab initial={clusters} zones={zones} />}
       {tab === "segments" && <SegmentsTab initial={initialMatrix} />}
       {tab === "comms" && <CommPlanTab templates={templates} />}
       {tab === "campaigns" && <CampaignsTab campaigns={campaigns} />}

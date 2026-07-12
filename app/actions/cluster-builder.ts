@@ -21,6 +21,7 @@ import {
 import { shortStoreName } from "@/lib/store-utils";
 import {
   describeCriteria,
+  hasConditions,
   resolveClusterCount,
   resolveClusterIds,
   type ClusterCriteria,
@@ -147,6 +148,9 @@ export async function createClusterFromCriteria(input: {
   const name = input.name.trim();
   if (!name) return { ok: false, error: "Give the cluster a name." };
   const mode = input.mode ?? "dynamic";
+  // Never allow a rule with no effective conditions — it would match every farmer.
+  if (!hasConditions(input.criteria))
+    return { ok: false, error: "Add at least one filter — this rule would target every farmer." };
   try {
     const storeNames = input.criteria.storeIds?.length
       ? new Map(
@@ -157,7 +161,13 @@ export async function createClusterFromCriteria(input: {
     const description = describeCriteria(input.criteria, storeNames);
     const count = await resolveClusterCount(input.criteria);
     if (count === 0) return { ok: false, error: "No farmers match this rule." };
-    const farmerIds = mode === "static" ? await resolveClusterIds(input.criteria, MAX_CLUSTER) : [];
+    // Static clusters freeze EXACTLY the hand-picked ids (never re-intersected with filters).
+    const farmerIds =
+      mode === "static"
+        ? input.criteria.explicitIds?.length
+          ? input.criteria.explicitIds.slice(0, MAX_CLUSTER)
+          : await resolveClusterIds(input.criteria, MAX_CLUSTER)
+        : [];
     const persona = await getPersona();
     const cluster = await prisma.cluster.create({
       data: {
@@ -184,6 +194,9 @@ export async function createClusterFromCriteria(input: {
 export async function createClusterFromSelection(
   input: CreateClusterInput,
 ): Promise<CreateClusterResult> {
+  // Hand-pick mode with nothing checked must NOT fall through to an all-matching cluster.
+  if (!input.allMatching && !input.explicitIds?.length)
+    return { ok: false, error: "Select farmers, or turn on “select all matching”." };
   const criteria: ClusterCriteria = {
     storeIds: input.storeIds,
     villages: input.filters.villages,
