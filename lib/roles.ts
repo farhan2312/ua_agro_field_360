@@ -160,7 +160,7 @@ export function viewTitle(
     case "mapView":
       return ["Map View", "Browse stores, filter farmers, and save clusters for action"];
     case "farmerCluster":
-      return ["Farmer Clusters", "Segmented farmer groups for targeted actions"];
+      return ["Segmentation", "Segmented farmer groups for targeted actions"];
     case "visitRepo":
       return [
         "Visit Repository",

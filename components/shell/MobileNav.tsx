@@ -23,7 +23,7 @@ const SHORT: Record<NavId, string> = {
   visitRepo: "Visits",
   farmers: "Farmers",
   mapView: "Map",
-  farmerCluster: "Clusters",
+  farmerCluster: "Segments",
   masterData: "Data",
   analytics: "Stats",
   actions: "Actions",

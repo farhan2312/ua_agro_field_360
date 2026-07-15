@@ -39,7 +39,7 @@ export function FarmerClustersScreen({ clusters, farmers, stores }: Props) {
       {/* Header row */}
       <div className="mb-5 flex items-center justify-between">
         <div>
-          <div className="text-[22px] font-extrabold text-[#1A1C1A]">Farmer Clusters</div>
+          <div className="text-[22px] font-extrabold text-[#1A1C1A]">Segmentation</div>
           <div className="mt-[3px] text-[12.5px] text-[#9E9E9E]">
             Segmented groups created from Map View selections · each cluster drives a targeted field action
           </div>
