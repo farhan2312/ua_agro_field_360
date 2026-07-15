@@ -78,6 +78,8 @@ function buildDetail(
     segment: segmentLabel,
     segBg: segmentLabel ? SEGMENT_BGS[segmentLabel] : FALLBACK_SEG_BG,
     segColor: segmentLabel ? SEGMENT_COLORS[segmentLabel] : FALLBACK_SEG_COLOR,
+    salesCrops: farmer.salesCropTags ?? [],
+    visitCrops: farmer.visitCropTags ?? [],
     ltv: inr(ltvNum),
     saleCount: sales.length,
     visitCount: visitLog.length,

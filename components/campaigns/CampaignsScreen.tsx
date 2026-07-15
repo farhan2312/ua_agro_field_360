@@ -2,21 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
+import { segMeta, fillTemplate } from "@/lib/campaign-segments";
 import {
-  SEGMENT_COLUMNS, segMeta, fillTemplate,
-} from "@/lib/campaign-segments";
-import {
-  getSegmentMatrix, getSegmentCustomers, saveCommTemplate, createCampaign, getCampaignUplift,
-  type SegmentMatrix, type CropFilter, type CropSource, type SegmentCustomer, type CampaignListItem, type UpliftRow, type ProjectVM,
+  saveCommTemplate, createCampaign, getCampaignUplift,
+  type CampaignListItem, type UpliftRow, type ProjectVM,
 } from "@/app/actions/campaigns";
-import { createClusterFromCriteria } from "@/app/actions/cluster-builder";
-import type { ClusterCriteria } from "@/lib/cluster-rules";
-import { cropLabel } from "@/lib/crops";
 
+/** Distinct-crop option (kept here as it's imported by the Segmentation + Projects screens). */
 export interface CropOption { crop: string; count: number }
-const CROP_SOURCES: { key: CropSource; label: string }[] = [
-  { key: "any", label: "Any source" }, { key: "sales", label: "Sales" }, { key: "visit", label: "Visit" },
-];
 
 export interface CommTemplateVM {
   segment: string; priority: number; medium: string; offer: string; timingLabel: string; template: string;
@@ -25,195 +18,6 @@ export interface StoreLite { id: number; name: string }
 
 const CARD = "rounded-[14px] border border-black/[0.04] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]";
 const n = (x: number) => x.toLocaleString("en-IN");
-
-/* ══════════════════ Segments matrix (WF2) ══════════════════ */
-function SegmentsTab({ initial, crops }: { initial: SegmentMatrix; crops: CropOption[] }) {
-  const [crop, setCrop] = useState<CropFilter>("all");
-  const [source, setSource] = useState<CropSource>("any");
-  const [matrix, setMatrix] = useState(initial);
-  const [loading, start] = useTransition();
-  const [cell, setCell] = useState<{ storeId: number | null; storeName: string; seg: string } | null>(null);
-  const [rows, setRows] = useState<SegmentCustomer[] | null>(null);
-
-  const reload = (c: CropFilter, s: CropSource) => start(async () => setMatrix(await getSegmentMatrix(c, s)));
-  const pickCrop = (c: CropFilter) => { setCrop(c); reload(c, source); };
-  const pickSource = (s: CropSource) => { setSource(s); reload(crop, s); };
-  const openCell = (storeId: number | null, storeName: string, seg: string) => {
-    setCell({ storeId, storeName, seg });
-    setRows(null);
-    getSegmentCustomers(storeId, seg, crop, source).then(setRows);
-  };
-
-  const [savedMsg, setSavedMsg] = useState<string | null>(null);
-  const [savingCluster, startSaveCluster] = useTransition();
-  const saveCellAsCluster = () => {
-    if (!cell) return;
-    setSavedMsg(null);
-    const criteria: ClusterCriteria = {
-      storeIds: cell.storeId != null ? [cell.storeId] : undefined,
-      campaignSegments: [cell.seg],
-      cropTags: crop === "all" ? undefined : [crop],
-    };
-    startSaveCluster(async () => {
-      const res = await createClusterFromCriteria({
-        name: `${cell.storeName} · ${segMeta(cell.seg).label}`,
-        criteria, origin: "segment", mode: "dynamic",
-      });
-      setSavedMsg(res.ok ? "✓ Saved as a live segment — open the Segmentation page." : res.error ?? "Failed");
-    });
-  };
-
-  return (
-    <div>
-      {/* Priority summary */}
-      <div className="mb-4 grid grid-cols-2 gap-[14px] sm:grid-cols-3 lg:grid-cols-6">
-        {SEGMENT_COLUMNS.map((s) => {
-          const m = segMeta(s);
-          return (
-            <div key={s} className={`${CARD} p-3.5`} style={{ borderTop: `3px solid ${m.color}` }}>
-              <div className="text-[11px] font-bold uppercase tracking-[0.4px]" style={{ color: m.color }}>{m.label}</div>
-              <div className="mt-1 text-[22px] font-bold text-[#1A1C1A]">{n(matrix.totals[s] ?? 0)}</div>
-              <div className="mt-0.5 text-[10.5px] text-[#9E9E9E]">{m.medium}</div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Crop + source selector */}
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <span className="text-[11px] font-bold uppercase tracking-[0.6px] text-[#9E9E9E]">Crop:</span>
-        <select value={crop} onChange={(e) => pickCrop(e.target.value)}
-          className="rounded-[10px] border-[1.5px] border-[#E0E0E0] bg-white px-3 py-1.5 text-[12.5px] font-semibold text-[#1A3A1A]">
-          <option value="all">All crops</option>
-          {crops.map((c) => <option key={c.crop} value={c.crop}>{cropLabel(c.crop)} ({n(c.count)})</option>)}
-        </select>
-        <span className="ml-2 text-[11px] font-bold uppercase tracking-[0.6px] text-[#9E9E9E]">Source:</span>
-        <div className="inline-flex overflow-hidden rounded-[10px] border-[1.5px] border-[#E0E0E0]">
-          {CROP_SOURCES.map((s) => (
-            <button key={s.key} type="button" onClick={() => pickSource(s.key)}
-              className="px-3 py-1.5 text-[12px] font-semibold transition-colors"
-              style={{ background: source === s.key ? "#1A3A1A" : "#fff", color: source === s.key ? "#fff" : "#616161" }}>
-              {s.label}
-            </button>
-          ))}
-        </div>
-        {loading && <span className="text-[12px] text-[#9E9E9E]">Updating…</span>}
-      </div>
-
-      {/* Matrix */}
-      <div className={`${CARD} overflow-hidden`}>
-        <div className="overflow-x-auto">
-          <div className="min-w-[820px]">
-            <div className="grid grid-cols-[1.4fr_repeat(6,1fr)_0.8fr] border-b border-[#F0F0F0] bg-[#FAFAFA] px-4 py-2.5 text-[10.5px] font-semibold uppercase tracking-[0.4px] text-[#9E9E9E]">
-              <div>Store</div>
-              {SEGMENT_COLUMNS.map((s) => <div key={s} className="text-right" style={{ color: segMeta(s).color }}>{segMeta(s).label}</div>)}
-              <div className="text-right">Total</div>
-            </div>
-            {matrix.rows.length === 0 ? (
-              <div className="px-4 py-10 text-center text-[13px] text-[#9E9E9E]">No farmers for this crop filter.</div>
-            ) : (
-              <>
-                <div className="grid grid-cols-[1.4fr_repeat(6,1fr)_0.8fr] border-b border-[#EEE] bg-[#F5FBF5] px-4 py-2.5 text-[12px] font-bold text-[#1A1C1A]">
-                  <div>All stores</div>
-                  {SEGMENT_COLUMNS.map((s) => <div key={s} className="text-right">{n(matrix.totals[s] ?? 0)}</div>)}
-                  <div className="text-right">{n(matrix.grandTotal)}</div>
-                </div>
-                {matrix.rows.slice(0, 200).map((r) => (
-                  <div key={String(r.storeId)} className="grid grid-cols-[1.4fr_repeat(6,1fr)_0.8fr] items-center border-b border-[#F8F8F8] px-4 py-2 text-[12px]">
-                    <div className="truncate font-semibold text-[#1A1C1A]" title={r.storeName}>{r.storeName}</div>
-                    {SEGMENT_COLUMNS.map((s) => {
-                      const c = r.counts[s] ?? 0;
-                      return (
-                        <div key={s} className="text-right">
-                          {c > 0 ? (
-                            <button type="button" onClick={() => openCell(r.storeId, r.storeName, s)}
-                              className="rounded px-1.5 py-0.5 font-semibold hover:underline" style={{ color: segMeta(s).color }}>
-                              {n(c)}
-                            </button>
-                          ) : <span className="text-[#DDD]">·</span>}
-                        </div>
-                      );
-                    })}
-                    <div className="text-right font-bold text-[#1A1C1A]">{n(r.total)}</div>
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-      <div className="mt-2 text-[11px] text-[#9E9E9E]">Click any count to see that store × segment customer list. Segments are exclusive — each farmer appears once.</div>
-
-      {/* Drill-down */}
-      <Modal open={!!cell} onClose={() => setCell(null)} className="max-w-[720px]">
-        {cell && (
-          <>
-            <ModalHeader
-              eyebrow={`${cell.storeName} · ${segMeta(cell.seg).label}`}
-              eyebrowColor={segMeta(cell.seg).color}
-              title="Customer list"
-              subtitle={`Recommended: ${segMeta(cell.seg).medium}`}
-              onClose={() => setCell(null)}
-            />
-            <div className="flex items-center justify-between gap-2 px-5 pt-3">
-              <div className="text-[11.5px] font-medium text-[#2E7D32]">{savedMsg}</div>
-              <button
-                type="button"
-                onClick={saveCellAsCluster}
-                disabled={savingCluster}
-                className="rounded-[8px] bg-[#2E7D32] px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-[#1B5E20] disabled:opacity-50"
-              >
-                {savingCluster ? "Saving…" : "＋ Save as segment"}
-              </button>
-            </div>
-            <div className="max-h-[62vh] overflow-y-auto px-5 py-4">
-              <div className="mb-2 flex items-center gap-3 text-[10.5px] font-semibold">
-                <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-full bg-[#E8F5E9] ring-1 ring-[#2E7D32]" /> <span className="text-[#2E7D32]">Sales crops</span></span>
-                <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-full bg-[#E3F2FD] ring-1 ring-[#1565C0]" /> <span className="text-[#1565C0]">Visit crops</span></span>
-              </div>
-              {rows == null ? (
-                <div className="py-8 text-center text-[13px] text-[#9E9E9E]">Loading…</div>
-              ) : rows.length === 0 ? (
-                <div className="py-8 text-center text-[13px] text-[#9E9E9E]">No customers.</div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[560px] text-left text-[12.5px]">
-                    <thead>
-                      <tr className="border-b border-[#EEE] text-[10px] font-bold uppercase text-[#9E9E9E]">
-                        <th className="py-2">Farmer</th><th>Crops</th><th className="text-right">P12M spend</th>
-                        <th className="text-right">Gap→HNI</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rows.map((f) => (
-                        <tr key={f.id} className="border-b border-[#F5F5F5]">
-                          <td className="py-2">
-                            <div className="font-semibold text-[#1A1C1A]">{f.name}</div>
-                            <div className="text-[11px] text-[#9E9E9E]">{f.village ?? "—"} · {f.mobile ?? "—"}</div>
-                          </td>
-                          <td className="py-2">
-                            <div className="flex flex-wrap gap-1">
-                              {f.salesCrops.map((c) => <span key={"s" + c} className="rounded-full bg-[#E8F5E9] px-1.5 py-0.5 text-[10px] font-semibold text-[#2E7D32]" title="From sales">{cropLabel(c)}</span>)}
-                              {f.visitCrops.map((c) => <span key={"v" + c} className="rounded-full bg-[#E3F2FD] px-1.5 py-0.5 text-[10px] font-semibold text-[#1565C0]" title="From field visit">{cropLabel(c)}</span>)}
-                              {f.salesCrops.length === 0 && f.visitCrops.length === 0 && <span className="text-[#DDD]">—</span>}
-                            </div>
-                          </td>
-                          <td className="text-right font-semibold text-[#1A1C1A]">{f.spend}</td>
-                          <td className="text-right text-[#E65100]">{f.gap ?? "—"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {rows.length >= 500 && <div className="mt-2 text-[11px] text-[#9E9E9E]">Showing first 500 by spend.</div>}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-      </Modal>
-    </div>
-  );
-}
 
 /* ══════════════════ Comm plan (WF3) ══════════════════ */
 const SAMPLE = { name: "Ramesh Kumar", hniGap: 2500, lastItem: "Maize Dekalb 9108", store: "Ram Nagar", phone: "98xxxxxxxx", deadline: "15 Aug" };
@@ -394,11 +198,11 @@ function CampaignsTab({ campaigns, projects }: { campaigns: CampaignListItem[]; 
 }
 
 /* ══════════════════ Shell ══════════════════ */
-export function CampaignsScreen({ initialMatrix, templates, campaigns, stores: _stores, projects, crops }: {
-  initialMatrix: SegmentMatrix; templates: CommTemplateVM[]; campaigns: CampaignListItem[]; stores: StoreLite[]; projects: ProjectVM[]; crops: CropOption[];
+export function CampaignsScreen({ templates, campaigns, stores: _stores, projects }: {
+  templates: CommTemplateVM[]; campaigns: CampaignListItem[]; stores: StoreLite[]; projects: ProjectVM[];
 }) {
-  const [tab, setTab] = useState<"segments" | "comms" | "campaigns">("campaigns");
-  const TABS = [["campaigns", "Campaigns"], ["segments", "Segments"], ["comms", "Comm Plan"]] as const;
+  const [tab, setTab] = useState<"comms" | "campaigns">("campaigns");
+  const TABS = [["campaigns", "Campaigns"], ["comms", "Comm Plan"]] as const;
   return (
     <div className="animate-[fadeUp_0.4s_ease-out]">
       <div className="mb-4 inline-flex flex-wrap rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] p-1">
@@ -410,7 +214,6 @@ export function CampaignsScreen({ initialMatrix, templates, campaigns, stores: _
           </button>
         ))}
       </div>
-      {tab === "segments" && <SegmentsTab initial={initialMatrix} crops={crops} />}
       {tab === "comms" && <CommPlanTab templates={templates} />}
       {tab === "campaigns" && <CampaignsTab campaigns={campaigns} projects={projects} />}
     </div>

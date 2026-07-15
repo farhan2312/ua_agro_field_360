@@ -6,7 +6,8 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { SEGMENT_LABEL_TO_ENUM, LEAD_LABEL_TO_ENUM } from "@/lib/segments";
-import { segMeta, CROP_LABEL } from "@/lib/campaign-segments";
+import { segMeta } from "@/lib/campaign-segments";
+import { cropLabel } from "@/lib/crops";
 import { inr } from "@/lib/format";
 
 /** The rule that defines a cluster. Every field is an AND-ed condition. */
@@ -14,7 +15,10 @@ export interface ClusterCriteria {
   storeIds?: number[];
   villages?: string[];
   crop?: string; // farmer.crop (enrichment)
-  cropTags?: string[]; // maize / potato (computed) — match ANY
+  cropTags?: string[]; // any crop (sales ∪ visit) — match ANY
+  salesCrops?: string[]; // crops from the sales upload — match ANY
+  visitCrops?: string[]; // crops from field visits — match ANY
+  visitProblem?: string; // farmer has a visit recording this problem
   segment?: string; // legacy display label (High Value…)
   campaignSegment?: string; // single: HNI | AT_RISK | …
   campaignSegments?: string[]; // multiple — match ANY
@@ -37,6 +41,9 @@ export function criteriaToWhere(c: ClusterCriteria): Prisma.FarmerWhereInput {
   if (c.villages?.length) and.push({ village: { in: c.villages } });
   if (c.crop) and.push({ crop: c.crop });
   if (c.cropTags?.length) and.push({ cropTags: { hasSome: c.cropTags } });
+  if (c.salesCrops?.length) and.push({ salesCropTags: { hasSome: c.salesCrops } });
+  if (c.visitCrops?.length) and.push({ visitCropTags: { hasSome: c.visitCrops } });
+  if (c.visitProblem) and.push({ visits: { some: { currentProblem: { has: c.visitProblem } } } });
   if (c.campaignSegments?.length) and.push({ campaignSegment: { in: c.campaignSegments } });
   else if (c.campaignSegment) and.push({ campaignSegment: c.campaignSegment });
   // Segment / lead labels FAIL CLOSED: an unknown label matches nothing rather than
@@ -94,7 +101,10 @@ export function describeCriteria(c: ClusterCriteria, storeNames?: Map<number, st
   else if (c.campaignSegment) parts.push(segMeta(c.campaignSegment).label);
   if (c.segment) parts.push(c.segment);
   if (c.crop) parts.push(`Crop: ${c.crop}`);
-  if (c.cropTags?.length) parts.push(c.cropTags.map((t) => CROP_LABEL[t] ?? t).join(" + "));
+  if (c.cropTags?.length) parts.push(c.cropTags.map(cropLabel).join(" + "));
+  if (c.salesCrops?.length) parts.push(`Sales crop: ${c.salesCrops.map(cropLabel).join(" / ")}`);
+  if (c.visitCrops?.length) parts.push(`Visit crop: ${c.visitCrops.map(cropLabel).join(" / ")}`);
+  if (c.visitProblem) parts.push(`Problem: ${c.visitProblem}`);
   if (c.leadStatus) parts.push(`Lead: ${c.leadStatus}`);
   if (c.category) parts.push(`Buys: ${c.category}`);
   if (c.spendMin != null && c.spendMax != null) parts.push(`Spend ${kFmt(c.spendMin)}–${kFmt(c.spendMax)}`);

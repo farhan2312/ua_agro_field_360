@@ -1,5 +1,6 @@
 import { Card } from "@/components/ui";
 import { initials } from "@/lib/format";
+import { cropLabel } from "@/lib/crops";
 import type { FarmerDetail } from "./types";
 
 function DetailRow({
@@ -57,20 +58,39 @@ export function FarmerProfileCard({ farmer }: { farmer: FarmerDetail }) {
       </div>
       <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
         <DetailRow label="Land" value={`${farmer.land || "0"} acres`} />
-        <DetailRow label="Crop" value={farmer.crop} />
         <DetailRow label="Season" value={farmer.season} />
         <DetailRow label="Soil" value={farmer.soil} />
         <DetailRow
           label="Lead Status"
           value={farmer.status}
           valueClass="text-[#2E7D32]"
-          border={false}
         />
         <DetailRow
           label="Total Visits"
           value={String(farmer.visitCount)}
           border={false}
         />
+      </div>
+
+      {/* Crops — labelled by source (Sales upload vs Field visits) */}
+      <div className="mt-3 border-t border-[#F5F5F5] pt-3">
+        <div className="mb-1.5 flex items-center gap-3">
+          <span className="text-[11px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Crops</span>
+          <span className="flex items-center gap-1 text-[10px] font-semibold text-[#2E7D32]"><span className="inline-block h-2 w-2 rounded-full bg-[#E8F5E9] ring-1 ring-[#2E7D32]" /> Sales</span>
+          <span className="flex items-center gap-1 text-[10px] font-semibold text-[#1565C0]"><span className="inline-block h-2 w-2 rounded-full bg-[#E3F2FD] ring-1 ring-[#1565C0]" /> Visit</span>
+        </div>
+        {farmer.salesCrops.length === 0 && farmer.visitCrops.length === 0 ? (
+          <span className="text-[12px] text-[#BDBDBD]">No crop data yet</span>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {farmer.salesCrops.map((c) => (
+              <span key={`s-${c}`} className="rounded-full bg-[#E8F5E9] px-2 py-0.5 text-[11px] font-semibold text-[#2E7D32]" title="From sales upload">{cropLabel(c)}</span>
+            ))}
+            {farmer.visitCrops.map((c) => (
+              <span key={`v-${c}`} className="rounded-full bg-[#E3F2FD] px-2 py-0.5 text-[11px] font-semibold text-[#1565C0]" title="From field visit">{cropLabel(c)}</span>
+            ))}
+          </div>
+        )}
       </div>
     </Card>
   );

@@ -43,6 +43,8 @@ export interface FarmerDetail {
   segment: string; // segment display label
   segBg: string;
   segColor: string;
+  salesCrops: string[]; // crops from the sales upload (labelled)
+  visitCrops: string[]; // crops from field visits (labelled)
   ltv: string; // computed lifetime value, e.g. "₹0"
   saleCount: number;
   visitCount: number;

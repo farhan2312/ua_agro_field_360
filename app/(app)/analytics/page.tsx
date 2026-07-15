@@ -1,58 +1,29 @@
-import { getAnalytics, type AnalyticsData } from "@/lib/analytics";
-import { PeriodFilter } from "@/components/analytics/PeriodFilter";
-import { HeroKpiBanner } from "@/components/analytics/HeroKpiBanner";
-import { ProblemHeatmap } from "@/components/analytics/ProblemHeatmap";
-import { AsrLeaderboard } from "@/components/analytics/AsrLeaderboard";
-import { RegionalPerformance } from "@/components/analytics/RegionalPerformance";
-import { ConversionFunnel } from "@/components/analytics/ConversionFunnel";
-import { LandSegmentation } from "@/components/analytics/LandSegmentation";
-import { DataQualityScore } from "@/components/analytics/DataQualityScore";
-import { AiInsights } from "@/components/analytics/AiInsights";
+import { notFound } from "next/navigation";
+import { getRole } from "@/lib/session";
+import { canAccess } from "@/lib/roles";
+import { getWorkbench, getWorkbenchFacets, type WbData, type WbFacets } from "@/app/actions/analytics-segments";
+import { AnalyticsWorkbench } from "@/components/analytics/AnalyticsWorkbench";
 
 export const dynamic = "force-dynamic";
 
-const VALID_PERIODS = ["7d", "30d", "90d", "ytd"];
-const EMPTY: AnalyticsData = {
-  kpis: [], heatmap: { problems: [], crops: [], data: [] }, asrs: [], regions: [],
-  funnel: [], land: [], quality: [], insights: [],
+const EMPTY: WbData = {
+  kpis: { farmers: 0, hni: 0, potentialHni: 0, atRisk: 0, lapsed: 0, spend: 0, visits: 0 },
+  matrix: { rows: [], totals: {}, grandTotal: 0 },
+  segmentDist: [], cropBreakdown: [], extra: [], extraTitle: "", secondary: [], secondaryTitle: "",
 };
 
-/** Analytics & Insights — all series computed live from farmer / sale / segment data. */
-export default async function AnalyticsPage({
-  searchParams,
-}: {
-  searchParams?: { period?: string };
-}) {
-  const period = searchParams?.period && VALID_PERIODS.includes(searchParams.period) ? searchParams.period : "30d";
-  let d: AnalyticsData;
+/** Analytics — a Sales / Visit segmentation workbench: filter → view → save as segment. */
+export default async function AnalyticsPage() {
+  const role = await getRole();
+  if (!canAccess("analytics", role)) notFound();
+
+  let data = EMPTY;
+  let facets: WbFacets = { stores: [], zones: [], salesCrops: [], visitCrops: [], problems: [], spendTiers: [] };
   try {
-    d = await getAnalytics(period);
+    [data, facets] = await Promise.all([getWorkbench({ lens: "sales" }), getWorkbenchFacets()]);
   } catch {
-    d = EMPTY;
+    // DB unavailable — render an empty shell.
   }
 
-  return (
-    <div className="animate-[fadeUp_0.4s_ease-out]">
-      <PeriodFilter initial={period} />
-
-      <HeroKpiBanner cells={d.kpis} />
-
-      <div className="grid grid-cols-1 gap-[18px] mb-[18px] lg:grid-cols-[1.2fr_1fr]">
-        <ProblemHeatmap heatmap={d.heatmap} />
-        <AsrLeaderboard asrs={d.asrs} />
-      </div>
-
-      <div className="grid grid-cols-1 gap-[18px] mb-[18px] lg:grid-cols-2">
-        <RegionalPerformance regions={d.regions} />
-        <ConversionFunnel steps={d.funnel} />
-      </div>
-
-      <div className="grid grid-cols-1 gap-[18px] mb-[18px] lg:grid-cols-2">
-        <LandSegmentation segments={d.land} />
-        <DataQualityScore quality={d.quality} />
-      </div>
-
-      <AiInsights insights={d.insights} />
-    </div>
-  );
+  return <AnalyticsWorkbench initial={data} facets={facets} />;
 }
