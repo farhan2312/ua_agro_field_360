@@ -39,14 +39,18 @@ function farmerConds(f: WbFilters, alias = ""): Prisma.Sql[] {
   if (f.segment) c.push(Prisma.sql`${col(alias, "campaignSegment")} = ${f.segment}`);
   if (f.crop) {
     const cc = f.lens === "sales" ? "salesCropTags" : "visitCropTags";
-    c.push(Prisma.sql`${f.crop} = ANY(${col(alias, cc)})`);
+    // Array-contains (@>) so the GIN index on the crop column is actually used.
+    c.push(Prisma.sql`${col(alias, cc)} @> ARRAY[${f.crop}]::text[]`);
   }
   if (f.lens === "sales" && f.spendTier != null && SPEND_TIERS[f.spendTier]) {
     const t = SPEND_TIERS[f.spendTier];
-    if (t.min != null) c.push(Prisma.sql`COALESCE(${col(alias, "p12mSpend")}, 0) >= ${t.min}`);
-    if (t.max != null) c.push(Prisma.sql`COALESCE(${col(alias, "p12mSpend")}, 0) < ${t.max}`);
+    // No COALESCE: null-spend farmers are excluded from every tier, matching the saved
+    // segment's criteria (p12mSpend gte/lt) and the "No spend" distribution bucket.
+    if (t.min != null) c.push(Prisma.sql`${col(alias, "p12mSpend")} >= ${t.min}`);
+    if (t.max != null) c.push(Prisma.sql`${col(alias, "p12mSpend")} < ${t.max}`);
   }
   if (f.lens === "visit" && f.problem) {
+    // Qualify the correlation to the OUTER farmer via `alias`; a bare "id" would bind to Visit.id.
     c.push(Prisma.sql`EXISTS (SELECT 1 FROM "Visit" v WHERE v."farmerId" = ${col(alias, "id")} AND ${f.problem} = ANY(v."currentProblem"))`);
   }
   return c;
@@ -96,43 +100,50 @@ export interface WbData {
 }
 
 export async function getWorkbench(f: WbFilters): Promise<WbData> {
-  const where = whereOf(f);
+  // Alias the outer Farmer as `f` everywhere so the visit-problem EXISTS correlates to Farmer.id
+  // (a bare "id" would bind to Visit.id and collapse the visit lens to ~0).
   const whereF = whereOf(f, "f");
 
   const [kpiRows, matrixRows, segRows, cropRows, stores] = await Promise.all([
-    prisma.$queryRaw<{ total: number; hni: number; phni: number; atrisk: number; lapsed: number; spend: number; visits: number }[]>`
+    prisma.$queryRaw<{ total: number; hni: number; phni: number; atrisk: number; lapsed: number; spend: number }[]>(Prisma.sql`
       SELECT COUNT(*)::int total,
-        COUNT(*) FILTER (WHERE "campaignSegment"='HNI')::int hni,
-        COUNT(*) FILTER (WHERE "campaignSegment"='POTENTIAL_HNI')::int phni,
-        COUNT(*) FILTER (WHERE "campaignSegment"='AT_RISK')::int atrisk,
-        COUNT(*) FILTER (WHERE "campaignSegment"='LAPSED')::int lapsed,
-        COALESCE(SUM("p12mSpend"),0)::float spend,
-        COALESCE((SELECT COUNT(*) FROM "Visit" v JOIN "Farmer" f ON f.id=v."farmerId" ${whereF}),0)::int visits
-      FROM "Farmer" ${where}`,
+        COUNT(*) FILTER (WHERE f."campaignSegment"='HNI')::int hni,
+        COUNT(*) FILTER (WHERE f."campaignSegment"='POTENTIAL_HNI')::int phni,
+        COUNT(*) FILTER (WHERE f."campaignSegment"='AT_RISK')::int atrisk,
+        COUNT(*) FILTER (WHERE f."campaignSegment"='LAPSED')::int lapsed,
+        COALESCE(SUM(f."p12mSpend"),0)::float spend
+      FROM "Farmer" f ${whereF}`),
     prisma.$queryRaw<{ storeId: number | null; seg: string; n: number }[]>(Prisma.sql`
-      SELECT "storeId", "campaignSegment" seg, COUNT(*)::int n FROM "Farmer" ${where}
-      AND "campaignSegment" IS NOT NULL AND "campaignSegment" <> 'OTHER' GROUP BY 1, 2`),
+      SELECT f."storeId" AS "storeId", f."campaignSegment" seg, COUNT(*)::int n FROM "Farmer" f ${whereF}
+      AND f."campaignSegment" IS NOT NULL AND f."campaignSegment" <> 'OTHER' GROUP BY 1, 2`),
     prisma.$queryRaw<{ seg: string; n: number }[]>(Prisma.sql`
-      SELECT "campaignSegment" seg, COUNT(*)::int n FROM "Farmer" ${where}
-      AND "campaignSegment" IS NOT NULL GROUP BY 1`),
+      SELECT f."campaignSegment" seg, COUNT(*)::int n FROM "Farmer" f ${whereF}
+      AND f."campaignSegment" IS NOT NULL GROUP BY 1`),
     prisma.$queryRaw<{ crop: string; n: number }[]>(Prisma.sql`
-      SELECT unnest(${col("", f.lens === "sales" ? "salesCropTags" : "visitCropTags")}) crop, COUNT(*)::int n
-      FROM "Farmer" ${where} GROUP BY 1 ORDER BY 2 DESC LIMIT 12`),
+      SELECT unnest(${col("f", f.lens === "sales" ? "salesCropTags" : "visitCropTags")}) crop, COUNT(*)::int n
+      FROM "Farmer" f ${whereF} GROUP BY 1 ORDER BY 2 DESC LIMIT 12`),
     prisma.store.findMany({ select: { id: true, name: true } }),
   ]);
+
+  // Visits count only matters in the visit lens (avoids a wasted Visit join on every sales filter).
+  let visits = 0;
+  if (f.lens === "visit") {
+    const vr = await prisma.$queryRaw<{ n: number }[]>(Prisma.sql`SELECT COUNT(*)::int n FROM "Visit" v JOIN "Farmer" f ON f.id = v."farmerId" ${whereF}`);
+    visits = num(vr[0]?.n);
+  }
 
   // Lens-specific charts.
   let extra: WbBar[] = [], secondary: WbBar[] = [], extraTitle = "", secondaryTitle = "";
   if (f.lens === "sales") {
     const [spendRows, zoneRows] = await Promise.all([
       prisma.$queryRaw<{ bucket: string; n: number }[]>(Prisma.sql`
-        SELECT CASE WHEN COALESCE("p12mSpend",0)>=12000 THEN 'HNI ₹12K+'
-          WHEN "p12mSpend">=10000 THEN '₹10–12K' WHEN "p12mSpend">=5000 THEN '₹5–10K'
-          WHEN "p12mSpend">=2500 THEN '₹2.5–5K' WHEN "p12mSpend">0 THEN '< ₹2.5K' ELSE 'No spend' END bucket,
-          COUNT(*)::int n FROM "Farmer" ${where} GROUP BY 1`),
+        SELECT CASE WHEN f."p12mSpend">=12000 THEN 'HNI ₹12K+'
+          WHEN f."p12mSpend">=10000 THEN '₹10–12K' WHEN f."p12mSpend">=5000 THEN '₹5–10K'
+          WHEN f."p12mSpend">=2500 THEN '₹2.5–5K' WHEN f."p12mSpend">0 THEN '< ₹2.5K' ELSE 'No spend' END bucket,
+          COUNT(*)::int n FROM "Farmer" f ${whereF} GROUP BY 1`),
       prisma.$queryRaw<{ zone: string; spend: number }[]>(Prisma.sql`
-        SELECT "zone", COALESCE(SUM("p12mSpend"),0)::float spend FROM "Farmer" ${where}
-        AND "zone" IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10`),
+        SELECT f."zone" AS zone, COALESCE(SUM(f."p12mSpend"),0)::float spend FROM "Farmer" f ${whereF}
+        AND f."zone" IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10`),
     ]);
     const order = ["HNI ₹12K+", "₹10–12K", "₹5–10K", "₹2.5–5K", "< ₹2.5K", "No spend"];
     extra = spendRows.map((r) => ({ label: r.bucket, value: num(r.n) })).sort((a, b) => order.indexOf(a.label) - order.indexOf(b.label));
@@ -170,10 +181,10 @@ export async function getWorkbench(f: WbFilters): Promise<WbData> {
   })).sort((a, b) => b.total - a.total).slice(0, 100);
   const grandTotal = SEGMENT_COLUMNS.reduce((s, k) => s + (totals[k] ?? 0), 0);
 
-  const k = kpiRows[0] ?? { total: 0, hni: 0, phni: 0, atrisk: 0, lapsed: 0, spend: 0, visits: 0 };
+  const k = kpiRows[0] ?? { total: 0, hni: 0, phni: 0, atrisk: 0, lapsed: 0, spend: 0 };
   const segMap = new Map(segRows.map((r) => [r.seg, num(r.n)]));
   return {
-    kpis: { farmers: num(k.total), hni: num(k.hni), potentialHni: num(k.phni), atRisk: num(k.atrisk), lapsed: num(k.lapsed), spend: num(k.spend), visits: num(k.visits) },
+    kpis: { farmers: num(k.total), hni: num(k.hni), potentialHni: num(k.phni), atRisk: num(k.atrisk), lapsed: num(k.lapsed), spend: num(k.spend), visits },
     matrix: { rows, totals, grandTotal },
     segmentDist: SEGMENT_COLUMNS.map((s) => ({ label: segMeta(s).label, value: segMap.get(s) ?? 0, color: segMeta(s).color })),
     cropBreakdown: cropRows.map((r) => ({ label: r.crop, value: num(r.n) })),
@@ -185,12 +196,12 @@ export async function getWorkbench(f: WbFilters): Promise<WbData> {
 export interface WbCustomer { id: number; name: string; mobile: string | null; village: string | null; spend: string; segment: string; salesCrops: string[]; visitCrops: string[] }
 export async function getWorkbenchCustomers(f: WbFilters, storeId: number | null, segment: string, limit = 400): Promise<WbCustomer[]> {
   const cellFilter: WbFilters = { ...f, storeId: storeId ?? undefined, segment };
-  const conds = farmerConds(cellFilter);
-  if (storeId == null) conds.push(Prisma.sql`"storeId" IS NULL`);
+  const conds = farmerConds(cellFilter, "f"); // alias f so the visit-problem EXISTS correlates to Farmer.id
+  if (storeId == null) conds.push(Prisma.sql`f."storeId" IS NULL`);
   const rows = await prisma.$queryRaw<{ id: number; name: string; mobile: string | null; village: string | null; spend: number | null; seg: string | null; salesc: string[]; visitc: string[] }[]>(Prisma.sql`
-    SELECT id, name, mobile, village, "p12mSpend" spend, "campaignSegment" seg, "salesCropTags" salesc, "visitCropTags" visitc
-    FROM "Farmer" WHERE ${Prisma.join(conds, " AND ")}
-    ORDER BY "p12mSpend" DESC NULLS LAST LIMIT ${limit}`);
+    SELECT f.id, f.name, f.mobile, f.village, f."p12mSpend" spend, f."campaignSegment" seg, f."salesCropTags" salesc, f."visitCropTags" visitc
+    FROM "Farmer" f WHERE ${Prisma.join(conds, " AND ")}
+    ORDER BY f."p12mSpend" DESC NULLS LAST LIMIT ${limit}`);
   return rows.map((r) => ({
     id: r.id, name: r.name, mobile: r.mobile, village: r.village,
     spend: r.spend != null ? inr(r.spend) : "—", segment: r.seg ?? "—",

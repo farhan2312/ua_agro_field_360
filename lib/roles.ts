@@ -105,8 +105,8 @@ export const NAV_VISIBILITY: Record<string, (r: RoleKey) => boolean> = {
   analytics: () => true,
   actions: (r) =>
     r === "regional" || r === "central" || r === "officer" || r === "sysadmin",
-  campaigns: (r) => r === "regional" || r === "central" || r === "sysadmin",
-  projects: (r) => r === "regional" || r === "central" || r === "sysadmin",
+  campaigns: () => true, // all roles; officers/RMs get a store/region-scoped view
+  projects: (r) => r === "central" || r === "sysadmin", // initiated by the central team only
   products: (r) => r === "regional" || r === "central" || r === "sysadmin",
   movement: (r) => r === "regional" || r === "central" || r === "sysadmin",
   users: (r) => r === "central" || r === "sysadmin",

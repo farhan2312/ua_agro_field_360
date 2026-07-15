@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
 import { getRole } from "@/lib/session";
+import { canAccess } from "@/lib/roles";
+import { canManage } from "@/lib/scope";
 import { prisma } from "@/lib/prisma";
 import { listCampaigns, listProjects, type CampaignListItem, type ProjectVM } from "@/app/actions/campaigns";
 import { DEFAULT_COMM_TEMPLATES } from "@/lib/campaign-segments";
@@ -9,7 +11,8 @@ export const dynamic = "force-dynamic";
 
 export default async function CampaignsPage() {
   const role = await getRole();
-  if (!(role === "regional" || role === "central" || role === "sysadmin")) notFound();
+  if (!canAccess("campaigns", role)) notFound();
+  const manage = canManage(role);
 
   let templates: CommTemplateVM[] = [];
   let campaigns: CampaignListItem[] = [];
@@ -42,6 +45,7 @@ export default async function CampaignsPage() {
       campaigns={campaigns}
       stores={stores}
       projects={projects}
+      canManage={manage}
     />
   );
 }

@@ -4,8 +4,8 @@ import { useState, useTransition } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
 import { segMeta, fillTemplate } from "@/lib/campaign-segments";
 import {
-  saveCommTemplate, createCampaign, getCampaignUplift,
-  type CampaignListItem, type UpliftRow, type ProjectVM,
+  saveCommTemplate, createCampaign, getCampaignUplift, extendCampaign, getCampaignMembers,
+  type CampaignListItem, type UpliftRow, type ProjectVM, type CampaignMemberVM,
 } from "@/app/actions/campaigns";
 
 /** Distinct-crop option (kept here as it's imported by the Segmentation + Projects screens). */
@@ -77,25 +77,30 @@ function CommPlanTab({ templates }: { templates: CommTemplateVM[] }) {
 }
 
 /* ══════════════════ Campaigns + tracking (WF4) ══════════════════ */
-function CampaignsTab({ campaigns, projects }: { campaigns: CampaignListItem[]; projects: ProjectVM[] }) {
+function CampaignsTab({ campaigns, projects, canManage }: { campaigns: CampaignListItem[]; projects: ProjectVM[]; canManage: boolean }) {
   const [list] = useState(campaigns);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
-  const [startDate, setStart] = useState("2026-07-20");
-  const [endDate, setEnd] = useState("2026-08-31");
   const [projectId, setProjectId] = useState<number | null>(projects[0]?.id ?? null);
   const [clusterId, setClusterId] = useState<number | null>(null); // null = whole project
+  const [startDate, setStart] = useState(projects[0]?.startDate ?? "");
+  const [endDate, setEnd] = useState(projects[0]?.endDate ?? "");
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
-  const [openId, setOpenId] = useState<number | null>(null);
+  const [upliftId, setUpliftId] = useState<number | null>(null);
   const [uplift, setUplift] = useState<UpliftRow[] | null>(null);
+  const [membersOf, setMembersOf] = useState<CampaignListItem | null>(null);
+  const [members, setMembers] = useState<CampaignMemberVM[] | null>(null);
+  const [extendOf, setExtendOf] = useState<CampaignListItem | null>(null);
 
   const project = projects.find((p) => p.id === projectId) ?? null;
-  const audience = clusterId
-    ? project?.clusters.find((c) => c.id === clusterId)?.count ?? 0
-    : project?.audienceCount ?? 0;
+  const audience = clusterId ? project?.clusters.find((c) => c.id === clusterId)?.count ?? 0 : project?.audienceCount ?? 0;
 
-  const pickProject = (id: number) => { setProjectId(id); setClusterId(null); };
+  const pickProject = (id: number) => {
+    const p = projects.find((x) => x.id === id) ?? null;
+    setProjectId(id); setClusterId(null);
+    setStart(p?.startDate ?? ""); setEnd(p?.endDate ?? "");
+  };
 
   const submit = () => {
     if (!projectId) { setMsg("Pick a project first."); return; }
@@ -103,37 +108,42 @@ function CampaignsTab({ campaigns, projects }: { campaigns: CampaignListItem[]; 
     setMsg(null);
     start(async () => {
       const res = await createCampaign({ name, startDate, endDate, projectId, clusterId });
-      if (res.ok) { setMsg(`Created "${name}" · ${res.members} farmers enrolled (75/25 test/control).`); setCreating(false); location.reload(); }
+      if (res.ok) { setMsg(`Created "${name}" · ${n(res.members ?? 0)} enrolled${res.skipped ? ` · ${n(res.skipped)} skipped (already in another campaign of this project)` : ""}.`); setCreating(false); location.reload(); }
       else setMsg(res.error ?? "Failed");
     });
   };
-  const openUplift = (id: number) => { setOpenId(id); setUplift(null); getCampaignUplift(id).then(setUplift); };
+  const openUplift = (id: number) => { setUpliftId(id); setUplift(null); getCampaignUplift(id).then(setUplift); };
+  const openMembers = (c: CampaignListItem) => { setMembersOf(c); setMembers(null); getCampaignMembers(c.id).then(setMembers); };
 
   return (
     <div>
       <div className="mb-3 flex items-center justify-between">
-        <div className="text-[13px] text-[#757575]">Run a campaign on a project (all its segments) or one segment inside it. Members are snapshot now and auto-split 75% test / 25% control.</div>
-        <button type="button" onClick={() => setCreating((v) => !v)} disabled={projects.length === 0} className="rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{creating ? "Close" : "+ New campaign"}</button>
+        <div className="text-[13px] text-[#757575]">
+          {canManage
+            ? "Run a campaign on a project (all its segments) or one segment inside it. Farmers already in another campaign of the same project are skipped — no double-contact."
+            : "Your campaigns — showing only the farmers enrolled from your store / region."}
+        </div>
+        {canManage && <button type="button" onClick={() => setCreating((v) => !v)} disabled={projects.length === 0} className="rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{creating ? "Close" : "+ New campaign"}</button>}
       </div>
 
-      {projects.length === 0 && (
+      {canManage && projects.length === 0 && (
         <div className="mb-3 rounded-[10px] border border-[#FFE0B2] bg-[#FFF8E1] px-3.5 py-2.5 text-[12.5px] text-[#8D6E00]">
           Create a project first (Projects page) — campaigns run on a project or one of its segments.
         </div>
       )}
 
-      {creating && project && (
+      {canManage && creating && project && (
         <div className={`${CARD} mb-4 p-[18px]`}>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div><label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Name</label><input className="mt-1 w-full rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Kharif HNI Push" /></div>
-            <div><label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Start</label><input type="date" className="mt-1 w-full rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" value={startDate} onChange={(e) => setStart(e.target.value)} /></div>
-            <div><label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">End</label><input type="date" className="mt-1 w-full rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" value={endDate} onChange={(e) => setEnd(e.target.value)} /></div>
+            <div><label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Start</label><input type="date" min={project.startDate ?? undefined} max={project.endDate ?? undefined} className="mt-1 w-full rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" value={startDate} onChange={(e) => setStart(e.target.value)} /></div>
+            <div><label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">End</label><input type="date" min={startDate || project.startDate || undefined} max={project.endDate ?? undefined} className="mt-1 w-full rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" value={endDate} onChange={(e) => setEnd(e.target.value)} /></div>
           </div>
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Project</label>
               <select className="mt-1 w-full rounded-lg border border-[#E0E0E0] bg-white px-2.5 py-2 text-[13px]" value={projectId ?? ""} onChange={(e) => pickProject(Number(e.target.value))}>
-                {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                {projects.map((p) => <option key={p.id} value={p.id}>{p.name}{p.startDate ? ` (${p.startDate} → ${p.endDate})` : ""}</option>)}
               </select>
             </div>
             <div>
@@ -144,8 +154,9 @@ function CampaignsTab({ campaigns, projects }: { campaigns: CampaignListItem[]; 
               </select>
             </div>
           </div>
+          <div className="mt-2 text-[11px] text-[#9E9E9E]">Campaign dates must fall within the project window{project.endDate ? ` (${project.startDate} → ${project.endDate})` : ""}. To run past the project end, extend the project first.</div>
           <div className="mt-3 flex items-center justify-between rounded-[10px] bg-[#F5F7F5] px-4 py-3">
-            <div className="text-[12px] text-[#616161]">Audience {clusterId ? "(segment)" : "(project, de-duplicated)"}</div>
+            <div className="text-[12px] text-[#616161]">Audience {clusterId ? "(segment)" : "(project, de-duplicated)"} · before cross-campaign de-dup</div>
             <div className="text-[18px] font-bold text-[#2E7D32]">{n(audience)}</div>
           </div>
           <button type="button" onClick={submit} disabled={pending || !name.trim()} className="mt-4 rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{pending ? "Creating…" : "Create & enrol"}</button>
@@ -155,7 +166,7 @@ function CampaignsTab({ campaigns, projects }: { campaigns: CampaignListItem[]; 
 
       <div className={`${CARD} overflow-hidden`}>
         {list.length === 0 ? (
-          <div className="px-4 py-10 text-center text-[13px] text-[#9E9E9E]">No campaigns yet.</div>
+          <div className="px-4 py-10 text-center text-[13px] text-[#9E9E9E]">{canManage ? "No campaigns yet." : "No campaigns assigned to your store / region yet."}</div>
         ) : list.map((c) => (
           <div key={c.id} className="flex flex-wrap items-center gap-3 border-b border-[#F5F5F5] px-4 py-3">
             <div className="min-w-0 flex-1">
@@ -163,13 +174,44 @@ function CampaignsTab({ campaigns, projects }: { campaigns: CampaignListItem[]; 
               <div className="text-[11.5px] text-[#9E9E9E]">{c.startDate} → {c.endDate} · {c.target}</div>
             </div>
             <div className="text-[12px] text-[#616161]">{n(c.members)} farmers</div>
-            <button type="button" onClick={() => openUplift(c.id)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9]">Uplift</button>
+            <button type="button" onClick={() => openMembers(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#1565C0] hover:bg-[#E3F2FD]">Farmers</button>
+            {canManage && <button type="button" onClick={() => openUplift(c.id)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9]">Uplift</button>}
+            {canManage && <button type="button" onClick={() => setExtendOf(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#6A1B9A] hover:bg-[#F3E5F5]">Extend</button>}
           </div>
         ))}
       </div>
 
-      <Modal open={openId != null} onClose={() => setOpenId(null)} className="max-w-[760px]">
-        <ModalHeader eyebrow="Campaign" eyebrowColor="#2E7D32" title="Uplift dashboard" subtitle="Test vs control · purchases within the campaign window" onClose={() => setOpenId(null)} />
+      {/* Scoped farmer list (all roles) */}
+      <Modal open={membersOf != null} onClose={() => setMembersOf(null)} className="max-w-[720px]">
+        {membersOf && (
+          <>
+            <ModalHeader eyebrow="Campaign" eyebrowColor="#1565C0" title={membersOf.name} subtitle={canManage ? "Enrolled farmers" : "Enrolled farmers from your store / region"} onClose={() => setMembersOf(null)} />
+            <div className="max-h-[64vh] overflow-y-auto px-5 py-4">
+              {members == null ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">Loading…</div>
+                : members.length === 0 ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">No farmers.</div>
+                : (
+                  <div className="overflow-x-auto"><table className="w-full min-w-[600px] text-left text-[12.5px]">
+                    <thead><tr className="border-b border-[#EEE] text-[10px] font-bold uppercase text-[#9E9E9E]"><th className="py-2">Farmer</th><th>Store</th><th>Segment</th><th className="text-right">Group</th></tr></thead>
+                    <tbody>{members.map((m) => (
+                      <tr key={m.id} className="border-b border-[#F5F5F5]">
+                        <td className="py-2"><div className="font-semibold text-[#1A1C1A]">{m.name}</div><div className="text-[11px] text-[#9E9E9E]">{m.village ?? "—"} · {m.mobile ?? "—"}</div></td>
+                        <td className="text-[#616161]">{m.store ?? "—"}</td>
+                        <td><span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: segMeta(m.segment).bg, color: segMeta(m.segment).color }}>{segMeta(m.segment).label}</span></td>
+                        <td className="text-right text-[11px] font-semibold text-[#616161]">{m.group}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                  {members.length >= 500 && <div className="mt-2 text-[11px] text-[#9E9E9E]">Showing first 500.</div>}
+                  </div>
+                )}
+            </div>
+          </>
+        )}
+      </Modal>
+
+      {/* Uplift (managers only) */}
+      <Modal open={upliftId != null} onClose={() => setUpliftId(null)} className="max-w-[760px]">
+        <ModalHeader eyebrow="Campaign" eyebrowColor="#2E7D32" title="Uplift dashboard" subtitle="Test vs control · purchases within the campaign window" onClose={() => setUpliftId(null)} />
         <div className="max-h-[64vh] overflow-y-auto px-5 py-4">
           {uplift == null ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">Loading…</div>
             : uplift.length === 0 ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">No members / no sales in window yet. Uplift matures once the campaign period's sales are imported.</div>
@@ -193,29 +235,64 @@ function CampaignsTab({ campaigns, projects }: { campaigns: CampaignListItem[]; 
             )}
         </div>
       </Modal>
+
+      {extendOf && <ExtendModal campaign={extendOf} project={projects.find((p) => p.id === projectId) ?? null} onClose={() => setExtendOf(null)} />}
     </div>
   );
 }
 
+function ExtendModal({ campaign, project, onClose }: { campaign: CampaignListItem; project: ProjectVM | null; onClose: () => void }) {
+  const [end, setEnd] = useState(campaign.endDate);
+  const [saving, start] = useTransition();
+  const [err, setErr] = useState<string | null>(null);
+  const save = () => {
+    setErr(null);
+    start(async () => {
+      const res = await extendCampaign(campaign.id, end);
+      if (res.ok) location.reload(); else setErr(res.error ?? "Failed");
+    });
+  };
+  return (
+    <Modal open onClose={onClose} className="max-w-[440px]">
+      <ModalHeader eyebrow="Extend campaign" eyebrowColor="#6A1B9A" title={campaign.name} subtitle={`Currently ends ${campaign.endDate}`} onClose={onClose} />
+      <div className="px-5 py-4">
+        <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">New end date</label>
+        <input type="date" min={campaign.endDate} max={project?.endDate ?? undefined} className="mt-1 w-full rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" value={end} onChange={(e) => setEnd(e.target.value)} />
+        <div className="mt-1 text-[11px] text-[#9E9E9E]">Can't go past the project end. To extend further, extend the project first (Projects page).</div>
+        {err && <div className="mt-2 text-[12px] text-[#C62828]">{err}</div>}
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="rounded-[10px] border border-[#E0E0E0] px-4 py-2 text-[13px] font-semibold text-[#616161]">Cancel</button>
+          <button type="button" onClick={save} disabled={saving} className="rounded-[10px] bg-[#6A1B9A] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{saving ? "Extending…" : "Extend"}</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 /* ══════════════════ Shell ══════════════════ */
-export function CampaignsScreen({ templates, campaigns, stores: _stores, projects }: {
-  templates: CommTemplateVM[]; campaigns: CampaignListItem[]; stores: StoreLite[]; projects: ProjectVM[];
+export function CampaignsScreen({ templates, campaigns, stores: _stores, projects, canManage }: {
+  templates: CommTemplateVM[]; campaigns: CampaignListItem[]; stores: StoreLite[]; projects: ProjectVM[]; canManage: boolean;
 }) {
   const [tab, setTab] = useState<"comms" | "campaigns">("campaigns");
-  const TABS = [["campaigns", "Campaigns"], ["comms", "Comm Plan"]] as const;
+  // Officers/RMs get the scoped campaign view only; the comm-plan config is central.
+  const TABS: [("comms" | "campaigns"), string][] = canManage
+    ? [["campaigns", "Campaigns"], ["comms", "Comm Plan"]]
+    : [["campaigns", "Campaigns"]];
   return (
     <div className="animate-[fadeUp_0.4s_ease-out]">
-      <div className="mb-4 inline-flex flex-wrap rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] p-1">
-        {TABS.map(([k, label]) => (
-          <button key={k} type="button" onClick={() => setTab(k)}
-            className="rounded-[8px] px-4 py-2 text-[12.5px] font-semibold transition-colors"
-            style={{ background: tab === k ? "#fff" : "transparent", color: tab === k ? "#2E7D32" : "#9E9E9E", boxShadow: tab === k ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}>
-            {label}
-          </button>
-        ))}
-      </div>
-      {tab === "comms" && <CommPlanTab templates={templates} />}
-      {tab === "campaigns" && <CampaignsTab campaigns={campaigns} projects={projects} />}
+      {canManage && (
+        <div className="mb-4 inline-flex flex-wrap rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] p-1">
+          {TABS.map(([k, label]) => (
+            <button key={k} type="button" onClick={() => setTab(k)}
+              className="rounded-[8px] px-4 py-2 text-[12.5px] font-semibold transition-colors"
+              style={{ background: tab === k ? "#fff" : "transparent", color: tab === k ? "#2E7D32" : "#9E9E9E", boxShadow: tab === k ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+      {tab === "comms" && canManage && <CommPlanTab templates={templates} />}
+      {tab === "campaigns" && <CampaignsTab campaigns={campaigns} projects={projects} canManage={canManage} />}
     </div>
   );
 }

@@ -338,6 +338,8 @@ model CampaignMember {
   segment    String // snapshot at enrolment
   crop       String?
   group      String // TEST | CONTROL
+  storeId    Int? // snapshot of the farmer's store (for officer-scoped visibility)
+  zone       String? // snapshot of the farmer's zone (for regional-scoped visibility)
   reached    Boolean   @default(false)
   reachedAt  DateTime?
   medium     String? // IN_PERSON | CALL | WHATSAPP
@@ -345,6 +347,8 @@ model CampaignMember {
 
   @@unique([campaignId, farmerId])
   @@index([campaignId])
+  @@index([campaignId, storeId])
+  @@index([campaignId, zone])
 }
 
 /// Editable communication plan row per campaign segment (WF3).
@@ -425,7 +429,9 @@ model Project {
   title       String
   status      ProjectStatus   @default(PLANNED)
   owner       String?
-  due         String? // display date
+  due         String? // display date (legacy)
+  startDate   DateTime? // project duration start — campaigns must fall within
+  endDate     DateTime? // project duration end — campaigns cannot extend past this
   groupName   String? // target group description
   farmerIds   Int[]           @default([])
   farmerNames String[]        @default([])

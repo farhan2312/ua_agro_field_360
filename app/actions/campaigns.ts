@@ -10,6 +10,13 @@ import {
   parseCriteria, resolveClusterCount, resolveClusterIds, scopedCriteriaWhere,
   hasConditions, type ClusterCriteria,
 } from "@/lib/cluster-rules";
+import { getScope, canManage } from "@/lib/scope";
+
+const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
+async function requireManager(): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { role } = await getScope();
+  return canManage(role) ? { ok: true } : { ok: false, error: "Only the central team can create or change this." };
+}
 
 export type CropFilter = string; // "all" or a canonical crop name (see lib/crops.ts)
 export type CropSource = "any" | "sales" | "visit"; // which labelled crop set to match
@@ -216,7 +223,7 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
 }
 
 export interface ProjectClusterVM { id: number; name: string; count: number }
-export interface ProjectVM { id: number; name: string; status: string; audienceCount: number; clusters: ProjectClusterVM[] }
+export interface ProjectVM { id: number; name: string; status: string; audienceCount: number; startDate: string | null; endDate: string | null; clusters: ProjectClusterVM[] }
 
 /** Projects with their clusters + de-duplicated live audience (union across clusters). */
 export async function listProjects(): Promise<ProjectVM[]> {
@@ -237,33 +244,54 @@ export async function listProjects(): Promise<ProjectVM[]> {
   );
   return projects.map((p, i) => ({
     id: p.id, name: p.title, status: p.status, audienceCount: audiences[i],
+    startDate: iso(p.startDate), endDate: iso(p.endDate),
     clusters: p.clusters.map((c) => ({ id: c.id, name: c.name, count: countById.get(c.id) ?? 0 })),
   }));
 }
 
-export async function createProject(name: string, clusterIds: number[]): Promise<{ ok: boolean; id?: number; error?: string }> {
+export async function createProject(name: string, clusterIds: number[], startDate?: string, endDate?: string): Promise<{ ok: boolean; id?: number; error?: string }> {
+  const perm = await requireManager(); if (!perm.ok) return perm;
   const t = name.trim();
   if (!t) return { ok: false, error: "Give the project a name." };
-  if (!clusterIds.length) return { ok: false, error: "Add at least one cluster." };
+  if (!clusterIds.length) return { ok: false, error: "Add at least one segment." };
+  if (!startDate || !endDate) return { ok: false, error: "Set a project start and end date." };
+  const s = new Date(startDate), e = new Date(endDate);
+  if (!(s <= e)) return { ok: false, error: "End date must be on or after the start date." };
   try {
     const p = await prisma.project.create({
-      data: { title: t, status: "PLANNED", source: "REAL", clusters: { connect: clusterIds.map((id) => ({ id })) } },
+      data: { title: t, status: "PLANNED", source: "REAL", startDate: s, endDate: e, clusters: { connect: clusterIds.map((id) => ({ id })) } },
     });
-    revalidatePath("/campaigns");
+    revalidatePath("/projects"); revalidatePath("/campaigns");
     return { ok: true, id: p.id };
-  } catch (e) { return { ok: false, error: e instanceof Error ? e.message : "Create failed" }; }
+  } catch (e2) { return { ok: false, error: e2 instanceof Error ? e2.message : "Create failed" }; }
+}
+
+/** Extend a project's end date (central only). Campaigns can then be extended up to the new end. */
+export async function extendProject(projectId: number, newEndDate: string): Promise<{ ok: boolean; error?: string }> {
+  const perm = await requireManager(); if (!perm.ok) return perm;
+  const p = await prisma.project.findUnique({ where: { id: projectId }, select: { endDate: true } });
+  if (!p) return { ok: false, error: "Project not found." };
+  const nd = new Date(newEndDate);
+  if (p.endDate && !(nd > p.endDate)) return { ok: false, error: `New end must be after the current end (${iso(p.endDate)}).` };
+  try {
+    await prisma.project.update({ where: { id: projectId }, data: { endDate: nd } });
+    revalidatePath("/projects"); revalidatePath("/campaigns");
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e instanceof Error ? e.message : "Extend failed" }; }
 }
 
 export async function setProjectClusters(projectId: number, clusterIds: number[]): Promise<{ ok: boolean; error?: string }> {
+  const perm = await requireManager(); if (!perm.ok) return perm;
   try {
     await prisma.project.update({ where: { id: projectId }, data: { clusters: { set: clusterIds.map((id) => ({ id })) } } });
-    revalidatePath("/campaigns");
+    revalidatePath("/projects"); revalidatePath("/campaigns");
     return { ok: true };
   } catch (e) { return { ok: false, error: e instanceof Error ? e.message : "Update failed" }; }
 }
 
 export async function deleteProject(id: number): Promise<{ ok: boolean; error?: string }> {
-  try { await prisma.project.delete({ where: { id } }); revalidatePath("/campaigns"); return { ok: true }; }
+  const perm = await requireManager(); if (!perm.ok) return perm;
+  try { await prisma.project.delete({ where: { id } }); revalidatePath("/projects"); revalidatePath("/campaigns"); return { ok: true }; }
   catch (e) { return { ok: false, error: e instanceof Error ? e.message : "Delete failed" }; }
 }
 
@@ -295,66 +323,87 @@ export interface CreateCampaignInput {
 
 const CLUSTER_SELECT = { id: true, name: true, criteria: true, mode: true, farmerIds: true } as const;
 
-export async function createCampaign(input: CreateCampaignInput): Promise<{ ok: boolean; id?: number; members?: number; error?: string }> {
+export async function createCampaign(input: CreateCampaignInput): Promise<{ ok: boolean; id?: number; members?: number; skipped?: number; error?: string }> {
+  const perm = await requireManager(); if (!perm.ok) return perm;
   try {
     if (!input.name.trim()) return { ok: false, error: "Name is required." };
     if (!input.projectId) return { ok: false, error: "Pick a project." };
+    if (!input.startDate || !input.endDate) return { ok: false, error: "Set the campaign start and end date." };
 
-    // Resolve the audience id-set — snapshot at launch (a single cluster, or the union of the project's clusters).
+    // Load the project (its duration + segments).
+    const project = await prisma.project.findUnique({ where: { id: input.projectId }, include: { clusters: { select: CLUSTER_SELECT } } });
+    if (!project) return { ok: false, error: "Project not found." };
+
+    // Campaign window must sit inside the project's duration.
+    const cs = new Date(input.startDate), ce = new Date(input.endDate);
+    if (!(cs <= ce)) return { ok: false, error: "Campaign end must be on or after its start." };
+    if (project.startDate && cs < project.startDate) return { ok: false, error: `Campaign can't start before the project (${iso(project.startDate)}).` };
+    if (project.endDate && ce > project.endDate) return { ok: false, error: `Campaign can't end after the project (${iso(project.endDate)}). Extend the project first.` };
+
+    // Resolve the audience id-set — a single segment, or the union of the project's segments.
     let ids: number[];
     if (input.clusterId) {
-      const c = await prisma.cluster.findUnique({ where: { id: input.clusterId }, select: CLUSTER_SELECT });
-      if (!c) return { ok: false, error: "Cluster not found." };
-      // Guard: the cluster must actually belong to the chosen project.
-      const inProject = await prisma.project.findFirst({ where: { id: input.projectId, clusters: { some: { id: c.id } } }, select: { id: true } });
-      if (!inProject) return { ok: false, error: "That cluster is not part of the selected project." };
+      const c = project.clusters.find((x) => x.id === input.clusterId);
+      if (!c) return { ok: false, error: "That segment is not part of the selected project." };
       ids = await clusterIdsOf(c);
     } else {
-      const p = await prisma.project.findUnique({ where: { id: input.projectId }, include: { clusters: { select: CLUSTER_SELECT } } });
-      if (!p) return { ok: false, error: "Project not found." };
-      if (!p.clusters.length) return { ok: false, error: "This project has no clusters." };
-      // NB: pass an explicit arrow — `.map(clusterIdsOf)` would feed the array index in as `cap`.
-      const sets = await Promise.all(p.clusters.map((c) => clusterIdsOf(c)));
-      ids = [...new Set(sets.flat())]; // de-duplicate farmers shared across clusters
+      if (!project.clusters.length) return { ok: false, error: "This project has no segments." };
+      const sets = await Promise.all(project.clusters.map((c) => clusterIdsOf(c)));
+      ids = [...new Set(sets.flat())]; // de-duplicate farmers shared across segments
     }
     if (!ids.length) return { ok: false, error: "The selected audience is empty right now." };
-    // The audience count shown to the user is uncapped; refuse rather than silently
-    // enrol only part of a pathologically large audience (see ENROLL_CAP).
-    if (ids.length >= ENROLL_CAP) return { ok: false, error: `Audience is too large to enrol in one campaign (${ENROLL_CAP.toLocaleString("en-IN")}+). Narrow the cluster or project first.` };
+
+    // Cross-campaign de-dup: never enrol a farmer already in ANOTHER campaign of this project
+    // (one project = one contact per farmer, so later campaigns don't spam them).
+    const already = await prisma.campaignMember.findMany({ where: { campaign: { projectId: input.projectId } }, select: { farmerId: true }, distinct: ["farmerId"] });
+    const alreadySet = new Set(already.map((a) => a.farmerId));
+    const gross = ids.length;
+    ids = ids.filter((id) => !alreadySet.has(id));
+    const skipped = gross - ids.length;
+    if (!ids.length) return { ok: false, error: "Every farmer here is already enrolled in another campaign of this project." };
+    if (ids.length >= ENROLL_CAP) return { ok: false, error: `Audience is too large to enrol in one campaign (${ENROLL_CAP.toLocaleString("en-IN")}+). Narrow the project first.` };
 
     const camp = await prisma.campaign.create({
-      data: {
-        name: input.name.trim(),
-        startDate: new Date(input.startDate),
-        endDate: new Date(input.endDate),
-        projectId: input.projectId,
-        clusterId: input.clusterId ?? null,
-        testPct: input.testPct ?? 75,
-        status: "ACTIVE",
-      },
+      data: { name: input.name.trim(), startDate: cs, endDate: ce, projectId: input.projectId, clusterId: input.clusterId ?? null, testPct: input.testPct ?? 75, status: "ACTIVE" },
     });
 
-    // Enrol the snapshot, split 75/25 test/control by a deterministic id hash. Fetch segment/crop in chunks.
+    // Enrol snapshot; store/zone denormalized so officers/RMs see only their own farmers. 75/25 test/control.
     const controlEvery = Math.max(2, Math.round(100 / (100 - (input.testPct ?? 75)))); // ~4 for 75/25
     let total = 0;
     for (let i = 0; i < ids.length; i += 5000) {
       const slice = ids.slice(i, i + 5000);
-      const farmers = await prisma.farmer.findMany({ where: { id: { in: slice } }, select: { id: true, campaignSegment: true, cropTags: true } });
+      const farmers = await prisma.farmer.findMany({ where: { id: { in: slice } }, select: { id: true, campaignSegment: true, cropTags: true, storeId: true, zone: true } });
       const members = farmers.map((f) => ({
-        campaignId: camp.id,
-        farmerId: f.id,
-        segment: f.campaignSegment ?? "OTHER",
-        crop: f.cropTags[0] ?? null,
+        campaignId: camp.id, farmerId: f.id, segment: f.campaignSegment ?? "OTHER",
+        crop: f.cropTags[0] ?? null, storeId: f.storeId ?? null, zone: f.zone ?? null,
         group: f.id % controlEvery === 0 ? "CONTROL" : "TEST",
       }));
       const res = await prisma.campaignMember.createMany({ data: members, skipDuplicates: true });
       total += res.count;
     }
     revalidatePath("/campaigns");
-    return { ok: true, id: camp.id, members: total };
+    return { ok: true, id: camp.id, members: total, skipped };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Create failed" };
   }
+}
+
+/** Extend a campaign's end date (central only). Cannot exceed the project's end — extend the project first. */
+export async function extendCampaign(campaignId: number, newEndDate: string): Promise<{ ok: boolean; error?: string }> {
+  const perm = await requireManager(); if (!perm.ok) return perm;
+  const camp = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { endDate: true, projectId: true } });
+  if (!camp) return { ok: false, error: "Campaign not found." };
+  const nd = new Date(newEndDate);
+  if (!(nd > camp.endDate)) return { ok: false, error: `New end must be after the current end (${iso(camp.endDate)}).` };
+  if (camp.projectId) {
+    const p = await prisma.project.findUnique({ where: { id: camp.projectId }, select: { endDate: true } });
+    if (p?.endDate && nd > p.endDate) return { ok: false, error: `Can't extend past the project end (${iso(p.endDate)}). Extend the project first.` };
+  }
+  try {
+    await prisma.campaign.update({ where: { id: campaignId }, data: { endDate: nd } });
+    revalidatePath("/campaigns");
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e instanceof Error ? e.message : "Extend failed" }; }
 }
 
 export interface CampaignListItem {
@@ -362,11 +411,22 @@ export interface CampaignListItem {
   target: string; members: number;
 }
 
+/** Member `where` for the current user's scope (officer→their store, RM→their zone). null = see all. */
+async function memberScopeWhere(): Promise<Prisma.CampaignMemberWhereInput | null | "none"> {
+  const { role, storeId, zone } = await getScope();
+  if (role === "officer") return storeId == null ? "none" : { storeId };
+  if (role === "regional") return zone == null ? "none" : { zone };
+  return null; // central / sysadmin
+}
+
 export async function listCampaigns(): Promise<CampaignListItem[]> {
+  const scope = await memberScopeWhere();
+  if (scope === "none") return []; // officer/RM with no store/zone → nothing to show
   const camps = await prisma.campaign.findMany({
     orderBy: { createdAt: "desc" },
     take: 100,
-    include: { _count: { select: { members: true } } },
+    where: scope ? { members: { some: scope } } : undefined, // only campaigns that reach my store/zone
+    include: { _count: { select: { members: scope ? { where: scope } : true } } }, // scoped member count
   });
   // Batch-resolve target names (loose ids — campaigns don't relation-load project/cluster).
   const projIds = [...new Set(camps.map((c) => c.projectId).filter((x): x is number => x != null))];
@@ -382,12 +442,39 @@ export async function listCampaigns(): Promise<CampaignListItem[]> {
     startDate: c.startDate.toISOString().slice(0, 10),
     endDate: c.endDate.toISOString().slice(0, 10),
     target: c.clusterId
-      ? `Cluster · ${cName.get(c.clusterId) ?? "removed"}`
+      ? `Segment · ${cName.get(c.clusterId) ?? "removed"}`
       : c.projectId
         ? `Project · ${pName.get(c.projectId) ?? "removed"}`
         : c.targetSegments.map((s) => segMeta(s).label).join(", ") || "—", // legacy segment campaigns
     members: c._count.members,
   }));
+}
+
+/** Scoped enrolled-farmer list for a campaign (officer→their store, RM→their zone, central→all). */
+export interface CampaignMemberVM { id: number; name: string; mobile: string | null; village: string | null; store: string | null; segment: string; group: string; reached: boolean }
+export async function getCampaignMembers(campaignId: number, limit = 500): Promise<CampaignMemberVM[]> {
+  const scope = await memberScopeWhere();
+  if (scope === "none") return [];
+  const members = await prisma.campaignMember.findMany({
+    where: { campaignId, ...(scope ?? {}) },
+    take: limit, orderBy: { id: "asc" },
+    select: { id: true, farmerId: true, segment: true, group: true, reached: true, storeId: true },
+  });
+  if (!members.length) return [];
+  const [farmers, stores] = await Promise.all([
+    prisma.farmer.findMany({ where: { id: { in: members.map((m) => m.farmerId) } }, select: { id: true, name: true, mobile: true, village: true } }),
+    prisma.store.findMany({ select: { id: true, name: true } }),
+  ]);
+  const fMap = new Map(farmers.map((f) => [f.id, f]));
+  const sMap = new Map(stores.map((s) => [s.id, shortStoreName(s.name)]));
+  return members.map((m) => {
+    const f = fMap.get(m.farmerId);
+    return {
+      id: m.id, name: f?.name ?? `Farmer #${m.farmerId}`, mobile: f?.mobile ?? null, village: f?.village ?? null,
+      store: m.storeId != null ? sMap.get(m.storeId) ?? null : null,
+      segment: m.segment, group: m.group, reached: m.reached,
+    };
+  });
 }
 
 export interface UpliftRow {
@@ -399,8 +486,10 @@ export interface UpliftRow {
   incremental: number;
 }
 
-/** Uplift dashboard: test vs control, purchases attributed to sales within the window. */
+/** Uplift dashboard: test vs control, purchases attributed to sales within the window. Central/Sysadmin only. */
 export async function getCampaignUplift(campaignId: number): Promise<UpliftRow[]> {
+  const { role } = await getScope();
+  if (!canManage(role)) return []; // officers/RMs get the scoped farmer list instead
   const camp = await prisma.campaign.findUnique({ where: { id: campaignId } });
   if (!camp) return [];
   const members = await prisma.campaignMember.findMany({

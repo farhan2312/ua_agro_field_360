@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
 import {
-  listProjects, createProject, setProjectClusters, deleteProject,
+  listProjects, createProject, setProjectClusters, deleteProject, extendProject,
   type ProjectVM, type ClusterVM,
 } from "@/app/actions/campaigns";
 
@@ -19,6 +19,7 @@ export function ProjectsTab({ initial, clusters }: { initial: ProjectVM[]; clust
   const [list, setList] = useState(initial);
   const [building, setBuilding] = useState(false);
   const [editing, setEditing] = useState<ProjectVM | null>(null);
+  const [extendingP, setExtendingP] = useState<ProjectVM | null>(null);
   const [pending, start] = useTransition();
 
   const refresh = () => start(async () => setList(await listProjects()));
@@ -53,6 +54,7 @@ export function ProjectsTab({ initial, clusters }: { initial: ProjectVM[]; clust
                   <div className="flex items-center gap-2">
                     <span className="text-[13.5px] font-bold text-[#1A1C1A]">{p.name}</span>
                     <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: st.bg, color: st.color }}>{p.status}</span>
+                    {p.startDate && <span className="text-[10.5px] font-medium text-[#9E9E9E]">{p.startDate} → {p.endDate}</span>}
                   </div>
                   <div className="mt-1 flex flex-wrap gap-1.5">
                     {p.clusters.length === 0 ? (
@@ -69,6 +71,7 @@ export function ProjectsTab({ initial, clusters }: { initial: ProjectVM[]; clust
                   <div className="text-[10.5px] text-[#9E9E9E]">unique farmers</div>
                 </div>
                 <button type="button" onClick={() => setEditing(p)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9]">Edit</button>
+                <button type="button" onClick={() => setExtendingP(p)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#6A1B9A] hover:bg-[#F3E5F5]">Extend</button>
                 <button type="button" onClick={() => remove(p.id)} disabled={pending} className="rounded-[8px] bg-[#FDECEA] px-3 py-1.5 text-[12px] font-semibold text-[#C62828] hover:bg-[#F9DCD8] disabled:opacity-50">Delete</button>
               </div>
             </div>
@@ -91,7 +94,33 @@ export function ProjectsTab({ initial, clusters }: { initial: ProjectVM[]; clust
           onSaved={() => { setEditing(null); refresh(); }}
         />
       )}
+      {extendingP && <ExtendProjectModal project={extendingP} onClose={() => setExtendingP(null)} onSaved={() => { setExtendingP(null); refresh(); }} />}
     </div>
+  );
+}
+
+function ExtendProjectModal({ project, onClose, onSaved }: { project: ProjectVM; onClose: () => void; onSaved: () => void }) {
+  const [end, setEnd] = useState(project.endDate ?? "");
+  const [saving, start] = useTransition();
+  const [err, setErr] = useState<string | null>(null);
+  const save = () => {
+    setErr(null);
+    start(async () => { const res = await extendProject(project.id, end); if (res.ok) onSaved(); else setErr(res.error ?? "Failed"); });
+  };
+  return (
+    <Modal open onClose={onClose} className="max-w-[440px]">
+      <ModalHeader eyebrow="Extend project" eyebrowColor="#6A1B9A" title={project.name} subtitle={project.endDate ? `Currently ends ${project.endDate}` : "No end date set"} onClose={onClose} />
+      <div className="px-5 py-4">
+        <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">New end date</label>
+        <input type="date" min={project.endDate ?? undefined} className="mt-1 w-full rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" value={end} onChange={(e) => setEnd(e.target.value)} />
+        <div className="mt-1 text-[11px] text-[#9E9E9E]">Extending the project lets its campaigns be extended up to the new end.</div>
+        {err && <div className="mt-2 text-[12px] text-[#C62828]">{err}</div>}
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="rounded-[10px] border border-[#E0E0E0] px-4 py-2 text-[13px] font-semibold text-[#616161]">Cancel</button>
+          <button type="button" onClick={save} disabled={saving || !end} className="rounded-[10px] bg-[#6A1B9A] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{saving ? "Extending…" : "Extend"}</button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -101,6 +130,8 @@ function ProjectBuilder({ clusters, project, onClose, onSaved }: {
 }) {
   const [name, setName] = useState(project?.name ?? "");
   const [picked, setPicked] = useState<number[]>(project?.clusters.map((c) => c.id) ?? []);
+  const [startDate, setStart] = useState(project?.startDate ?? "");
+  const [endDate, setEnd] = useState(project?.endDate ?? "");
   const [saving, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
 
@@ -115,7 +146,7 @@ function ProjectBuilder({ clusters, project, onClose, onSaved }: {
     start(async () => {
       const res = project
         ? await setProjectClusters(project.id, picked)
-        : await createProject(name, picked);
+        : await createProject(name, picked, startDate, endDate);
       if (res.ok) onSaved();
       else setErr(res.error ?? "Failed");
     });
@@ -135,6 +166,11 @@ function ProjectBuilder({ clusters, project, onClose, onSaved }: {
           <>
             <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Name</label>
             <input className="mt-1 mb-3 w-full rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Kharif Maize Push" />
+            <div className="mb-3 grid grid-cols-2 gap-3">
+              <div><label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Start date</label><input type="date" className="mt-1 w-full rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" value={startDate} onChange={(e) => setStart(e.target.value)} /></div>
+              <div><label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">End date</label><input type="date" min={startDate || undefined} className="mt-1 w-full rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" value={endDate} onChange={(e) => setEnd(e.target.value)} /></div>
+            </div>
+            <div className="mb-3 text-[11px] text-[#9E9E9E]">Campaigns in this project must run within these dates. You can extend the project later.</div>
           </>
         )}
 
@@ -164,7 +200,7 @@ function ProjectBuilder({ clusters, project, onClose, onSaved }: {
         {err && <div className="mt-2 text-[12px] text-[#C62828]">{err}</div>}
         <div className="mt-4 flex justify-end gap-2">
           <button type="button" onClick={onClose} className="rounded-[10px] border border-[#E0E0E0] px-4 py-2 text-[13px] font-semibold text-[#616161]">Cancel</button>
-          <button type="button" onClick={save} disabled={saving || (!project && !name.trim()) || picked.length === 0}
+          <button type="button" onClick={save} disabled={saving || (!project && (!name.trim() || !startDate || !endDate)) || picked.length === 0}
             className="rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">
             {saving ? "Saving…" : project ? "Save changes" : "Create project"}
           </button>
