@@ -3,9 +3,10 @@
 import { useState, useTransition } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
 import { segMeta, fillTemplate } from "@/lib/campaign-segments";
+import { inr } from "@/lib/format";
 import {
-  saveCommTemplate, createCampaign, getCampaignUplift, extendCampaign, getCampaignMembers,
-  type CampaignListItem, type UpliftRow, type ProjectVM, type CampaignMemberVM,
+  saveCommTemplate, createCampaign, getCampaignTracker, extendCampaign, getCampaignMembers, markCampaignMember,
+  type CampaignListItem, type CampaignTracker, type ProjectVM, type CampaignMemberVM,
 } from "@/app/actions/campaigns";
 
 /** Distinct-crop option (kept here as it's imported by the Segmentation + Projects screens). */
@@ -87,8 +88,8 @@ function CampaignsTab({ campaigns, projects, canManage }: { campaigns: CampaignL
   const [endDate, setEnd] = useState(projects[0]?.endDate ?? "");
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
-  const [upliftId, setUpliftId] = useState<number | null>(null);
-  const [uplift, setUplift] = useState<UpliftRow[] | null>(null);
+  const [trackerOf, setTrackerOf] = useState<CampaignListItem | null>(null);
+  const [tracker, setTracker] = useState<CampaignTracker | null>(null);
   const [membersOf, setMembersOf] = useState<CampaignListItem | null>(null);
   const [members, setMembers] = useState<CampaignMemberVM[] | null>(null);
   const [extendOf, setExtendOf] = useState<CampaignListItem | null>(null);
@@ -112,7 +113,7 @@ function CampaignsTab({ campaigns, projects, canManage }: { campaigns: CampaignL
       else setMsg(res.error ?? "Failed");
     });
   };
-  const openUplift = (id: number) => { setUpliftId(id); setUplift(null); getCampaignUplift(id).then(setUplift); };
+  const openTracker = (c: CampaignListItem) => { setTrackerOf(c); setTracker(null); getCampaignTracker(c.id).then(setTracker); };
   const openMembers = (c: CampaignListItem) => { setMembersOf(c); setMembers(null); getCampaignMembers(c.id).then(setMembers); };
 
   return (

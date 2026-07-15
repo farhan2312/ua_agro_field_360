@@ -26,7 +26,8 @@ export interface ClusterCriteria {
   category?: string; // product category purchased
   spendMin?: number; // p12mSpend >= (₹)
   spendMax?: number; // p12mSpend <  (₹)
-  zone?: string;
+  zone?: string; // single region (legacy)
+  zones?: string[]; // multiple regions — match ANY
   district?: string;
   q?: string; // free-text (name/mobile/village/code)
   explicitIds?: number[]; // hand-picked (static clusters)
@@ -56,7 +57,8 @@ export function criteriaToWhere(c: ClusterCriteria): Prisma.FarmerWhereInput {
     const e = LEAD_LABEL_TO_ENUM[c.leadStatus as never];
     and.push(e ? { leadStatus: e as never } : { id: { in: [] } });
   }
-  if (c.zone) and.push({ zone: c.zone });
+  if (c.zones?.length) and.push({ zone: { in: c.zones } });
+  else if (c.zone) and.push({ zone: c.zone });
   if (c.district) and.push({ district: c.district });
   if (c.category) and.push({ sales: { some: { category: c.category } } });
   if (c.spendMin != null || c.spendMax != null)
@@ -95,7 +97,8 @@ export function describeCriteria(c: ClusterCriteria, storeNames?: Map<number, st
   const parts: string[] = [];
   if (c.storeIds?.length)
     parts.push(c.storeIds.length === 1 ? storeNames?.get(c.storeIds[0]) ?? `Store #${c.storeIds[0]}` : `${c.storeIds.length} stores`);
-  if (c.zone) parts.push(c.zone);
+  if (c.zones?.length) parts.push(c.zones.length === 1 ? c.zones[0] : `${c.zones.length} regions`);
+  else if (c.zone) parts.push(c.zone);
   if (c.district) parts.push(c.district);
   if (c.campaignSegments?.length) parts.push(c.campaignSegments.map((s) => segMeta(s).label).join(" / "));
   else if (c.campaignSegment) parts.push(segMeta(c.campaignSegment).label);

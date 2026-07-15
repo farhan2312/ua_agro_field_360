@@ -3,7 +3,7 @@ import { getRole } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { canAccess } from "@/lib/roles";
 import { listClustersWithCounts, getCropOptions, type ClusterVM } from "@/app/actions/campaigns";
-import { ClustersTab } from "@/components/campaigns/ClustersTab";
+import { ClustersTab, type StoreOption } from "@/components/campaigns/ClustersTab";
 import type { CropOption } from "@/components/campaigns/CampaignsScreen";
 
 export const dynamic = "force-dynamic";
@@ -15,22 +15,25 @@ export default async function SegmentationPage() {
   let clusters: ClusterVM[] = [];
   let zones: string[] = [];
   let crops: CropOption[] = [];
+  let stores: StoreOption[] = [];
   try {
-    const [cls, zoneRows, cropOpts] = await Promise.all([
+    const [cls, zoneRows, cropOpts, storeRows] = await Promise.all([
       listClustersWithCounts(),
       prisma.farmer.findMany({ where: { zone: { not: null }, source: "REAL" }, distinct: ["zone"], select: { zone: true }, orderBy: { zone: "asc" } }),
       getCropOptions(),
+      prisma.store.findMany({ where: { source: "REAL" }, select: { id: true, name: true, zone: true }, orderBy: { name: "asc" } }),
     ]);
     clusters = cls;
     zones = zoneRows.map((z) => z.zone!).filter(Boolean);
     crops = cropOpts;
+    stores = storeRows.map((s) => ({ id: s.id, name: s.name, zone: s.zone }));
   } catch {
     // DB unavailable — render an empty shell.
   }
 
   return (
     <div className="animate-[fadeUp_0.4s_ease-out]">
-      <ClustersTab initial={clusters} zones={zones} crops={crops} />
+      <ClustersTab initial={clusters} zones={zones} crops={crops} stores={stores} />
     </div>
   );
 }

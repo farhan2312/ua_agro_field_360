@@ -26,7 +26,7 @@ export default async function CampaignsPage() {
       prisma.commTemplate.findMany({ orderBy: { priority: "asc" } }),
       listCampaigns(),
       prisma.store.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
-      listProjects(),
+      manage ? listProjects() : Promise.resolve<ProjectVM[]>([]), // project catalog is central-only; don't leak it to officers/RMs
     ]);
     templates = tpls.map((t) => ({
       segment: t.segment, priority: t.priority, medium: t.medium,

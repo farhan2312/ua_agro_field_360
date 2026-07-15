@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
 import { SEGMENT_COLUMNS, segMeta } from "@/lib/campaign-segments";
 import { cropLabel } from "@/lib/crops";
+import { shortStoreName } from "@/lib/store-utils";
 import type { ClusterCriteria } from "@/lib/cluster-rules";
 import type { CropOption } from "./CampaignsScreen";
 import {
@@ -23,7 +24,9 @@ const SPEND_PRESETS: { label: string; min?: number; max?: number }[] = [
 ];
 const ORIGIN_LABEL: Record<string, string> = { map: "Map", segment: "Segments", analytics: "Analytics" };
 
-export function ClustersTab({ initial, zones, crops }: { initial: ClusterVM[]; zones: string[]; crops: CropOption[] }) {
+export interface StoreOption { id: number; name: string; zone: string | null }
+
+export function ClustersTab({ initial, zones, crops, stores }: { initial: ClusterVM[]; zones: string[]; crops: CropOption[]; stores: StoreOption[] }) {
   const [list, setList] = useState(initial);
   const [building, setBuilding] = useState(false);
   const [viewing, setViewing] = useState<ClusterVM | null>(null);
@@ -63,18 +66,19 @@ export function ClustersTab({ initial, zones, crops }: { initial: ClusterVM[]; z
         ))}
       </div>
 
-      {building && <RuleBuilder zones={zones} crops={crops} onClose={() => setBuilding(false)} onCreated={() => { setBuilding(false); refresh(); }} />}
+      {building && <RuleBuilder zones={zones} crops={crops} stores={stores} onClose={() => setBuilding(false)} onCreated={() => { setBuilding(false); refresh(); }} />}
       {viewing && <MembersModal cluster={viewing} onClose={() => setViewing(null)} />}
     </div>
   );
 }
 
 /* ── Rule builder ── */
-function RuleBuilder({ zones, crops: cropOpts, onClose, onCreated }: { zones: string[]; crops: CropOption[]; onClose: () => void; onCreated: () => void }) {
+function RuleBuilder({ zones, crops: cropOpts, stores, onClose, onCreated }: { zones: string[]; crops: CropOption[]; stores: StoreOption[]; onClose: () => void; onCreated: () => void }) {
   const [name, setName] = useState("");
   const [segs, setSegs] = useState<string[]>([]);
   const [crops, setCrops] = useState<string[]>([]);
-  const [zone, setZone] = useState("");
+  const [zoneList, setZoneList] = useState<string[]>([]);
+  const [storeIds, setStoreIds] = useState<number[]>([]);
   const [spendIdx, setSpendIdx] = useState(-1);
   const [q, setQ] = useState("");
   const [count, setCount] = useState<number | null>(null);
@@ -82,14 +86,22 @@ function RuleBuilder({ zones, crops: cropOpts, onClose, onCreated }: { zones: st
   const [saving, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
 
+  const storeById = useMemo(() => new Map(stores.map((s) => [s.id, s])), [stores]);
+  // Stores cascade off the selected regions: with regions picked, only stores in those regions are offered.
+  const availStores = useMemo(
+    () => (zoneList.length ? stores.filter((s) => s.zone && zoneList.includes(s.zone)) : stores),
+    [zoneList, stores],
+  );
+
   const criteria = (): ClusterCriteria => ({
     campaignSegments: segs.length ? segs : undefined,
     cropTags: crops.length ? crops : undefined,
-    zone: zone || undefined,
+    zones: zoneList.length ? zoneList : undefined,
+    storeIds: storeIds.length ? storeIds : undefined,
     ...(spendIdx >= 0 ? { spendMin: SPEND_PRESETS[spendIdx].min, spendMax: SPEND_PRESETS[spendIdx].max } : {}),
     q: q.trim() || undefined,
   });
-  const hasAny = segs.length || crops.length || zone || spendIdx >= 0 || q.trim();
+  const hasAny = segs.length || crops.length || zoneList.length || storeIds.length || spendIdx >= 0 || q.trim();
 
   // Debounced live count preview.
   useEffect(() => {
@@ -98,9 +110,16 @@ function RuleBuilder({ zones, crops: cropOpts, onClose, onCreated }: { zones: st
     const t = setTimeout(async () => { setCount(await previewClusterCount(criteria())); setCounting(false); }, 350);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segs, crops, zone, spendIdx, q]);
+  }, [segs, crops, zoneList, storeIds, spendIdx, q]);
 
   const toggle = (arr: string[], set: (a: string[]) => void, v: string) => set(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
+  const toggleZone = (z: string) => {
+    const next = zoneList.includes(z) ? zoneList.filter((x) => x !== z) : [...zoneList, z];
+    setZoneList(next);
+    // Prune any picked store no longer inside the (now constraining) region set.
+    if (next.length) setStoreIds((ids) => ids.filter((id) => { const s = storeById.get(id); return !!s?.zone && next.includes(s.zone); }));
+  };
+  const toggleStore = (id: number) => setStoreIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
 
   const save = () => {
     setErr(null);
@@ -138,19 +157,35 @@ function RuleBuilder({ zones, crops: cropOpts, onClose, onCreated }: { zones: st
           <button key={p.label} type="button" onClick={() => setSpendIdx(on ? -1 : i)} className="rounded-full border-[1.5px] px-3 py-1 text-[12px] font-semibold" style={{ background: on ? "#E3F2FD" : "#fff", color: on ? "#1565C0" : "#616161", borderColor: on ? "#1565C0" : "#E0E0E0" }}>{p.label}</button>
         ); })}</div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Region</label>
-            <select className="mt-1 w-full rounded-lg border border-[#E0E0E0] bg-white px-2.5 py-2 text-[13px]" value={zone} onChange={(e) => setZone(e.target.value)}>
-              <option value="">Any region</option>
-              {zones.map((z) => <option key={z} value={z}>{z}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Search</label>
-            <input className="mt-1 w-full rounded-lg border border-[#E0E0E0] px-2.5 py-2 text-[13px]" value={q} onChange={(e) => setQ(e.target.value)} placeholder="name / village" />
-          </div>
-        </div>
+        {/* Regions — multi-select; cascades into the Stores picker below */}
+        <div className="mb-1.5 text-[11px] font-semibold uppercase text-[#9E9E9E]">Regions (any of)</div>
+        <select value="" onChange={(e) => { if (e.target.value) toggleZone(e.target.value); }}
+          className="mb-2 w-full rounded-lg border border-[#E0E0E0] bg-white px-3 py-2 text-[13px]">
+          <option value="">+ Add a region…</option>
+          {zones.filter((z) => !zoneList.includes(z)).map((z) => <option key={z} value={z}>{z}</option>)}
+        </select>
+        {zoneList.length > 0 && (
+          <div className="mb-3 flex flex-wrap gap-1.5">{zoneList.map((z) => (
+            <button key={z} type="button" onClick={() => toggleZone(z)} className="rounded-full border-[1.5px] border-[#2E7D32] bg-[#E8F5E9] px-3 py-1 text-[12px] font-semibold text-[#2E7D32]">{z} ✕</button>
+          ))}</div>
+        )}
+
+        {/* Stores — cascading multi-select, filtered by the selected regions */}
+        <div className="mb-1.5 text-[11px] font-semibold uppercase text-[#9E9E9E]">Stores (any of){zoneList.length > 0 ? ` · in ${zoneList.length} region${zoneList.length > 1 ? "s" : ""}` : ""}</div>
+        <select value="" onChange={(e) => { if (e.target.value) toggleStore(Number(e.target.value)); }}
+          className="mb-2 w-full rounded-lg border border-[#E0E0E0] bg-white px-3 py-2 text-[13px]">
+          <option value="">+ Add a store…</option>
+          {availStores.filter((s) => !storeIds.includes(s.id)).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        {storeIds.length > 0 && (
+          <div className="mb-3 flex flex-wrap gap-1.5">{storeIds.map((id) => { const s = storeById.get(id); return (
+            <button key={id} type="button" onClick={() => toggleStore(id)} className="rounded-full border-[1.5px] border-[#1565C0] bg-[#E3F2FD] px-3 py-1 text-[12px] font-semibold text-[#1565C0]">{s ? shortStoreName(s.name) : `#${id}`} ✕</button>
+          ); })}</div>
+        )}
+
+        {/* Search */}
+        <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Search</label>
+        <input className="mt-1 w-full rounded-lg border border-[#E0E0E0] px-2.5 py-2 text-[13px]" value={q} onChange={(e) => setQ(e.target.value)} placeholder="name / village / mobile" />
 
         <div className="mt-4 flex items-center justify-between rounded-[10px] bg-[#F5F7F5] px-4 py-3">
           <div className="text-[12px] text-[#616161]">Matches</div>

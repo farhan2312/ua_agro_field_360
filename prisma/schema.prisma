@@ -342,8 +342,9 @@ model CampaignMember {
   zone       String? // snapshot of the farmer's zone (for regional-scoped visibility)
   reached    Boolean   @default(false)
   reachedAt  DateTime?
-  medium     String? // IN_PERSON | CALL | WHATSAPP
+  medium     String? // CALL | WHATSAPP | SMS (outreach approach recorded by the officer/RM)
   reachedBy  String?
+  comment    String? // optional free-text note from the officer/RM about the contact
 
   @@unique([campaignId, farmerId])
   @@index([campaignId])

@@ -11,6 +11,8 @@ import {
   hasConditions, type ClusterCriteria,
 } from "@/lib/cluster-rules";
 import { getScope, canManage } from "@/lib/scope";
+import { getPersona } from "@/lib/session";
+import { cropLabel } from "@/lib/crops";
 
 const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
 async function requireManager(): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -228,6 +230,7 @@ export interface ProjectVM { id: number; name: string; status: string; audienceC
 /** Projects with their clusters + de-duplicated live audience (union across clusters). */
 export async function listProjects(): Promise<ProjectVM[]> {
   const projects = await prisma.project.findMany({
+    where: { source: "REAL" }, // pipeline projects only; legacy/DEMO (Action Planner) projects are dateless and not campaign targets
     orderBy: { createdAt: "desc" }, take: 100,
     include: { clusters: { select: { id: true, name: true, criteria: true, mode: true, farmerIds: true } } },
   });
@@ -301,6 +304,7 @@ export async function saveCommTemplate(
   segment: string,
   patch: { medium?: string; offer?: string; timingLabel?: string; template?: string },
 ): Promise<{ ok: boolean; error?: string }> {
+  const perm = await requireManager(); if (!perm.ok) return perm; // central-only config (read-only for officers/RMs)
   try {
     await prisma.commTemplate.update({ where: { segment }, data: patch });
     revalidatePath("/campaigns");
@@ -333,6 +337,9 @@ export async function createCampaign(input: CreateCampaignInput): Promise<{ ok: 
     // Load the project (its duration + segments).
     const project = await prisma.project.findUnique({ where: { id: input.projectId }, include: { clusters: { select: CLUSTER_SELECT } } });
     if (!project) return { ok: false, error: "Project not found." };
+    // A campaign must sit inside a real project window — reject dateless (legacy/DEMO) projects outright.
+    if (project.source !== "REAL" || !project.startDate || !project.endDate)
+      return { ok: false, error: "This project has no start/end dates set. Set the project's dates first." };
 
     // Campaign window must sit inside the project's duration.
     const cs = new Date(input.startDate), ce = new Date(input.endDate);
@@ -355,6 +362,9 @@ export async function createCampaign(input: CreateCampaignInput): Promise<{ ok: 
 
     // Cross-campaign de-dup: never enrol a farmer already in ANOTHER campaign of this project
     // (one project = one contact per farmer, so later campaigns don't spam them).
+    // NOTE: this is an app-level check-then-insert, not transactional. The create button is
+    // pending-disabled so a single user can't double-submit; two managers creating campaigns on
+    // the SAME project at the exact same moment is the only residual race (rare, manager-gated).
     const already = await prisma.campaignMember.findMany({ where: { campaign: { projectId: input.projectId } }, select: { farmerId: true }, distinct: ["farmerId"] });
     const alreadySet = new Set(already.map((a) => a.farmerId));
     const gross = ids.length;
@@ -450,15 +460,18 @@ export async function listCampaigns(): Promise<CampaignListItem[]> {
   }));
 }
 
-/** Scoped enrolled-farmer list for a campaign (officer→their store, RM→their zone, central→all). */
-export interface CampaignMemberVM { id: number; name: string; mobile: string | null; village: string | null; store: string | null; segment: string; group: string; reached: boolean }
-export async function getCampaignMembers(campaignId: number, limit = 500): Promise<CampaignMemberVM[]> {
+/** Scoped enrolled-farmer list for a campaign — TEST group only (the CONTROL holdout is never contacted). */
+export interface CampaignMemberVM {
+  id: number; name: string; mobile: string | null; village: string | null; store: string | null;
+  segment: string; reached: boolean; medium: string | null; comment: string | null; reachedAt: string | null;
+}
+export async function getCampaignMembers(campaignId: number, limit = 1000): Promise<CampaignMemberVM[]> {
   const scope = await memberScopeWhere();
   if (scope === "none") return [];
   const members = await prisma.campaignMember.findMany({
-    where: { campaignId, ...(scope ?? {}) },
+    where: { campaignId, group: "TEST", ...(scope ?? {}) }, // officers/RMs contact only the TEST group
     take: limit, orderBy: { id: "asc" },
-    select: { id: true, farmerId: true, segment: true, group: true, reached: true, storeId: true },
+    select: { id: true, farmerId: true, segment: true, reached: true, medium: true, comment: true, reachedAt: true, storeId: true },
   });
   if (!members.length) return [];
   const [farmers, stores] = await Promise.all([
@@ -472,9 +485,47 @@ export async function getCampaignMembers(campaignId: number, limit = 500): Promi
     return {
       id: m.id, name: f?.name ?? `Farmer #${m.farmerId}`, mobile: f?.mobile ?? null, village: f?.village ?? null,
       store: m.storeId != null ? sMap.get(m.storeId) ?? null : null,
-      segment: m.segment, group: m.group, reached: m.reached,
+      segment: m.segment, reached: m.reached, medium: m.medium, comment: m.comment, reachedAt: iso(m.reachedAt),
     };
   });
+}
+
+const APPROACHES = new Set(["CALL", "WHATSAPP", "SMS"]);
+
+/** Officer/RM (or central) records an outreach: mark reached + approach + optional note. Scope-guarded to own store/zone. */
+export async function markCampaignMember(
+  memberId: number,
+  patch: { reached?: boolean; medium?: string | null; comment?: string | null },
+): Promise<{ ok: boolean; error?: string }> {
+  const { role, storeId, zone } = await getScope();
+  const member = await prisma.campaignMember.findUnique({ where: { id: memberId }, select: { storeId: true, zone: true, group: true } });
+  if (!member) return { ok: false, error: "Member not found." };
+  // Officers/RMs may only touch their own store's / region's members; central/sysadmin may touch any.
+  if (role === "officer") { if (storeId == null || member.storeId !== storeId) return { ok: false, error: "This farmer isn't in your store." }; }
+  else if (role === "regional") { if (zone == null || member.zone !== zone) return { ok: false, error: "This farmer isn't in your region." }; }
+  else if (!canManage(role)) return { ok: false, error: "Not authorised." };
+  if (member.group !== "TEST") return { ok: false, error: "This farmer is a control holdout — not contacted." };
+
+  const data: Prisma.CampaignMemberUpdateInput = {};
+  if (patch.medium !== undefined) {
+    const med = patch.medium ? patch.medium.toUpperCase() : null;
+    if (med && !APPROACHES.has(med)) return { ok: false, error: "Approach must be Call, WhatsApp or SMS." };
+    data.medium = med;
+  }
+  if (patch.comment !== undefined) data.comment = patch.comment?.trim() ? patch.comment.trim().slice(0, 500) : null;
+  if (patch.reached !== undefined) {
+    data.reached = patch.reached;
+    data.reachedAt = patch.reached ? new Date() : null;
+    const persona = await getPersona();
+    data.reachedBy = patch.reached ? persona.name : null;
+  }
+  try {
+    await prisma.campaignMember.update({ where: { id: memberId }, data });
+    revalidatePath("/campaigns");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Save failed" };
+  }
 }
 
 export interface UpliftRow {
@@ -486,42 +537,112 @@ export interface UpliftRow {
   incremental: number;
 }
 
-/** Uplift dashboard: test vs control, purchases attributed to sales within the window. Central/Sysadmin only. */
-export async function getCampaignUplift(campaignId: number): Promise<UpliftRow[]> {
-  const { role } = await getScope();
-  if (!canManage(role)) return []; // officers/RMs get the scoped farmer list instead
-  const camp = await prisma.campaign.findUnique({ where: { id: campaignId } });
-  if (!camp) return [];
-  const members = await prisma.campaignMember.findMany({
-    where: { campaignId },
-    select: { farmerId: true, segment: true, group: true, reached: true },
-  });
-  if (!members.length) return [];
+/* ── Attribution: which purchases count as "campaign revenue" ── */
+interface ProductFilter { crops: string[]; categories: string[]; all: boolean }
 
-  // Sales within the campaign window, per farmer.
-  const ids = members.map((m) => m.farmerId);
-  const purch = new Map<number, number>(); // farmerId → total ₹ in window
-  for (let i = 0; i < ids.length; i += 20000) {
-    const rows = await prisma.sale.groupBy({
-      by: ["farmerId"],
-      where: { farmerId: { in: ids.slice(i, i + 20000) }, soldAt: { gte: camp.startDate, lte: camp.endDate } },
-      _sum: { amountNum: true },
-    });
-    for (const r of rows) purch.set(r.farmerId, r._sum.amountNum ?? 0);
+/** Mirror a campaign's segment filters into the products that count as campaign-related. */
+function productFilterOf(criteria: ClusterCriteria[]): ProductFilter {
+  const crops = new Set<string>(), cats = new Set<string>();
+  for (const c of criteria) {
+    for (const x of c.cropTags ?? []) crops.add(x);
+    for (const x of c.salesCrops ?? []) crops.add(x);
+    for (const x of c.visitCrops ?? []) crops.add(x);
+    if (c.crop) crops.add(c.crop);
+    if (c.category) cats.add(c.category);
+  }
+  return { crops: [...crops], categories: [...cats], all: crops.size === 0 && cats.size === 0 };
+}
+
+/** SaleLine `where` for campaign-matched purchases by the given farmers within [start,end]. */
+function matchedLineWhere(pf: ProductFilter, farmerIds: number[], start: Date, end: Date): Prisma.SaleLineWhereInput {
+  const base: Prisma.SaleLineWhereInput = { farmerId: { in: farmerIds }, soldAt: { gte: start, lte: end } };
+  if (pf.all) return base; // segment isn't product-specific → every purchase counts
+  const or: Prisma.SaleLineWhereInput[] = [];
+  if (pf.crops.length) or.push({ product: { cropTag: { in: pf.crops } } });
+  if (pf.categories.length) or.push({ mainCategory: { in: pf.categories } });
+  return { ...base, OR: or };
+}
+
+/** Sum matched line revenue per farmer, chunked to protect the pooled DB. */
+async function matchedSpendByFarmer(pf: ProductFilter, farmerIds: number[], start: Date, end: Date): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  for (let i = 0; i < farmerIds.length; i += 15000) {
+    const slice = farmerIds.slice(i, i + 15000);
+    const rows = await prisma.saleLine.groupBy({ by: ["farmerId"], where: matchedLineWhere(pf, slice, start, end), _sum: { totalPrice: true } });
+    for (const r of rows) if (r.farmerId != null) out.set(r.farmerId, Math.round(r._sum.totalPrice ?? 0));
+  }
+  return out;
+}
+
+export interface CampaignReach { testTotal: number; reached: number; byApproach: { CALL: number; WHATSAPP: number; SMS: number; unspecified: number } }
+export interface CampaignAttribution {
+  basisLabel: string; crops: string[]; categories: string[]; all: boolean; noCatalogMatch: boolean;
+  windowStart: string; windowEnd: string;
+  reachedFarmers: number; payingFarmers: number; matchedRevenue: number; totalRevenue: number;
+}
+export interface CampaignTracker { reach: CampaignReach; attribution: CampaignAttribution; uplift: UpliftRow[] }
+
+/**
+ * Campaign Tracker (managers only): outreach reach + real attributed revenue + test/control uplift.
+ * Attributed revenue = matched purchases (segment-mirrored products) by CONTACTED (reached) TEST farmers,
+ * over the window [campaign start, campaign end + 30 days]. Populated as monthly sales are imported.
+ */
+export async function getCampaignTracker(campaignId: number): Promise<CampaignTracker | null> {
+  const { role } = await getScope();
+  if (!canManage(role)) return null; // officers/RMs execute via the scoped farmer list, not the tracker
+  const camp = await prisma.campaign.findUnique({ where: { id: campaignId } });
+  if (!camp) return null;
+
+  // Resolve the campaign's segment criteria (one cluster, or every cluster in its project).
+  let clusterIds: number[] = camp.clusterId ? [camp.clusterId] : [];
+  if (!clusterIds.length && camp.projectId) {
+    const proj = await prisma.project.findUnique({ where: { id: camp.projectId }, include: { clusters: { select: { id: true } } } });
+    clusterIds = proj?.clusters.map((c) => c.id) ?? [];
+  }
+  const clusterRows = clusterIds.length ? await prisma.cluster.findMany({ where: { id: { in: clusterIds } }, select: { criteria: true } }) : [];
+  const criteria = clusterRows.map((c) => parseCriteria(c.criteria)).filter((x): x is ClusterCriteria => !!x);
+  const pf = productFilterOf(criteria);
+
+  // Product.cropTag is seed-only, so many crops (e.g. potato) match no catalogue product — flag that for the UI.
+  let noCatalogMatch = false;
+  if (!pf.all && pf.crops.length && pf.categories.length === 0) {
+    noCatalogMatch = (await prisma.product.count({ where: { cropTag: { in: pf.crops } } })) === 0;
   }
 
+  const start = camp.startDate;
+  const end = new Date(camp.endDate); end.setDate(end.getDate() + 30); // +30-day grace tail
+
+  const members = await prisma.campaignMember.findMany({ where: { campaignId }, select: { farmerId: true, segment: true, group: true, reached: true, medium: true } });
+  const test = members.filter((m) => m.group === "TEST");
+  const reachedMembers = test.filter((m) => m.reached);
+  const byApproach = { CALL: 0, WHATSAPP: 0, SMS: 0, unspecified: 0 };
+  for (const m of reachedMembers) {
+    const k = (m.medium ?? "").toUpperCase();
+    if (k === "CALL" || k === "WHATSAPP" || k === "SMS") byApproach[k]++; else byApproach.unspecified++;
+  }
+
+  // Matched spend per farmer for ALL members (uplift needs the control baseline); total spend for reached test (context).
+  const allIds = [...new Set(members.map((m) => m.farmerId))];
+  const matched = await matchedSpendByFarmer(pf, allIds, start, end);
+  const reachedIds = reachedMembers.map((m) => m.farmerId);
+  const totalSpend = await matchedSpendByFarmer({ crops: [], categories: [], all: true }, reachedIds, start, end);
+
+  const matchedRevenue = reachedMembers.reduce((s, m) => s + (matched.get(m.farmerId) ?? 0), 0);
+  const totalRevenue = [...totalSpend.values()].reduce((a, b) => a + b, 0);
+  const payingFarmers = reachedMembers.filter((m) => (matched.get(m.farmerId) ?? 0) > 0).length;
+
+  // Uplift per segment — test vs control, on MATCHED spend in window (the real values).
   type Acc = { tF: number; tR: number; tP: number; tSum: number; cF: number; cP: number; cSum: number };
   const bySeg = new Map<string, Acc>();
   for (const m of members) {
     const a = bySeg.get(m.segment) ?? { tF: 0, tR: 0, tP: 0, tSum: 0, cF: 0, cP: 0, cSum: 0 };
-    const spend = purch.get(m.farmerId) ?? 0;
+    const spend = matched.get(m.farmerId) ?? 0;
     const bought = spend > 0;
     if (m.group === "TEST") { a.tF++; if (m.reached) a.tR++; if (bought) { a.tP++; a.tSum += spend; } }
     else { a.cF++; if (bought) { a.cP++; a.cSum += spend; } }
     bySeg.set(m.segment, a);
   }
-
-  return [...bySeg.entries()].map(([segment, a]) => {
+  const uplift: UpliftRow[] = [...bySeg.entries()].map(([segment, a]) => {
     const testPurchPct = a.tR > 0 ? a.tP / a.tR : a.tF > 0 ? a.tP / a.tF : 0;
     const ctrlPurchPct = a.cF > 0 ? a.cP / a.cF : 0;
     const testAvg = a.tP > 0 ? a.tSum / a.tP : 0;
@@ -534,8 +655,21 @@ export async function getCampaignUplift(campaignId: number): Promise<UpliftRow[]
       control: { farmers: a.cF, purchased: a.cP, avg: Math.round(ctrlAvg) },
       upliftPurchasePct: Math.round(upliftPct * 1000) / 10,
       upliftAvg: Math.round(testAvg - ctrlAvg),
-      // Incremental ₹ = reached × uplift-in-conversion × test avg order value (rigorous version).
       incremental: Math.round(reachedOrFarmers * upliftPct * testAvg),
     };
   });
+
+  const basisLabel = pf.all
+    ? "All purchases (segment isn't product-specific)"
+    : [pf.crops.length ? `Crop: ${pf.crops.map(cropLabel).join(", ")}` : "", pf.categories.length ? `Category: ${pf.categories.join(", ")}` : ""].filter(Boolean).join(" · ");
+
+  return {
+    reach: { testTotal: test.length, reached: reachedMembers.length, byApproach },
+    attribution: {
+      basisLabel, crops: pf.crops, categories: pf.categories, all: pf.all, noCatalogMatch,
+      windowStart: iso(start)!, windowEnd: iso(end)!,
+      reachedFarmers: reachedMembers.length, payingFarmers, matchedRevenue, totalRevenue,
+    },
+    uplift,
+  };
 }
