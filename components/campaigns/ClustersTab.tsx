@@ -2,8 +2,10 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
-import { SEGMENT_COLUMNS, segMeta, CROP_LABEL } from "@/lib/campaign-segments";
+import { SEGMENT_COLUMNS, segMeta } from "@/lib/campaign-segments";
+import { cropLabel } from "@/lib/crops";
 import type { ClusterCriteria } from "@/lib/cluster-rules";
+import type { CropOption } from "./CampaignsScreen";
 import {
   listClustersWithCounts, deleteCluster, previewClusterCount, type ClusterVM,
 } from "@/app/actions/campaigns";
@@ -21,7 +23,7 @@ const SPEND_PRESETS: { label: string; min?: number; max?: number }[] = [
 ];
 const ORIGIN_LABEL: Record<string, string> = { map: "Map", segment: "Segments", analytics: "Analytics" };
 
-export function ClustersTab({ initial, zones }: { initial: ClusterVM[]; zones: string[] }) {
+export function ClustersTab({ initial, zones, crops }: { initial: ClusterVM[]; zones: string[]; crops: CropOption[] }) {
   const [list, setList] = useState(initial);
   const [building, setBuilding] = useState(false);
   const [viewing, setViewing] = useState<ClusterVM | null>(null);
@@ -61,14 +63,14 @@ export function ClustersTab({ initial, zones }: { initial: ClusterVM[]; zones: s
         ))}
       </div>
 
-      {building && <RuleBuilder zones={zones} onClose={() => setBuilding(false)} onCreated={() => { setBuilding(false); refresh(); }} />}
+      {building && <RuleBuilder zones={zones} crops={crops} onClose={() => setBuilding(false)} onCreated={() => { setBuilding(false); refresh(); }} />}
       {viewing && <MembersModal cluster={viewing} onClose={() => setViewing(null)} />}
     </div>
   );
 }
 
 /* ── Rule builder ── */
-function RuleBuilder({ zones, onClose, onCreated }: { zones: string[]; onClose: () => void; onCreated: () => void }) {
+function RuleBuilder({ zones, crops: cropOpts, onClose, onCreated }: { zones: string[]; crops: CropOption[]; onClose: () => void; onCreated: () => void }) {
   const [name, setName] = useState("");
   const [segs, setSegs] = useState<string[]>([]);
   const [crops, setCrops] = useState<string[]>([]);
@@ -121,10 +123,15 @@ function RuleBuilder({ zones, onClose, onCreated }: { zones: string[]; onClose: 
           <button key={s} type="button" onClick={() => toggle(segs, setSegs, s)} className="rounded-full border-[1.5px] px-3 py-1 text-[12px] font-semibold" style={{ background: on ? m.bg : "#fff", color: on ? m.color : "#616161", borderColor: on ? m.color : "#E0E0E0" }}>{m.label}</button>
         ); })}</div>
 
-        <div className="mb-1.5 text-[11px] font-semibold uppercase text-[#9E9E9E]">Crop</div>
-        <div className="mb-3 flex flex-wrap gap-1.5">{["maize", "potato"].map((c) => { const on = crops.includes(c); return (
-          <button key={c} type="button" onClick={() => toggle(crops, setCrops, c)} className="rounded-full border-[1.5px] px-3 py-1 text-[12px] font-semibold" style={{ background: on ? "#E8F5E9" : "#fff", color: on ? "#2E7D32" : "#616161", borderColor: on ? "#2E7D32" : "#E0E0E0" }}>{CROP_LABEL[c]}</button>
-        ); })}</div>
+        <div className="mb-1.5 text-[11px] font-semibold uppercase text-[#9E9E9E]">Crop (any of)</div>
+        <select value="" onChange={(e) => { if (e.target.value) toggle(crops, setCrops, e.target.value); }}
+          className="mb-2 w-full rounded-lg border border-[#E0E0E0] bg-white px-3 py-2 text-[13px]">
+          <option value="">+ Add a crop…</option>
+          {cropOpts.filter((c) => !crops.includes(c.crop)).map((c) => <option key={c.crop} value={c.crop}>{cropLabel(c.crop)} ({c.count.toLocaleString("en-IN")})</option>)}
+        </select>
+        <div className="mb-3 flex flex-wrap gap-1.5">{crops.map((c) => (
+          <button key={c} type="button" onClick={() => toggle(crops, setCrops, c)} className="rounded-full border-[1.5px] border-[#2E7D32] bg-[#E8F5E9] px-3 py-1 text-[12px] font-semibold text-[#2E7D32]">{cropLabel(c)} ✕</button>
+        ))}</div>
 
         <div className="mb-1.5 text-[11px] font-semibold uppercase text-[#9E9E9E]">Spend tier (optional)</div>
         <div className="mb-3 flex flex-wrap gap-1.5">{SPEND_PRESETS.map((p, i) => { const on = spendIdx === i; return (

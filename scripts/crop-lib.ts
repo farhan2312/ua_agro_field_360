@@ -41,3 +41,92 @@ export function cropFromItem(item: string): string | null {
   for (const [re, c] of CROP_RULES) if (re.test(s)) return c;
   return null;
 }
+
+/**
+ * Clean/canonicalize a free-text crop value from the Crops column (monthly sales
+ * upload) or a field-visit crop entry. Returns a canonical crop name or null for
+ * non-crop junk (equipment, storage, livestock, "field clean", etc.). Data is very
+ * dirty — variant spellings + Hindi/English mix + non-crop entries.
+ */
+const CROP_JUNK = /GODOWN|GODAUN|WITHOUT CROP|NO CROP|FIELD CLEAN|CLEAR FIELD|^FIELD$|HOME USE|^HOUSE$|FARM HOUSE|HERBICIDE|INSECTI(?:C|S)IDE|^WEED$|KHARPATWAR|RAT ?KIL|KILL ?RAT|RODENT|KHATMAL|^TOOLS?$|HARDWARE|EMPLIMANT|SPRAYER|^LED$|KITCHEN|^AGRICULTURE$|^OTHER$|ALL CROPS|NURSERY|CARRI? BAG|GAJA KATILA|GILOR|GILOD|SUNDHIYU|PEEROSARAINYA|^BEEJ$|^SEEDS?$|^COW$|BUFFALO|BAFFALO|^FISH$|CATTLE/;
+const CROP_CLEAN_RULES: [RegExp, string][] = [
+  [/PADDY|BASMATI|\bDHAN\b|\bRICE\b/, "paddy"],
+  [/SUGARCANE|GANNA/, "sugarcane"],
+  [/MUSTARD|MUSTER|MUSTURD|MUSTRD|SARSON|TORIA|\bRAYA\b/, "mustard"],
+  [/MENTHA|PIPPERMENT|PIPERMENT|PEPPERMINT|\bMINT\b/, "mentha"],
+  [/WHEAT|GEHU|KANAK/, "wheat"], // "wheat storage" -> wheat (godown handled by JUNK)
+  [/POTATO|PATATO|\bALOO\b/, "potato"],
+  [/MAIJE|MAIZE|MAKKA|\bCORN\b|DEKALB/, "maize"],
+  [/BANANA|KELA/, "banana"],
+  [/TAMATO|TOMATO|TAMATAR/, "tomato"],
+  [/MUSK ?MELON/, "muskmelon"],
+  [/WATER ?MELON|TARBOOJ/, "watermelon"],
+  [/BERSEEM|BARSEEM/, "berseem"],
+  [/GROUNDNUT|GRAUNDNET|MUNGPHALI|MOONGFALI|PEANUT/, "groundnut"],
+  [/CUCUMBER|KHEERA|KAKDI/, "cucumber"],
+  [/COLOCAS|CALOCAS|\bARVI\b|\bARBI\b|TARO/, "arvi"],
+  [/BRINJAL|BAINGAN|EGGPLANT/, "brinjal"],
+  [/ONION|PYAJ|PIYAJ/, "onion"],
+  [/GARLIC|LAHSUN|LEHSUN/, "garlic"],
+  [/MOONG|GREEN GRAM/, "moong"],
+  [/URAD|BLACK GRAM|\bURD\b/, "urad"],
+  [/ARHAR|\bTUR\b|\bTUAR\b|PIGEON/, "arhar"],
+  [/\bGRAM\b|CHANA|CHANNA|CHICKPEA/, "gram"],
+  [/BAJRA|BAJARA|PEARL/, "bajra"],
+  [/JOWAR|SORGHUM|\bCHARI\b/, "sorghum"],
+  [/BARLEY|\bJAU\b/, "barley"],
+  [/\bOATS?\b/, "oats"],
+  [/OKRA|BHINDI|LADY ?FINGER/, "okra"],
+  [/CORIANDER|DHANIYA/, "coriander"],
+  [/CAPSICUM|SHIMLA|SHIMA MIRCH/, "capsicum"],
+  [/CHILL?I|MIRCH/, "chilli"],
+  [/CAULIFLOWER|CAULIFLAWER/, "cauliflower"],
+  [/CABBAGE|PATTA GOBHI/, "cabbage"],
+  [/RADISH|MOOLI/, "radish"],
+  [/PUMPKIN|KADDU/, "pumpkin"],
+  [/PARWAL|POINTED GOURD/, "pointed_gourd"],
+  [/BOTTELE|BOTTLE ?GAURD|BOTTLE ?GOURD|LAUKI/, "bottle_gourd"],
+  [/KARELA|KARAILA|BITTER ?GOURD/, "bitter_gourd"],
+  [/SPONGE ?GOURD|SONGE ?GOURD|TOREE|TORI/, "sponge_gourd"],
+  [/\bGOURD\b/, "gourd"],
+  [/\bYAM\b|SURAN|JIMIKAND/, "yam"],
+  [/WATER ?NUT|WAT+ER ?CHESTNUT|SINGHARA/, "water_chestnut"],
+  [/MUSHROOM|MASROOM/, "mushroom"],
+  [/DRAGON|DRAGAN/, "dragon_fruit"],
+  [/\bAPPLE\b/, "apple"],
+  [/PAPAYA|PAPITA/, "papaya"],
+  [/JACKFRUIT|KATHAL/, "jackfruit"],
+  [/GUAVA|GUAVAVA|AMROOD/, "guava"],
+  [/LICHI|LITCHI/, "litchi"],
+  [/BLACK PLUM|JAMUN/, "jamun"],
+  [/GRAPES|ANGOOR/, "grapes"],
+  [/CARROT|GAJAR/, "carrot"],
+  [/POMEGRANATE|\bANAR\b/, "pomegranate"],
+  [/LEMON|LEMAN|NEEBOO|\bNIBOO\b|NIMBU|CITRUS/, "citrus"],
+  [/SOYA|SOYBEAN/, "soybean"],
+  [/SUNFLOWER|SURAJMUKHI/, "sunflower"],
+  [/TOBACCO|TAMBAKU/, "tobacco"],
+  [/BETEL|\bPAAN\b/, "betel"],
+  [/GINGER|ADRAK/, "ginger"],
+  [/FENNEL|SAUNF/, "fennel"],
+  [/\bTILLI\b|\bTIL\b|\bTAL\b|SESAME/, "sesame"],
+  [/POSTA|KHAS ?-? ?KHAS|KHASKHAS|POPPY/, "poppy"],
+  [/BEANS?|CHOLI|COWPEA|LOBIA|\bGUAR\b|GAUR BEAN/, "beans"],
+  [/\bPEAS?\b|MATAR/, "pea"],
+  [/MARIGOLD|MERIGOLD|GENDA/, "marigold"],
+  [/\bROSE\b|GUDHAL|HIBISCUS|\bFLOWER\b|\bPHOOL\b/, "flower"],
+  [/KAHU|LETTUCE/, "lettuce"],
+  [/SAPHEDA|EUCALYPTUS/, "eucalyptus"],
+  [/\bMELON\b/, "melon"],
+  [/VEGETABLE|SABJI|SABZI/, "vegetable"],
+  [/FODDER|\bCHARA\b|\bGRASS\b|GRAZE|\bGROSS\b/, "fodder"],
+  [/MANGO|MANG0|\bAAM\b/, "mango"],
+];
+export function cleanCrop(raw?: string | null): string | null {
+  if (!raw) return null;
+  const s = raw.toUpperCase().replace(/[{}[\]()].*$/g, "").replace(/\s+/g, " ").trim();
+  if (!s || s === "0") return null;
+  if (CROP_JUNK.test(s)) return null;
+  for (const [re, c] of CROP_CLEAN_RULES) if (re.test(s)) return c;
+  return null; // unknown → drop
+}

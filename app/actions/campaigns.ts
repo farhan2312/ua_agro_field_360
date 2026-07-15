@@ -11,13 +11,24 @@ import {
   hasConditions, type ClusterCriteria,
 } from "@/lib/cluster-rules";
 
-export type CropFilter = "all" | "maize" | "potato" | "both";
+export type CropFilter = string; // "all" or a canonical crop name (see lib/crops.ts)
+export type CropSource = "any" | "sales" | "visit"; // which labelled crop set to match
 
-function cropClause(crop: CropFilter): string {
-  if (crop === "maize") return `AND 'maize' = ANY("cropTags")`;
-  if (crop === "potato") return `AND 'potato' = ANY("cropTags")`;
-  if (crop === "both") return `AND 'maize' = ANY("cropTags") AND 'potato' = ANY("cropTags")`;
-  return "";
+function cropColumn(source: CropSource): string {
+  return source === "sales" ? `"salesCropTags"` : source === "visit" ? `"visitCropTags"` : `"cropTags"`;
+}
+function cropClause(crop: CropFilter, source: CropSource): string {
+  if (!crop || crop === "all") return "";
+  const safe = crop.replace(/[^a-z_]/gi, ""); // canonical crops are [a-z_]
+  return safe ? `AND '${safe}' = ANY(${cropColumn(source)})` : "";
+}
+
+/** Distinct crops present across farmers (union of sales + visit), most common first. */
+export async function getCropOptions(): Promise<{ crop: string; count: number }[]> {
+  const rows = await prisma.$queryRawUnsafe<{ crop: string; n: number }[]>(
+    `SELECT unnest("cropTags") crop, COUNT(*)::int n FROM "Farmer" WHERE source='REAL' AND array_length("cropTags",1) > 0 GROUP BY 1 ORDER BY 2 DESC`,
+  );
+  return rows.map((r) => ({ crop: r.crop, count: Number(r.n) }));
 }
 
 export interface MatrixRow {
@@ -32,12 +43,12 @@ export interface SegmentMatrix {
   grandTotal: number;
 }
 
-/** Store × campaign-segment count matrix (optionally scoped to a crop). */
-export async function getSegmentMatrix(crop: CropFilter): Promise<SegmentMatrix> {
+/** Store × campaign-segment count matrix (optionally scoped to a crop + its source). */
+export async function getSegmentMatrix(crop: CropFilter = "all", source: CropSource = "any"): Promise<SegmentMatrix> {
   const grouped = await prisma.$queryRawUnsafe<{ storeId: number | null; seg: string; n: number }[]>(
     `SELECT "storeId", "campaignSegment" AS seg, COUNT(*)::int AS n
      FROM "Farmer"
-     WHERE "campaignSegment" IS NOT NULL AND "campaignSegment" <> 'OTHER' ${cropClause(crop)}
+     WHERE "campaignSegment" IS NOT NULL AND "campaignSegment" <> 'OTHER' ${cropClause(crop, source)}
      GROUP BY "storeId", "campaignSegment"`,
   );
   const stores = await prisma.store.findMany({ select: { id: true, name: true } });
@@ -73,29 +84,31 @@ export interface SegmentCustomer {
   gap: string | null;
   lastItem: string | null;
   medium: string;
+  salesCrops: string[]; // labelled: from the sales upload
+  visitCrops: string[]; // labelled: from field visits
 }
 
-/** Drill-down: farmers in a store × segment cell (optionally crop-scoped). */
+/** Drill-down: farmers in a store × segment cell (optionally crop + source scoped). */
 export async function getSegmentCustomers(
   storeId: number | null,
   segment: string,
-  crop: CropFilter,
+  crop: CropFilter = "all",
+  source: CropSource = "any",
   limit = 500,
 ): Promise<SegmentCustomer[]> {
-  const cropTags =
-    crop === "maize" ? ["maize"] : crop === "potato" ? ["potato"] : crop === "both" ? ["maize", "potato"] : undefined;
+  const cropField = source === "sales" ? "salesCropTags" : source === "visit" ? "visitCropTags" : "cropTags";
+  const cropWhere: Prisma.FarmerWhereInput = crop && crop !== "all" ? { [cropField]: { has: crop } } : {};
   const farmers = await prisma.farmer.findMany({
     where: {
       campaignSegment: segment,
-      storeId: storeId ?? undefined,
-      ...(storeId == null ? { storeId: null } : {}),
-      ...(cropTags ? { cropTags: { hasEvery: cropTags } } : {}),
+      ...(storeId == null ? { storeId: null } : { storeId }),
+      ...cropWhere,
     },
     orderBy: { p12mSpend: "desc" },
     take: limit,
     select: {
       id: true, name: true, mobile: true, village: true, p12mSpend: true, hniGap: true,
-      lastMaizeItem: true, lastPotatoItem: true,
+      lastMaizeItem: true, lastPotatoItem: true, salesCropTags: true, visitCropTags: true,
     },
   });
   const med = segMeta(segment).medium;
@@ -108,6 +121,8 @@ export async function getSegmentCustomers(
     gap: f.hniGap != null && f.hniGap > 0 ? inr(f.hniGap) : null,
     lastItem: f.lastMaizeItem ?? f.lastPotatoItem ?? null,
     medium: med,
+    salesCrops: f.salesCropTags,
+    visitCrops: f.visitCropTags,
   }));
 }
 

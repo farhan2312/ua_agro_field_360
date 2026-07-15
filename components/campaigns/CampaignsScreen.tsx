@@ -7,12 +7,18 @@ import {
 } from "@/lib/campaign-segments";
 import {
   getSegmentMatrix, getSegmentCustomers, saveCommTemplate, createCampaign, getCampaignUplift,
-  type SegmentMatrix, type CropFilter, type SegmentCustomer, type CampaignListItem, type UpliftRow, type ClusterVM, type ProjectVM,
+  type SegmentMatrix, type CropFilter, type CropSource, type SegmentCustomer, type CampaignListItem, type UpliftRow, type ClusterVM, type ProjectVM,
 } from "@/app/actions/campaigns";
 import { createClusterFromCriteria } from "@/app/actions/cluster-builder";
 import type { ClusterCriteria } from "@/lib/cluster-rules";
+import { cropLabel } from "@/lib/crops";
 import { ClustersTab } from "./ClustersTab";
 import { ProjectsTab } from "./ProjectsTab";
+
+export interface CropOption { crop: string; count: number }
+const CROP_SOURCES: { key: CropSource; label: string }[] = [
+  { key: "any", label: "Any source" }, { key: "sales", label: "Sales" }, { key: "visit", label: "Visit" },
+];
 
 export interface CommTemplateVM {
   segment: string; priority: number; medium: string; offer: string; timingLabel: string; template: string;
@@ -20,28 +26,24 @@ export interface CommTemplateVM {
 export interface StoreLite { id: number; name: string }
 
 const CARD = "rounded-[14px] border border-black/[0.04] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]";
-const CROPS: { key: CropFilter; label: string }[] = [
-  { key: "all", label: "All crops" }, { key: "maize", label: "Maize" },
-  { key: "potato", label: "Potato" }, { key: "both", label: "Maize + Potato" },
-];
 const n = (x: number) => x.toLocaleString("en-IN");
 
 /* ══════════════════ Segments matrix (WF2) ══════════════════ */
-function SegmentsTab({ initial }: { initial: SegmentMatrix }) {
+function SegmentsTab({ initial, crops }: { initial: SegmentMatrix; crops: CropOption[] }) {
   const [crop, setCrop] = useState<CropFilter>("all");
+  const [source, setSource] = useState<CropSource>("any");
   const [matrix, setMatrix] = useState(initial);
   const [loading, start] = useTransition();
   const [cell, setCell] = useState<{ storeId: number | null; storeName: string; seg: string } | null>(null);
   const [rows, setRows] = useState<SegmentCustomer[] | null>(null);
 
-  const pickCrop = (c: CropFilter) => {
-    setCrop(c);
-    start(async () => setMatrix(await getSegmentMatrix(c)));
-  };
+  const reload = (c: CropFilter, s: CropSource) => start(async () => setMatrix(await getSegmentMatrix(c, s)));
+  const pickCrop = (c: CropFilter) => { setCrop(c); reload(c, source); };
+  const pickSource = (s: CropSource) => { setSource(s); reload(crop, s); };
   const openCell = (storeId: number | null, storeName: string, seg: string) => {
     setCell({ storeId, storeName, seg });
     setRows(null);
-    getSegmentCustomers(storeId, seg, crop).then(setRows);
+    getSegmentCustomers(storeId, seg, crop, source).then(setRows);
   };
 
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
@@ -49,11 +51,10 @@ function SegmentsTab({ initial }: { initial: SegmentMatrix }) {
   const saveCellAsCluster = () => {
     if (!cell) return;
     setSavedMsg(null);
-    const cropTags = crop === "maize" ? ["maize"] : crop === "potato" ? ["potato"] : crop === "both" ? ["maize", "potato"] : undefined;
     const criteria: ClusterCriteria = {
       storeIds: cell.storeId != null ? [cell.storeId] : undefined,
       campaignSegments: [cell.seg],
-      cropTags,
+      cropTags: crop === "all" ? undefined : [crop],
     };
     startSaveCluster(async () => {
       const res = await createClusterFromCriteria({
@@ -80,16 +81,24 @@ function SegmentsTab({ initial }: { initial: SegmentMatrix }) {
         })}
       </div>
 
-      {/* Crop selector */}
+      {/* Crop + source selector */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <span className="text-[11px] font-bold uppercase tracking-[0.6px] text-[#9E9E9E]">Crop:</span>
-        {CROPS.map((c) => (
-          <button key={c.key} type="button" onClick={() => pickCrop(c.key)}
-            className="rounded-[20px] border-[1.5px] px-3.5 py-1.5 text-[12px] font-semibold transition-colors"
-            style={{ background: crop === c.key ? "#1A3A1A" : "#fff", color: crop === c.key ? "#fff" : "#616161", borderColor: crop === c.key ? "#1A3A1A" : "#E0E0E0" }}>
-            {c.label}
-          </button>
-        ))}
+        <select value={crop} onChange={(e) => pickCrop(e.target.value)}
+          className="rounded-[10px] border-[1.5px] border-[#E0E0E0] bg-white px-3 py-1.5 text-[12.5px] font-semibold text-[#1A3A1A]">
+          <option value="all">All crops</option>
+          {crops.map((c) => <option key={c.crop} value={c.crop}>{cropLabel(c.crop)} ({n(c.count)})</option>)}
+        </select>
+        <span className="ml-2 text-[11px] font-bold uppercase tracking-[0.6px] text-[#9E9E9E]">Source:</span>
+        <div className="inline-flex overflow-hidden rounded-[10px] border-[1.5px] border-[#E0E0E0]">
+          {CROP_SOURCES.map((s) => (
+            <button key={s.key} type="button" onClick={() => pickSource(s.key)}
+              className="px-3 py-1.5 text-[12px] font-semibold transition-colors"
+              style={{ background: source === s.key ? "#1A3A1A" : "#fff", color: source === s.key ? "#fff" : "#616161" }}>
+              {s.label}
+            </button>
+          ))}
+        </div>
         {loading && <span className="text-[12px] text-[#9E9E9E]">Updating…</span>}
       </div>
 
@@ -160,6 +169,10 @@ function SegmentsTab({ initial }: { initial: SegmentMatrix }) {
               </button>
             </div>
             <div className="max-h-[62vh] overflow-y-auto px-5 py-4">
+              <div className="mb-2 flex items-center gap-3 text-[10.5px] font-semibold">
+                <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-full bg-[#E8F5E9] ring-1 ring-[#2E7D32]" /> <span className="text-[#2E7D32]">Sales crops</span></span>
+                <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-full bg-[#E3F2FD] ring-1 ring-[#1565C0]" /> <span className="text-[#1565C0]">Visit crops</span></span>
+              </div>
               {rows == null ? (
                 <div className="py-8 text-center text-[13px] text-[#9E9E9E]">Loading…</div>
               ) : rows.length === 0 ? (
@@ -169,8 +182,8 @@ function SegmentsTab({ initial }: { initial: SegmentMatrix }) {
                   <table className="w-full min-w-[560px] text-left text-[12.5px]">
                     <thead>
                       <tr className="border-b border-[#EEE] text-[10px] font-bold uppercase text-[#9E9E9E]">
-                        <th className="py-2">Farmer</th><th>Village</th><th className="text-right">P12M spend</th>
-                        <th className="text-right">Gap→HNI</th><th>Last item</th>
+                        <th className="py-2">Farmer</th><th>Crops</th><th className="text-right">P12M spend</th>
+                        <th className="text-right">Gap→HNI</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -178,12 +191,17 @@ function SegmentsTab({ initial }: { initial: SegmentMatrix }) {
                         <tr key={f.id} className="border-b border-[#F5F5F5]">
                           <td className="py-2">
                             <div className="font-semibold text-[#1A1C1A]">{f.name}</div>
-                            <div className="text-[11px] text-[#9E9E9E]">{f.mobile ?? "—"}</div>
+                            <div className="text-[11px] text-[#9E9E9E]">{f.village ?? "—"} · {f.mobile ?? "—"}</div>
                           </td>
-                          <td className="text-[#616161]">{f.village ?? "—"}</td>
+                          <td className="py-2">
+                            <div className="flex flex-wrap gap-1">
+                              {f.salesCrops.map((c) => <span key={"s" + c} className="rounded-full bg-[#E8F5E9] px-1.5 py-0.5 text-[10px] font-semibold text-[#2E7D32]" title="From sales">{cropLabel(c)}</span>)}
+                              {f.visitCrops.map((c) => <span key={"v" + c} className="rounded-full bg-[#E3F2FD] px-1.5 py-0.5 text-[10px] font-semibold text-[#1565C0]" title="From field visit">{cropLabel(c)}</span>)}
+                              {f.salesCrops.length === 0 && f.visitCrops.length === 0 && <span className="text-[#DDD]">—</span>}
+                            </div>
+                          </td>
                           <td className="text-right font-semibold text-[#1A1C1A]">{f.spend}</td>
                           <td className="text-right text-[#E65100]">{f.gap ?? "—"}</td>
-                          <td className="text-[11.5px] text-[#616161]">{f.lastItem ?? "—"}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -378,8 +396,8 @@ function CampaignsTab({ campaigns, projects }: { campaigns: CampaignListItem[]; 
 }
 
 /* ══════════════════ Shell ══════════════════ */
-export function CampaignsScreen({ initialMatrix, templates, campaigns, stores: _stores, clusters, projects, zones }: {
-  initialMatrix: SegmentMatrix; templates: CommTemplateVM[]; campaigns: CampaignListItem[]; stores: StoreLite[]; clusters: ClusterVM[]; projects: ProjectVM[]; zones: string[];
+export function CampaignsScreen({ initialMatrix, templates, campaigns, stores: _stores, clusters, projects, zones, crops }: {
+  initialMatrix: SegmentMatrix; templates: CommTemplateVM[]; campaigns: CampaignListItem[]; stores: StoreLite[]; clusters: ClusterVM[]; projects: ProjectVM[]; zones: string[]; crops: CropOption[];
 }) {
   const [tab, setTab] = useState<"clusters" | "projects" | "segments" | "comms" | "campaigns">("clusters");
   const TABS = [["clusters", "1 · Clusters"], ["projects", "2 · Projects"], ["campaigns", "3 · Campaigns"], ["segments", "Segments"], ["comms", "Comm Plan"]] as const;
@@ -394,9 +412,9 @@ export function CampaignsScreen({ initialMatrix, templates, campaigns, stores: _
           </button>
         ))}
       </div>
-      {tab === "clusters" && <ClustersTab initial={clusters} zones={zones} />}
+      {tab === "clusters" && <ClustersTab initial={clusters} zones={zones} crops={crops} />}
       {tab === "projects" && <ProjectsTab initial={projects} clusters={clusters} />}
-      {tab === "segments" && <SegmentsTab initial={initialMatrix} />}
+      {tab === "segments" && <SegmentsTab initial={initialMatrix} crops={crops} />}
       {tab === "comms" && <CommPlanTab templates={templates} />}
       {tab === "campaigns" && <CampaignsTab campaigns={campaigns} projects={projects} />}
     </div>

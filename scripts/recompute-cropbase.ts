@@ -37,22 +37,10 @@ async function main() {
     WHERE p.id = s.pid`);
   console.log(`   products updated: ${Number(r1)}`);
 
-  console.log("2) Resetting REAL farmers' cropTags…");
-  await prisma.$executeRawUnsafe(`UPDATE "Farmer" SET "cropTags" = ARRAY[]::text[] WHERE source = 'REAL'`);
+  // NB: Farmer.cropTags / salesCropTags / visitCropTags are owned by backfill-crops.ts
+  // (sales Crops column + field visits). This script no longer sets them.
 
-  console.log("3) Setting exact crop base from seed SaleLines (REAL farmers)…");
-  const r3 = await prisma.$executeRawUnsafe(`
-    UPDATE "Farmer" f SET "cropTags" = sub.crops
-    FROM (
-      SELECT sl."farmerId" fid, array_agg(DISTINCT p."cropTag" ORDER BY p."cropTag") FILTER (WHERE p."cropTag" IS NOT NULL) crops
-      FROM "SaleLine" sl JOIN "Product" p ON p.id = sl."productId"
-      WHERE sl."farmerId" IS NOT NULL AND p."cropTag" IS NOT NULL
-      GROUP BY sl."farmerId"
-    ) sub
-    WHERE f.id = sub.fid AND f.source = 'REAL'`);
-  console.log(`   farmers tagged with a crop base: ${Number(r3)}`);
-
-  console.log("4) Refreshing exact last maize/potato purchase per REAL farmer…");
+  console.log("2) Refreshing exact last maize/potato purchase per REAL farmer…");
   for (const crop of ["maize", "potato"] as const) {
     const item = crop === "maize" ? "lastMaizeItem" : "lastPotatoItem";
     const at = crop === "maize" ? "lastMaizeAt" : "lastPotatoAt";
@@ -67,10 +55,7 @@ async function main() {
       WHERE f.id = sub.fid AND f.source = 'REAL'`);
   }
 
-  const dist = await prisma.$queryRawUnsafe<{ crop: string; farmers: bigint }[]>(`
-    SELECT unnest("cropTags") crop, COUNT(*) farmers FROM "Farmer" WHERE source='REAL' GROUP BY 1 ORDER BY 2 DESC`);
-  console.log("\nCrop base (farmers per crop):");
-  for (const d of dist) console.log(`  ${d.crop.padEnd(12)} ${Number(d.farmers).toLocaleString()}`);
+  console.log("Done (crop tags are set by backfill-crops.ts).");
   await prisma.$disconnect();
 }
 

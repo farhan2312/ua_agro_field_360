@@ -158,7 +158,9 @@ model Farmer {
   // ── CRM segmentation (precomputed by scripts/compute-segments.ts, monthly) ──
   segmentTags       String[]  @default([]) // regular, loyal, at_risk, lapsed, new, hni, potential_hni
   campaignSegment   String? // exclusive: HNI|POTENTIAL_HNI|REGULAR|AT_RISK|NEW|LAPSED|OTHER
-  cropTags          String[]  @default([]) // maize, potato
+  cropTags          String[]  @default([]) // union of sales + visit crops (used by crop filters)
+  salesCropTags     String[]  @default([]) // crops from the monthly sales upload (Crops column, cleaned)
+  visitCropTags     String[]  @default([]) // crops recorded during field visits
   p12mSpend         Int? // ₹ spend in past 12 months
   hniGap            Int? // ₹ to reach HNI (for Potential HNI)
   lastMaizeItem     String?
@@ -179,6 +181,8 @@ model Farmer {
   @@index([source]) // DEMO/REAL filters (clusters, users, map)
   @@index([campaignSegment])
   @@index([cropTags], type: Gin)
+  @@index([salesCropTags], type: Gin)
+  @@index([visitCropTags], type: Gin)
   @@index([segmentTags], type: Gin)
 }
 
