@@ -7,13 +7,11 @@ import {
 } from "@/lib/campaign-segments";
 import {
   getSegmentMatrix, getSegmentCustomers, saveCommTemplate, createCampaign, getCampaignUplift,
-  type SegmentMatrix, type CropFilter, type CropSource, type SegmentCustomer, type CampaignListItem, type UpliftRow, type ClusterVM, type ProjectVM,
+  type SegmentMatrix, type CropFilter, type CropSource, type SegmentCustomer, type CampaignListItem, type UpliftRow, type ProjectVM,
 } from "@/app/actions/campaigns";
 import { createClusterFromCriteria } from "@/app/actions/cluster-builder";
 import type { ClusterCriteria } from "@/lib/cluster-rules";
 import { cropLabel } from "@/lib/crops";
-import { ClustersTab } from "./ClustersTab";
-import { ProjectsTab } from "./ProjectsTab";
 
 export interface CropOption { crop: string; count: number }
 const CROP_SOURCES: { key: CropSource; label: string }[] = [
@@ -61,7 +59,7 @@ function SegmentsTab({ initial, crops }: { initial: SegmentMatrix; crops: CropOp
         name: `${cell.storeName} · ${segMeta(cell.seg).label}`,
         criteria, origin: "segment", mode: "dynamic",
       });
-      setSavedMsg(res.ok ? "✓ Saved as a live cluster — open the Clusters tab." : res.error ?? "Failed");
+      setSavedMsg(res.ok ? "✓ Saved as a live segment — open the Segmentation page." : res.error ?? "Failed");
     });
   };
 
@@ -165,7 +163,7 @@ function SegmentsTab({ initial, crops }: { initial: SegmentMatrix; crops: CropOp
                 disabled={savingCluster}
                 className="rounded-[8px] bg-[#2E7D32] px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-[#1B5E20] disabled:opacity-50"
               >
-                {savingCluster ? "Saving…" : "＋ Save as cluster"}
+                {savingCluster ? "Saving…" : "＋ Save as segment"}
               </button>
             </div>
             <div className="max-h-[62vh] overflow-y-auto px-5 py-4">
@@ -310,13 +308,13 @@ function CampaignsTab({ campaigns, projects }: { campaigns: CampaignListItem[]; 
   return (
     <div>
       <div className="mb-3 flex items-center justify-between">
-        <div className="text-[13px] text-[#757575]">Run a campaign on a project (all its clusters) or one cluster inside it. Members are snapshot now and auto-split 75% test / 25% control.</div>
+        <div className="text-[13px] text-[#757575]">Run a campaign on a project (all its segments) or one segment inside it. Members are snapshot now and auto-split 75% test / 25% control.</div>
         <button type="button" onClick={() => setCreating((v) => !v)} disabled={projects.length === 0} className="rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{creating ? "Close" : "+ New campaign"}</button>
       </div>
 
       {projects.length === 0 && (
         <div className="mb-3 rounded-[10px] border border-[#FFE0B2] bg-[#FFF8E1] px-3.5 py-2.5 text-[12.5px] text-[#8D6E00]">
-          Create a project first (Projects tab) — campaigns run on a project or one of its clusters.
+          Create a project first (Projects page) — campaigns run on a project or one of its segments.
         </div>
       )}
 
@@ -337,13 +335,13 @@ function CampaignsTab({ campaigns, projects }: { campaigns: CampaignListItem[]; 
             <div>
               <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Scope</label>
               <select className="mt-1 w-full rounded-lg border border-[#E0E0E0] bg-white px-2.5 py-2 text-[13px]" value={clusterId ?? ""} onChange={(e) => setClusterId(e.target.value ? Number(e.target.value) : null)}>
-                <option value="">Whole project ({project.clusters.length} clusters)</option>
+                <option value="">Whole project ({project.clusters.length} segments)</option>
                 {project.clusters.map((c) => <option key={c.id} value={c.id}>{c.name} · {n(c.count)}</option>)}
               </select>
             </div>
           </div>
           <div className="mt-3 flex items-center justify-between rounded-[10px] bg-[#F5F7F5] px-4 py-3">
-            <div className="text-[12px] text-[#616161]">Audience {clusterId ? "(cluster)" : "(project, de-duplicated)"}</div>
+            <div className="text-[12px] text-[#616161]">Audience {clusterId ? "(segment)" : "(project, de-duplicated)"}</div>
             <div className="text-[18px] font-bold text-[#2E7D32]">{n(audience)}</div>
           </div>
           <button type="button" onClick={submit} disabled={pending || !name.trim()} className="mt-4 rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{pending ? "Creating…" : "Create & enrol"}</button>
@@ -396,11 +394,11 @@ function CampaignsTab({ campaigns, projects }: { campaigns: CampaignListItem[]; 
 }
 
 /* ══════════════════ Shell ══════════════════ */
-export function CampaignsScreen({ initialMatrix, templates, campaigns, stores: _stores, clusters, projects, zones, crops }: {
-  initialMatrix: SegmentMatrix; templates: CommTemplateVM[]; campaigns: CampaignListItem[]; stores: StoreLite[]; clusters: ClusterVM[]; projects: ProjectVM[]; zones: string[]; crops: CropOption[];
+export function CampaignsScreen({ initialMatrix, templates, campaigns, stores: _stores, projects, crops }: {
+  initialMatrix: SegmentMatrix; templates: CommTemplateVM[]; campaigns: CampaignListItem[]; stores: StoreLite[]; projects: ProjectVM[]; crops: CropOption[];
 }) {
-  const [tab, setTab] = useState<"clusters" | "projects" | "segments" | "comms" | "campaigns">("clusters");
-  const TABS = [["clusters", "1 · Clusters"], ["projects", "2 · Projects"], ["campaigns", "3 · Campaigns"], ["segments", "Segments"], ["comms", "Comm Plan"]] as const;
+  const [tab, setTab] = useState<"segments" | "comms" | "campaigns">("campaigns");
+  const TABS = [["campaigns", "Campaigns"], ["segments", "Segments"], ["comms", "Comm Plan"]] as const;
   return (
     <div className="animate-[fadeUp_0.4s_ease-out]">
       <div className="mb-4 inline-flex flex-wrap rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] p-1">
@@ -412,8 +410,6 @@ export function CampaignsScreen({ initialMatrix, templates, campaigns, stores: _
           </button>
         ))}
       </div>
-      {tab === "clusters" && <ClustersTab initial={clusters} zones={zones} crops={crops} />}
-      {tab === "projects" && <ProjectsTab initial={projects} clusters={clusters} />}
       {tab === "segments" && <SegmentsTab initial={initialMatrix} crops={crops} />}
       {tab === "comms" && <CommPlanTab templates={templates} />}
       {tab === "campaigns" && <CampaignsTab campaigns={campaigns} projects={projects} />}

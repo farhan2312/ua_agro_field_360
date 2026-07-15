@@ -28,6 +28,7 @@ const SHORT: Record<NavId, string> = {
   analytics: "Stats",
   actions: "Actions",
   campaigns: "Campaign",
+  projects: "Projects",
   products: "Catalog",
   movement: "Stock",
   users: "Users",

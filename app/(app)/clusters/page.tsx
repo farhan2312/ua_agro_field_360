@@ -1,109 +1,36 @@
+import { notFound } from "next/navigation";
+import { getRole } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { FarmerClustersScreen } from "@/components/clusters/FarmerClustersScreen";
-import {
-  type ClusterView,
-  type ClusterFarmer,
-  type StoreOption,
-  type ClusterCriteria,
-} from "@/components/clusters/types";
-import { SEGMENT_ENUM_TO_LABEL, LEAD_ENUM_TO_LABEL } from "@/lib/segments";
-import { LAYER_LABELS, type MapLayerKey } from "@/lib/map-layers";
+import { canAccess } from "@/lib/roles";
+import { listClustersWithCounts, getCropOptions, type ClusterVM } from "@/app/actions/campaigns";
+import { ClustersTab } from "@/components/campaigns/ClustersTab";
+import type { CropOption } from "@/components/campaigns/CampaignsScreen";
 
 export const dynamic = "force-dynamic";
 
-function fmtCreated(d: Date): string {
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
+export default async function SegmentationPage() {
+  const role = await getRole();
+  if (!canAccess("farmerCluster", role)) notFound();
 
-function parseCriteria(raw: string | null, fallbackLayer: string | null): ClusterCriteria {
-  if (raw) {
-    try {
-      const c = JSON.parse(raw) as Partial<ClusterCriteria>;
-      const layer = (c.layer ?? "segment") as MapLayerKey;
-      return {
-        layer,
-        layerLabel: c.layerLabel ?? LAYER_LABELS[layer] ?? "Farmer Segment",
-        layerValue: c.layerValue ?? "all",
-        store: c.store ?? null,
-        storeName: c.storeName ?? "All Stores",
-      };
-    } catch {
-      /* fall through */
-    }
-  }
-  const layer = (fallbackLayer as MapLayerKey) || "segment";
-  return {
-    layer,
-    layerLabel: LAYER_LABELS[layer] ?? "Farmer Segment",
-    layerValue: "all",
-    store: null,
-    storeName: "All Stores",
-  };
-}
-
-export default async function ClustersPage() {
-  let clusters: ClusterView[] = [];
-  let farmers: ClusterFarmer[] = [];
-  let stores: StoreOption[] = [];
-
+  let clusters: ClusterVM[] = [];
+  let zones: string[] = [];
+  let crops: CropOption[] = [];
   try {
-    const [rawClusters, rawFarmers, rawStores] = await Promise.all([
-      prisma.cluster.findMany({ orderBy: { createdAt: "desc" } }),
-      prisma.farmer.findMany({
-        where: { source: "DEMO" },
-        orderBy: { id: "asc" },
-        select: {
-          id: true,
-          name: true,
-          village: true,
-          crop: true,
-          land: true,
-          segment: true,
-          leadStatus: true,
-          issues: true,
-          storeCode: true,
-          visits: {
-            orderBy: { id: "desc" },
-            take: 1,
-            select: { date: true },
-          },
-        },
-      }),
-      prisma.store.findMany({
-        orderBy: { name: "asc" },
-        select: { code: true, name: true },
-      }),
+    const [cls, zoneRows, cropOpts] = await Promise.all([
+      listClustersWithCounts(),
+      prisma.farmer.findMany({ where: { zone: { not: null }, source: "REAL" }, distinct: ["zone"], select: { zone: true }, orderBy: { zone: "asc" } }),
+      getCropOptions(),
     ]);
-
-    clusters = rawClusters.map((c) => ({
-      id: c.id,
-      name: c.name,
-      criteria: parseCriteria(c.criteria, c.layerFilter),
-      farmerIds: c.farmerIds,
-      farmerNames: c.farmerNames,
-      farmerCount: c.farmerIds.length,
-      createdDate: fmtCreated(c.createdAt),
-    }));
-
-    farmers = rawFarmers.map((f) => ({
-      id: f.id,
-      name: f.name,
-      village: f.village ?? "—",
-      crop: f.crop ?? "—",
-      land: f.land ?? 0,
-      segment: f.segment ? SEGMENT_ENUM_TO_LABEL[f.segment] ?? "—" : "—",
-      leadStatus: f.leadStatus ? LEAD_ENUM_TO_LABEL[f.leadStatus] ?? "—" : "—",
-      issues: f.issues ?? [],
-      lastVisit: f.visits[0]?.date ?? "—",
-      storeCode: f.storeCode ?? null,
-    }));
-
-    stores = rawStores;
+    clusters = cls;
+    zones = zoneRows.map((z) => z.zone!).filter(Boolean);
+    crops = cropOpts;
   } catch {
-    clusters = [];
-    farmers = [];
-    stores = [];
+    // DB unavailable — render an empty shell.
   }
 
-  return <FarmerClustersScreen clusters={clusters} farmers={farmers} stores={stores} />;
+  return (
+    <div className="animate-[fadeUp_0.4s_ease-out]">
+      <ClustersTab initial={clusters} zones={zones} crops={crops} />
+    </div>
+  );
 }

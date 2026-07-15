@@ -29,7 +29,7 @@ export function ProjectsTab({ initial, clusters }: { initial: ProjectVM[]; clust
     <div>
       <div className="mb-3 flex items-center justify-between">
         <div className="text-[13px] text-[#757575]">
-          A project bundles one or more clusters. Run a campaign on the whole project, or on a single cluster inside it.
+          A project bundles one or more segments. Run a campaign on the whole project, or on a single segment inside it.
         </div>
         <button type="button" onClick={() => setBuilding(true)} disabled={clusters.length === 0}
           className="rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50">+ New project</button>
@@ -37,13 +37,13 @@ export function ProjectsTab({ initial, clusters }: { initial: ProjectVM[]; clust
 
       {clusters.length === 0 && (
         <div className="mb-3 rounded-[10px] border border-[#FFE0B2] bg-[#FFF8E1] px-3.5 py-2.5 text-[12.5px] text-[#8D6E00]">
-          Build at least one cluster first (Clusters tab) — projects are made from clusters.
+          Build at least one segment first (Segmentation page) — projects are made from segments.
         </div>
       )}
 
       <div className={`${CARD} overflow-hidden`}>
         {list.length === 0 ? (
-          <div className="px-4 py-10 text-center text-[13px] text-[#9E9E9E]">No projects yet — bundle a few clusters into one.</div>
+          <div className="px-4 py-10 text-center text-[13px] text-[#9E9E9E]">No projects yet — bundle a few segments into one.</div>
         ) : list.map((p) => {
           const st = STATUS_STYLE[p.status] ?? STATUS_STYLE.PLANNED;
           return (
@@ -56,7 +56,7 @@ export function ProjectsTab({ initial, clusters }: { initial: ProjectVM[]; clust
                   </div>
                   <div className="mt-1 flex flex-wrap gap-1.5">
                     {p.clusters.length === 0 ? (
-                      <span className="text-[11.5px] text-[#C62828]">No clusters</span>
+                      <span className="text-[11.5px] text-[#C62828]">No segments</span>
                     ) : p.clusters.map((c) => (
                       <span key={c.id} className="rounded-full bg-[#F5F7F5] px-2 py-0.5 text-[10.5px] font-medium text-[#616161]">
                         {c.name} · {n(c.count)}
@@ -127,7 +127,7 @@ function ProjectBuilder({ clusters, project, onClose, onSaved }: {
         eyebrow="Step 2 · Project"
         eyebrowColor="#2E7D32"
         title={project ? "Edit project" : "New project"}
-        subtitle="Bundle reusable clusters — audience is their live union"
+        subtitle="Bundle reusable segments — audience is their live union"
         onClose={onClose}
       />
       <div className="max-h-[68vh] overflow-y-auto px-5 py-4">
@@ -138,7 +138,7 @@ function ProjectBuilder({ clusters, project, onClose, onSaved }: {
           </>
         )}
 
-        <div className="mb-1.5 text-[11px] font-semibold uppercase text-[#9E9E9E]">Clusters</div>
+        <div className="mb-1.5 text-[11px] font-semibold uppercase text-[#9E9E9E]">Segments</div>
         <div className="flex flex-col gap-1.5">
           {clusters.map((c) => {
             const on = picked.includes(c.id);
@@ -157,10 +157,10 @@ function ProjectBuilder({ clusters, project, onClose, onSaved }: {
         </div>
 
         <div className="mt-4 flex items-center justify-between rounded-[10px] bg-[#F5F7F5] px-4 py-3">
-          <div className="text-[12px] text-[#616161]">{picked.length} cluster{picked.length === 1 ? "" : "s"} · summed reach</div>
+          <div className="text-[12px] text-[#616161]">{picked.length} segment{picked.length === 1 ? "" : "s"} · summed reach</div>
           <div className="text-[18px] font-bold text-[#2E7D32]">{n(reach)}</div>
         </div>
-        <div className="mt-1 text-[11px] text-[#9E9E9E]">Actual project audience de-duplicates farmers shared across clusters.</div>
+        <div className="mt-1 text-[11px] text-[#9E9E9E]">Actual project audience de-duplicates farmers shared across segments.</div>
         {err && <div className="mt-2 text-[12px] text-[#C62828]">{err}</div>}
         <div className="mt-4 flex justify-end gap-2">
           <button type="button" onClick={onClose} className="rounded-[10px] border border-[#E0E0E0] px-4 py-2 text-[13px] font-semibold text-[#616161]">Cancel</button>
