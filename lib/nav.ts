@@ -2,7 +2,7 @@ import { canAccess, type RoleKey } from "./roles";
 
 export type NavId =
   | "dashboard" | "newVisit" | "visitRepo" | "farmers" | "mapView"
-  | "farmerCluster" | "masterData" | "analytics" | "leads" | "actions" | "campaigns"
+  | "farmerCluster" | "masterData" | "analytics" | "actions" | "campaigns"
   | "products" | "movement"
   | "users" | "salesImport" | "settings" | "audit";
 
@@ -24,7 +24,6 @@ export const MAIN_NAV: NavItem[] = [
   { id: "farmerCluster", label: "Farmer Clusters", href: "/clusters" },
   { id: "masterData", label: "Master Data", href: "/master-data" },
   { id: "analytics", label: "Analytics", href: "/analytics" },
-  { id: "leads", label: "Lead Pipeline", href: "/leads" },
   { id: "campaigns", label: "Campaigns", href: "/campaigns" },
   { id: "products", label: "Product Catalog", href: "/products" },
   { id: "movement", label: "Stock / Movement", href: "/movement" },
@@ -76,7 +75,6 @@ export function routeToView(pathname: string): ViewId {
   if (pathname.startsWith("/clusters")) return "farmerCluster";
   if (pathname.startsWith("/master-data")) return "masterData";
   if (pathname.startsWith("/analytics")) return "analytics";
-  if (pathname.startsWith("/leads")) return "leads";
   if (pathname.startsWith("/imports")) return "salesImport";
   if (pathname.startsWith("/users")) return "users";
   if (pathname.startsWith("/settings")) return "settings";

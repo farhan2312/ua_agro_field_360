@@ -51,12 +51,6 @@ export const NavIcons: Record<NavId, (p: P) => JSX.Element> = {
       <rect x="10" y="2" width="3" height="15" rx="1" /><rect x="14.5" y="8" width="3" height="9" rx="1" />
     </svg>
   ),
-  leads: ({ className }) => (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor" className={className}>
-      <rect x="1" y="1" width="16" height="3" rx="1" /><rect x="3" y="5.5" width="12" height="3" rx="1" />
-      <rect x="5" y="10" width="8" height="3" rx="1" /><rect x="7" y="14.5" width="4" height="3" rx="1" />
-    </svg>
-  ),
   actions: ({ className }) => (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor" className={className}>
       <rect x="1" y="2" width="11" height="2" rx="1" /><rect x="1" y="6" width="8" height="2" rx="1" />

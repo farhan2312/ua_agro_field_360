@@ -26,7 +26,6 @@ const SHORT: Record<NavId, string> = {
   farmerCluster: "Clusters",
   masterData: "Data",
   analytics: "Stats",
-  leads: "Leads",
   actions: "Actions",
   campaigns: "Campaign",
   products: "Catalog",

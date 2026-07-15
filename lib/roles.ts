@@ -103,7 +103,6 @@ export const NAV_VISIBILITY: Record<string, (r: RoleKey) => boolean> = {
   farmerCluster: () => true,
   masterData: (r) => r === "central" || r === "sysadmin",
   analytics: () => true,
-  leads: (r) => r === "regional" || r === "officer" || r === "sysadmin",
   actions: (r) =>
     r === "regional" || r === "central" || r === "officer" || r === "sysadmin",
   campaigns: (r) => r === "regional" || r === "central" || r === "sysadmin",
@@ -151,8 +150,6 @@ export function viewTitle(
       return ["Farmer 360", "1,284 registered farmers · Segmented view"];
     case "farmerDetail":
       return ["Farmer 360 — Profile", ""];
-    case "leads":
-      return ["Lead Pipeline", "Track farmer engagement funnel"];
     case "actions":
       return [
         "Action Planner",
