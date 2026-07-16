@@ -21,7 +21,7 @@ export const MAIN_NAV: NavItem[] = [
   { id: "visitRepo", label: "Visit Repo", href: "/visits" },
   { id: "farmers", label: "Farmer 360", href: "/farmers" },
   { id: "mapView", label: "Map View", href: "/map" },
-  { id: "farmerCluster", label: "Segmentation", href: "/clusters" },
+  { id: "farmerCluster", label: "Farmer Clusters", href: "/clusters" },
   { id: "masterData", label: "Master Data", href: "/master-data" },
   { id: "analytics", label: "Analytics", href: "/analytics" },
   { id: "projects", label: "Projects", href: "/projects" },

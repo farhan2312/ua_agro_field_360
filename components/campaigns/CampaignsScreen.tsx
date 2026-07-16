@@ -9,7 +9,7 @@ import {
   type CampaignListItem, type CampaignTracker, type ProjectVM, type CampaignMemberVM,
 } from "@/app/actions/campaigns";
 
-/** Distinct-crop option (kept here as it's imported by the Segmentation + Projects screens). */
+/** Distinct-crop option (kept here as it's imported by the Farmer Clusters + Projects screens). */
 export interface CropOption { crop: string; count: number }
 
 export interface CommTemplateVM {
@@ -124,7 +124,7 @@ function CampaignsTab({ campaigns, projects, canManage }: { campaigns: CampaignL
       <div className="mb-3 flex items-center justify-between">
         <div className="text-[13px] text-[#757575]">
           {canManage
-            ? "Run a campaign on a project (all its segments) or one segment inside it. Farmers already in another campaign of the same project are skipped — no double-contact."
+            ? "Run a campaign on a project (all its clusters) or one cluster inside it. Farmers already in another campaign of the same project are skipped — no double-contact."
             : "Your campaigns — showing only the farmers enrolled from your store / region."}
         </div>
         {canManage && <button type="button" onClick={() => setCreating((v) => !v)} disabled={projects.length === 0} className="rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{creating ? "Close" : "+ New campaign"}</button>}
@@ -132,7 +132,7 @@ function CampaignsTab({ campaigns, projects, canManage }: { campaigns: CampaignL
 
       {canManage && projects.length === 0 && (
         <div className="mb-3 rounded-[10px] border border-[#FFE0B2] bg-[#FFF8E1] px-3.5 py-2.5 text-[12.5px] text-[#8D6E00]">
-          Create a project first (Projects page) — campaigns run on a project or one of its segments.
+          Create a project first (Projects page) — campaigns run on a project or one of its clusters.
         </div>
       )}
 
@@ -153,14 +153,14 @@ function CampaignsTab({ campaigns, projects, canManage }: { campaigns: CampaignL
             <div>
               <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Scope</label>
               <select className="mt-1 w-full rounded-lg border border-[#E0E0E0] bg-white px-2.5 py-2 text-[13px]" value={clusterId ?? ""} onChange={(e) => setClusterId(e.target.value ? Number(e.target.value) : null)}>
-                <option value="">Whole project ({project.clusters.length} segments)</option>
+                <option value="">Whole project ({project.clusters.length} clusters)</option>
                 {project.clusters.map((c) => <option key={c.id} value={c.id}>{c.name} · {n(c.count)}</option>)}
               </select>
             </div>
           </div>
           <div className="mt-2 text-[11px] text-[#9E9E9E]">Campaign dates must fall within the project window{project.endDate ? ` (${project.startDate} → ${project.endDate})` : ""}. To run past the project end, extend the project first.</div>
           <div className="mt-3 flex items-center justify-between rounded-[10px] bg-[#F5F7F5] px-4 py-3">
-            <div className="text-[12px] text-[#616161]">Audience {clusterId ? "(segment)" : "(project, de-duplicated)"} · before cross-campaign de-dup</div>
+            <div className="text-[12px] text-[#616161]">Audience {clusterId ? "(cluster)" : "(project, de-duplicated)"} · before cross-campaign de-dup</div>
             <div className="text-[18px] font-bold text-[#2E7D32]">{n(audience)}</div>
           </div>
           <button type="button" onClick={submit} disabled={pending || !name.trim()} className="mt-4 rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{pending ? "Creating…" : "Create & enrol"}</button>
@@ -520,7 +520,7 @@ function TrackerBody({ t }: { t: CampaignTracker }) {
         </div>
         {a.noCatalogMatch && (
           <div className="mt-2 rounded-[10px] border border-[#FFE0B2] bg-[#FFF8E1] px-3 py-2 text-[11.5px] text-[#8D6E00]">
-            No catalogue products carry a crop tag for this segment's crop, so crop-matched revenue reads ₹0. Crop tags exist for seeds only — use the "all purchases" figure for context, or target by product category for precise attribution.
+            No sales data carries this cluster's crop, so crop-matched revenue reads ₹0 — use the "all purchases" figure for context, or target by product category for precise attribution.
           </div>
         )}
       </div>

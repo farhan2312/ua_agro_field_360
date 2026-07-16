@@ -256,7 +256,7 @@ export async function createProject(name: string, clusterIds: number[], startDat
   const perm = await requireManager(); if (!perm.ok) return perm;
   const t = name.trim();
   if (!t) return { ok: false, error: "Give the project a name." };
-  if (!clusterIds.length) return { ok: false, error: "Add at least one segment." };
+  if (!clusterIds.length) return { ok: false, error: "Add at least one cluster." };
   if (!startDate || !endDate) return { ok: false, error: "Set a project start and end date." };
   const s = new Date(startDate), e = new Date(endDate);
   if (!(s <= e)) return { ok: false, error: "End date must be on or after the start date." };
@@ -351,10 +351,10 @@ export async function createCampaign(input: CreateCampaignInput): Promise<{ ok: 
     let ids: number[];
     if (input.clusterId) {
       const c = project.clusters.find((x) => x.id === input.clusterId);
-      if (!c) return { ok: false, error: "That segment is not part of the selected project." };
+      if (!c) return { ok: false, error: "That cluster is not part of the selected project." };
       ids = await clusterIdsOf(c);
     } else {
-      if (!project.clusters.length) return { ok: false, error: "This project has no segments." };
+      if (!project.clusters.length) return { ok: false, error: "This project has no clusters." };
       const sets = await Promise.all(project.clusters.map((c) => clusterIdsOf(c)));
       ids = [...new Set(sets.flat())]; // de-duplicate farmers shared across segments
     }
@@ -452,7 +452,7 @@ export async function listCampaigns(): Promise<CampaignListItem[]> {
     startDate: c.startDate.toISOString().slice(0, 10),
     endDate: c.endDate.toISOString().slice(0, 10),
     target: c.clusterId
-      ? `Segment · ${cName.get(c.clusterId) ?? "removed"}`
+      ? `Cluster · ${cName.get(c.clusterId) ?? "removed"}`
       : c.projectId
         ? `Project · ${pName.get(c.projectId) ?? "removed"}`
         : c.targetSegments.map((s) => segMeta(s).label).join(", ") || "—", // legacy segment campaigns
@@ -671,7 +671,7 @@ export async function getCampaignTracker(campaignId: number): Promise<CampaignTr
   });
 
   const basisLabel = pf.all
-    ? "All purchases (segment isn't product-specific)"
+    ? "All purchases (cluster isn't product-specific)"
     : [pf.crops.length ? `Crop: ${pf.crops.map(cropLabel).join(", ")}` : "", pf.categories.length ? `Category: ${pf.categories.join(", ")}` : ""].filter(Boolean).join(" · ");
 
   return {

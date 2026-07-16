@@ -22,7 +22,7 @@ const SPEND_PRESETS: { label: string; min?: number; max?: number }[] = [
   { label: "₹5–10K", min: 5000, max: 10000 },
   { label: "< ₹2.5K", max: 2500 },
 ];
-const ORIGIN_LABEL: Record<string, string> = { map: "Map", segment: "Segments", analytics: "Analytics" };
+const ORIGIN_LABEL: Record<string, string> = { map: "Map", segment: "Builder", analytics: "Analytics" };
 
 export interface StoreOption { id: number; name: string; zone: string | null }
 
@@ -40,14 +40,14 @@ export function ClustersTab({ initial, zones, crops, stores }: { initial: Cluste
     <div>
       <div className="mb-3 flex items-center justify-between">
         <div className="text-[13px] text-[#757575]">
-          Segments are dynamic — membership re-resolves live as farmers are added or updated. Build one here, or save one from the Map or Analytics views.
+          Clusters are dynamic — membership re-resolves live as farmers are added or updated. Build one here, or save one from the Map or Analytics views.
         </div>
-        <button type="button" onClick={() => setBuilding(true)} className="rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white">+ New segment</button>
+        <button type="button" onClick={() => setBuilding(true)} className="rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white">+ New cluster</button>
       </div>
 
       <div className={`${CARD} overflow-hidden`}>
         {list.length === 0 ? (
-          <div className="px-4 py-10 text-center text-[13px] text-[#9E9E9E]">No segments yet — build one or save from a map/analytics view.</div>
+          <div className="px-4 py-10 text-center text-[13px] text-[#9E9E9E]">No clusters yet — build one or save from a map/analytics view.</div>
         ) : list.map((c) => (
           <div key={c.id} className="flex flex-wrap items-center gap-3 border-b border-[#F5F5F5] px-4 py-3">
             <div className="min-w-0 flex-1">
@@ -132,7 +132,7 @@ function RuleBuilder({ zones, crops: cropOpts, stores, onClose, onCreated }: { z
 
   return (
     <Modal open onClose={onClose} className="max-w-[560px]">
-      <ModalHeader eyebrow="Segment" eyebrowColor="#2E7D32" title="Build a segment" subtitle="Pick filters — membership stays live" onClose={onClose} />
+      <ModalHeader eyebrow="Cluster" eyebrowColor="#2E7D32" title="Build a cluster" subtitle="Pick filters — membership stays live" onClose={onClose} />
       <div className="max-h-[68vh] overflow-y-auto px-5 py-4">
         <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Name</label>
         <input className="mt-1 mb-3 w-full rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Amethi At-Risk HNI" />
@@ -194,7 +194,7 @@ function RuleBuilder({ zones, crops: cropOpts, stores, onClose, onCreated }: { z
         {err && <div className="mt-2 text-[12px] text-[#C62828]">{err}</div>}
         <div className="mt-4 flex justify-end gap-2">
           <button type="button" onClick={onClose} className="rounded-[10px] border border-[#E0E0E0] px-4 py-2 text-[13px] font-semibold text-[#616161]">Cancel</button>
-          <button type="button" onClick={save} disabled={saving || !name.trim() || !hasAny || !count} className="rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Create segment"}</button>
+          <button type="button" onClick={save} disabled={saving || !name.trim() || !hasAny || !count} className="rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Create cluster"}</button>
         </div>
       </div>
     </Modal>

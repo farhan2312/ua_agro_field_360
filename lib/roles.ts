@@ -161,7 +161,7 @@ export function viewTitle(
     case "mapView":
       return ["Map View", "Browse stores, filter farmers, and save clusters for action"];
     case "farmerCluster":
-      return ["Segmentation", "Segmented farmer groups for targeted actions"];
+      return ["Farmer Clusters", "Saved farmer groups for targeted actions"];
     case "visitRepo":
       return [
         "Visit Repository",
@@ -182,7 +182,7 @@ export function viewTitle(
     case "campaigns":
       return ["Campaigns", "Segmented customer targeting & outreach"];
     case "projects":
-      return ["Projects", "Bundle segments into reusable projects"];
+      return ["Projects", "Bundle farmer clusters into reusable projects"];
     case "products":
       return ["Product Catalog", "All products sold · categories, pricing & sales"];
     case "movement":

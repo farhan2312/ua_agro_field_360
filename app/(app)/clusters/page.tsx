@@ -8,7 +8,7 @@ import type { CropOption } from "@/components/campaigns/CampaignsScreen";
 
 export const dynamic = "force-dynamic";
 
-export default async function SegmentationPage() {
+export default async function FarmerClustersPage() {
   const role = await getRole();
   if (!canAccess("farmerCluster", role)) notFound();
 

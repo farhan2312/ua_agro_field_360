@@ -58,7 +58,7 @@ export function AnalyticsWorkbench({ initial, facets }: { initial: WbData; facet
         <div className="flex items-center gap-2">
           {loading && <span className="text-[12px] text-[#9E9E9E]">Updating…</span>}
           <button type="button" onClick={() => setSaving(true)} disabled={k.farmers === 0}
-            className="rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50">＋ Save as segment</button>
+            className="rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50">＋ Save as cluster</button>
         </div>
       </div>
 
@@ -227,18 +227,18 @@ function SaveModal({ filters, kpi, onClose }: { filters: WbFilters; kpi: number;
   };
   return (
     <Modal open onClose={onClose} className="max-w-[460px]">
-      <ModalHeader eyebrow="Segment" eyebrowColor="#2E7D32" title="Save filtered set as a segment" subtitle={`~${n(kpi)} farmers · membership stays live`} onClose={onClose} />
+      <ModalHeader eyebrow="Cluster" eyebrowColor="#2E7D32" title="Save filtered set as a cluster" subtitle={`~${n(kpi)} farmers · membership stays live`} onClose={onClose} />
       <div className="px-5 py-4">
         {msg === "ok" ? (
-          <div className="rounded-[10px] border border-[#A5D6A7] bg-[#E8F5E9] px-3.5 py-3 text-[13px] font-medium text-[#2E7D32]">✓ Saved — find it on the Segmentation page (live, re-resolving membership).</div>
+          <div className="rounded-[10px] border border-[#A5D6A7] bg-[#E8F5E9] px-3.5 py-3 text-[13px] font-medium text-[#2E7D32]">✓ Saved — find it on the Farmer Clusters page (live, re-resolving membership).</div>
         ) : (
           <>
-            <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Segment name</label>
+            <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Cluster name</label>
             <input autoFocus className="mt-1 w-full rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Amethi wheat HNIs" />
             {msg && <div className="mt-2 text-[12px] text-[#C62828]">{msg}</div>}
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" onClick={onClose} className="rounded-[10px] border border-[#E0E0E0] px-4 py-2 text-[13px] font-semibold text-[#616161]">Cancel</button>
-              <button type="button" onClick={save} disabled={saving || !name.trim()} className="rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Create segment"}</button>
+              <button type="button" onClick={save} disabled={saving || !name.trim()} className="rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Create cluster"}</button>
             </div>
           </>
         )}
