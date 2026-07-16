@@ -58,8 +58,8 @@ export function MobileNav({
 }) {
   const pathname = usePathname();
   const active = activeNavHref(pathname);
-  const { main, admin } = visibleNav(role);
-  const all: NavItem[] = [...main, ...admin];
+  const { main, sales, admin } = visibleNav(role);
+  const all: NavItem[] = [...main, ...sales, ...admin];
   const tabs = all.slice(0, TAB_COUNT);
   const rest = all.slice(TAB_COUNT);
   const [open, setOpen] = useState(false);

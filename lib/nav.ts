@@ -22,15 +22,18 @@ export const MAIN_NAV: NavItem[] = [
   { id: "farmers", label: "Farmer 360", href: "/farmers" },
   { id: "mapView", label: "Map View", href: "/map" },
   { id: "farmerCluster", label: "Farmer Clusters", href: "/clusters" },
-  { id: "masterData", label: "Master Data", href: "/master-data" },
   { id: "analytics", label: "Analytics", href: "/analytics" },
   { id: "projects", label: "Projects", href: "/projects" },
   { id: "campaigns", label: "Campaigns", href: "/campaigns" },
+];
+
+export const SALES_NAV: NavItem[] = [
   { id: "products", label: "Product Catalog", href: "/products" },
   { id: "movement", label: "Stock / Movement", href: "/movement" },
 ];
 
 export const ADMIN_NAV: NavItem[] = [
+  { id: "masterData", label: "Master Data", href: "/master-data" },
   { id: "users", label: "Users", href: "/users" },
   { id: "salesImport", label: "Sales Import", href: "/imports" },
   { id: "settings", label: "Settings", href: "/settings" },
@@ -39,14 +42,18 @@ export const ADMIN_NAV: NavItem[] = [
 
 /** Nav items visible to a role (RBAC). */
 export function visibleNav(role: RoleKey) {
+  const sales = SALES_NAV.filter((n) => canAccess(n.id, role));
+  const admin = ADMIN_NAV.filter((n) => canAccess(n.id, role));
   return {
     main: MAIN_NAV.filter((n) => canAccess(n.id, role)),
-    admin: ADMIN_NAV.filter((n) => canAccess(n.id, role)),
-    showAdminGroup: ADMIN_NAV.some((n) => canAccess(n.id, role)),
+    sales,
+    admin,
+    showSalesGroup: sales.length > 0,
+    showAdminGroup: admin.length > 0,
   };
 }
 
-const ALL_HREFS = [...MAIN_NAV, ...ADMIN_NAV].map((n) => n.href);
+const ALL_HREFS = [...MAIN_NAV, ...SALES_NAV, ...ADMIN_NAV].map((n) => n.href);
 
 /** The nav href that should appear active for a given pathname (longest prefix wins). */
 export function activeNavHref(pathname: string): string | null {

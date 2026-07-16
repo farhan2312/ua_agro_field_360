@@ -46,7 +46,7 @@ export function Sidebar({
 }) {
   const pathname = usePathname();
   const active = activeNavHref(pathname);
-  const { main, admin, showAdminGroup } = visibleNav(role);
+  const { main, sales, admin, showSalesGroup, showAdminGroup } = visibleNav(role);
 
   return (
     <nav className="fixed inset-y-0 left-0 z-20 hidden w-64 flex-col text-white shadow-sidebar bg-gradient-to-b from-brand-900 to-brand-950 lg:flex">
@@ -68,6 +68,17 @@ export function Sidebar({
         {main.map((item) => (
           <NavLink key={item.id} item={item} active={active === item.href} />
         ))}
+
+        {showSalesGroup && (
+          <>
+            <div className="mt-3 px-3.5 pb-1.5 text-[9.5px] font-semibold uppercase tracking-[1px] text-white/25">
+              Sales
+            </div>
+            {sales.map((item) => (
+              <NavLink key={item.id} item={item} active={active === item.href} />
+            ))}
+          </>
+        )}
 
         {showAdminGroup && (
           <>
