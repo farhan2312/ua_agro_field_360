@@ -1,15 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getPersona } from "@/lib/session";
-import {
-  SEGMENT_LABEL_TO_ENUM,
-  LEAD_LABEL_TO_ENUM,
-  SEGMENT_ENUM_TO_LABEL,
-  LEAD_ENUM_TO_LABEL,
-} from "@/lib/segments";
+import { SPEND_TIERS } from "@/lib/spend-tiers";
 import {
   PAGE_SIZE,
   MAX_CLUSTER,
@@ -32,11 +27,12 @@ function buildWhere(storeIds: number[], f: FarmerFilters): Prisma.FarmerWhereInp
   const where: Prisma.FarmerWhereInput =
     storeIds.length === 1 ? { storeId: storeIds[0] } : { storeId: { in: storeIds } };
   if (f.villages?.length) where.village = { in: f.villages };
-  if (f.crop) where.crop = f.crop;
-  if (f.segment && SEGMENT_LABEL_TO_ENUM[f.segment as never])
-    where.segment = SEGMENT_LABEL_TO_ENUM[f.segment as never] as never;
-  if (f.leadStatus && LEAD_LABEL_TO_ENUM[f.leadStatus as never])
-    where.leadStatus = LEAD_LABEL_TO_ENUM[f.leadStatus as never] as never;
+  if (f.crop) where.cropTags = { has: f.crop }; // canonical crop tag (sales ∪ visit)
+  if (f.campaignSegment) where.campaignSegment = f.campaignSegment;
+  if (f.spendTier != null && SPEND_TIERS[f.spendTier]) {
+    const t = SPEND_TIERS[f.spendTier];
+    where.p12mSpend = { ...(t.min != null ? { gte: t.min } : {}), ...(t.max != null ? { lt: t.max } : {}) };
+  }
   if (f.category) where.sales = { some: { category: f.category } };
   if (f.q?.trim()) {
     const q = f.q.trim();
@@ -69,7 +65,7 @@ export async function getStoreFarmers(
         orderBy: { name: "asc" },
         skip: (page - 1) * PAGE_SIZE,
         take: PAGE_SIZE,
-        select: { id: true, name: true, mobile: true, village: true, crop: true, segment: true, leadStatus: true },
+        select: { id: true, name: true, mobile: true, village: true, cropTags: true, campaignSegment: true },
       }),
       // Villages served by THIS store's farmers, biggest first (the "nearby" quick-pick).
       prisma.farmer.groupBy({
@@ -79,13 +75,10 @@ export async function getStoreFarmers(
         orderBy: { _count: { village: "desc" } },
         take: 250,
       }),
-      prisma.farmer.findMany({
-        where: { ...storeScope, crop: { not: null } },
-        distinct: ["crop"],
-        select: { crop: true },
-        orderBy: { crop: "asc" },
-        take: 50,
-      }),
+      // Crop tags grown by this store's farmers (sales ∪ visit), most common first.
+      prisma.$queryRaw<{ crop: string; n: number }[]>(Prisma.sql`
+        SELECT unnest("cropTags") crop, COUNT(*)::int n FROM "Farmer"
+        WHERE "storeId" IN (${Prisma.join(storeIds)}) GROUP BY 1 ORDER BY 2 DESC LIMIT 40`),
       // Product categories actually purchased by this store's farmers.
       prisma.sale.findMany({
         where: { farmer: storeScope, category: { not: null } },
@@ -114,9 +107,8 @@ export async function getStoreFarmers(
         name: r.name,
         mobile: r.mobile,
         village: r.village,
-        crop: r.crop,
-        segment: r.segment ? SEGMENT_ENUM_TO_LABEL[r.segment] ?? null : null,
-        leadStatus: r.leadStatus ? LEAD_ENUM_TO_LABEL[r.leadStatus] ?? null : null,
+        crops: r.cropTags.slice(0, 3),
+        segment: r.campaignSegment,
         ltv: byId.get(r.id)?.ltv ?? 0,
         bills: byId.get(r.id)?.bills ?? 0,
       })),
@@ -126,7 +118,7 @@ export async function getStoreFarmers(
       villages: villageGroups
         .filter((v) => v.village)
         .map((v) => ({ village: v.village as string, count: v._count._all })),
-      crops: cropRows.map((c) => c.crop!).filter(Boolean),
+      crops: cropRows.map((c) => ({ crop: c.crop, count: Number(c.n) })),
       categories: categoryRows.map((c) => c.category!).filter(Boolean),
     };
   } catch {
@@ -197,12 +189,14 @@ export async function createClusterFromSelection(
   // Hand-pick mode with nothing checked must NOT fall through to an all-matching cluster.
   if (!input.allMatching && !input.explicitIds?.length)
     return { ok: false, error: "Select farmers, or turn on “select all matching”." };
+  const tier = input.filters.spendTier != null ? SPEND_TIERS[input.filters.spendTier] : undefined;
   const criteria: ClusterCriteria = {
     storeIds: input.storeIds,
     villages: input.filters.villages,
-    crop: input.filters.crop,
-    segment: input.filters.segment,
-    leadStatus: input.filters.leadStatus,
+    cropTags: input.filters.crop ? [input.filters.crop] : undefined,
+    campaignSegments: input.filters.campaignSegment ? [input.filters.campaignSegment] : undefined,
+    spendMin: tier?.min,
+    spendMax: tier?.max,
     category: input.filters.category,
     q: input.filters.q,
   };

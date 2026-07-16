@@ -7,6 +7,7 @@ import { inr } from "@/lib/format";
 import { createClusterFromCriteria } from "@/app/actions/cluster-builder";
 import type { ClusterCriteria } from "@/lib/cluster-rules";
 import { getScope } from "@/lib/scope";
+import { SPEND_TIERS } from "@/lib/spend-tiers";
 
 export type Lens = "sales" | "visit";
 
@@ -19,14 +20,6 @@ export interface WbFilters {
   spendTier?: number | null; // index into SPEND_TIERS (sales lens)
   problem?: string; // visit lens
 }
-
-const SPEND_TIERS: { label: string; min?: number; max?: number }[] = [
-  { label: "HNI · ₹12K+", min: 12000 },
-  { label: "₹10–12K", min: 10000, max: 12000 },
-  { label: "₹5–10K", min: 5000, max: 10000 },
-  { label: "₹2.5–5K", min: 2500, max: 5000 },
-  { label: "< ₹2.5K", max: 2500 },
-];
 
 const num = (x: unknown) => (x == null ? 0 : Number(x));
 const shortStore = (s: string) => s.replace(/\s*\(.*?\)\s*/g, "").trim() || s;
@@ -254,6 +247,53 @@ export async function getWorkbenchCustomers(f: WbFilters, storeId: number | null
     spend: r.spend != null ? inr(r.spend) : "—", segment: r.seg ?? "—",
     salesCrops: r.salesc ?? [], visitCrops: r.visitc ?? [],
   }));
+}
+
+/* ── Crop purchase trend: monthly ₹ for one crop (per-line crop from the master file) ── */
+export interface CropTrendPoint {
+  ym: string; // "2025-06"
+  label: string; // "Jun"
+  year: number;
+  season: "Kharif" | "Rabi" | "Zaid";
+  revenue: number; // ₹ (line totals)
+  lines: number; // sale lines
+}
+
+/** Monthly purchase trend for a crop (SaleLine.cropTag), role-scoped like the rest of the workbench. */
+export async function getCropTrend(crop: string): Promise<CropTrendPoint[]> {
+  const safe = (crop || "").toLowerCase().replace(/[^a-z_]/g, "");
+  if (!safe) return [];
+  const { role, storeId, zone } = await getScope();
+  const scopeSql: Prisma.Sql =
+    role === "officer"
+      ? storeId != null ? Prisma.sql`AND sl."storeId" = ${storeId}` : Prisma.sql`AND false`
+      : role === "regional"
+        ? zone != null
+          ? Prisma.sql`AND EXISTS (SELECT 1 FROM "Store" st WHERE st.id = sl."storeId" AND st."zone" = ${zone})`
+          : Prisma.sql`AND false`
+        : Prisma.empty;
+  const rows = await prisma.$queryRaw<{ ym: string; rev: number; lines: number }[]>(Prisma.sql`
+    SELECT to_char(date_trunc('month', sl."soldAt"), 'YYYY-MM') ym,
+           COALESCE(SUM(sl."totalPrice"), 0)::float rev, COUNT(*)::int lines
+    FROM "SaleLine" sl
+    WHERE sl."cropTag" = ${safe} AND sl."soldAt" IS NOT NULL ${scopeSql}
+    GROUP BY 1 ORDER BY 1`);
+  if (!rows.length) return [];
+
+  // Continuous timeline: fill month gaps between the first and last sale with zeros.
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const byYm = new Map(rows.map((r) => [r.ym, r]));
+  const [fy, fm] = rows[0].ym.split("-").map(Number);
+  const [ly, lm] = rows[rows.length - 1].ym.split("-").map(Number);
+  const out: CropTrendPoint[] = [];
+  for (let y = fy, m = fm; y < ly || (y === ly && m <= lm); m === 12 ? (y++, m = 1) : m++) {
+    const ym = `${y}-${String(m).padStart(2, "0")}`;
+    const r = byYm.get(ym);
+    // North-India cropping seasons: Kharif Jun–Oct · Rabi Nov–Mar · Zaid Apr–May.
+    const season: CropTrendPoint["season"] = m >= 6 && m <= 10 ? "Kharif" : m === 4 || m === 5 ? "Zaid" : "Rabi";
+    out.push({ ym, label: MONTHS[m - 1], year: y, season, revenue: Math.round(num(r?.rev)), lines: num(r?.lines) });
+  }
+  return out;
 }
 
 /* ── Save the current filter as a live dynamic segment ── */

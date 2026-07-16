@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
 import { SEGMENT_COLUMNS, segMeta } from "@/lib/campaign-segments";
 import { cropLabel } from "@/lib/crops";
 import {
-  getWorkbench, getWorkbenchCustomers, saveWorkbenchSegment,
-  type Lens, type WbFilters, type WbData, type WbFacets, type WbBar, type WbCustomer,
+  getWorkbench, getWorkbenchCustomers, saveWorkbenchSegment, getCropTrend,
+  type Lens, type WbFilters, type WbData, type WbFacets, type WbBar, type WbCustomer, type CropTrendPoint,
 } from "@/app/actions/analytics-segments";
 
 const CARD = "rounded-[14px] border border-black/[0.04] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]";
@@ -17,7 +17,6 @@ export function AnalyticsWorkbench({ initial, facets }: { initial: WbData; facet
   const [filters, setFilters] = useState<WbFilters>({ lens: "sales" });
   const [data, setData] = useState(initial);
   const [loading, start] = useTransition();
-  const [view, setView] = useState<"matrix" | "breakdowns">("matrix");
   const [cell, setCell] = useState<{ storeId: number | null; storeName: string; seg: string } | null>(null);
   const [rows, setRows] = useState<WbCustomer[] | null>(null);
   const [saving, setSaving] = useState(false);
@@ -92,19 +91,23 @@ export function AnalyticsWorkbench({ initial, facets }: { initial: WbData; facet
         ))}
       </div>
 
-      {/* View toggle */}
-      <div className="mb-3 inline-flex rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] p-1">
-        {(["matrix", "breakdowns"] as const).map((v) => (
-          <button key={v} type="button" onClick={() => setView(v)}
-            className="rounded-[8px] px-4 py-1.5 text-[12px] font-semibold transition-colors"
-            style={{ background: view === v ? "#fff" : "transparent", color: view === v ? "#2E7D32" : "#9E9E9E", boxShadow: view === v ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}>
-            {v === "matrix" ? "Store × Segment" : "Breakdowns"}
-          </button>
-        ))}
-      </div>
+      {/* One board — trend, charts, and the matrix together */}
+      <div className="flex flex-col gap-[14px]">
+        {filters.lens === "sales" && <CropTrendCard crops={facets.salesCrops} />}
 
-      {view === "matrix" ? (
+        <div className="grid grid-cols-1 gap-[14px] lg:grid-cols-2">
+          <DonutCard title="Segment share" slices={data.segmentDist} />
+          {filters.lens === "sales" ? (
+            <HistogramCard title="Spend tiers (P12M) — farmer histogram" bars={data.extra} />
+          ) : (
+            <BarCard title={data.extraTitle} bars={data.extra} fmt={n} accent="#1565C0" />
+          )}
+          <BarCard title={filters.lens === "sales" ? "Sales-crop breakdown (farmers)" : "Visit-crop breakdown (farmers)"} bars={data.cropBreakdown.map((b) => ({ ...b, label: cropLabel(b.label) }))} fmt={n} accent="#F9A825" />
+          <BarCard title={data.secondaryTitle} bars={data.secondary} fmt={filters.lens === "sales" ? money : n} accent="#6A1B9A" />
+        </div>
+
         <div className={`${CARD} overflow-hidden`}>
+          <div className="border-b border-[#F0F0F0] px-4 py-2.5 text-[13px] font-bold text-[#1A1C1A]">Store × Segment</div>
           <div className="overflow-x-auto">
             <div className="min-w-[820px]">
               <div className="grid grid-cols-[1.4fr_repeat(6,1fr)_0.8fr] border-b border-[#F0F0F0] bg-[#FAFAFA] px-4 py-2.5 text-[10.5px] font-semibold uppercase tracking-[0.4px] text-[#9E9E9E]">
@@ -139,14 +142,7 @@ export function AnalyticsWorkbench({ initial, facets }: { initial: WbData; facet
           </div>
           <div className="px-4 py-2 text-[11px] text-[#9E9E9E]">Click any count to see that store × segment farmer list. Segments are exclusive.</div>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-[14px] lg:grid-cols-2">
-          <BarCard title="Segment sizes" bars={data.segmentDist} fmt={n} />
-          <BarCard title={filters.lens === "sales" ? "Sales-crop breakdown" : "Visit-crop breakdown"} bars={data.cropBreakdown.map((b) => ({ ...b, label: cropLabel(b.label) }))} fmt={n} accent="#F9A825" />
-          <BarCard title={data.extraTitle} bars={data.extra} fmt={n} accent="#1565C0" />
-          <BarCard title={data.secondaryTitle} bars={data.secondary} fmt={filters.lens === "sales" ? money : n} accent="#6A1B9A" />
-        </div>
-      )}
+      </div>
 
       {/* Drill modal */}
       <Modal open={!!cell} onClose={() => setCell(null)} className="max-w-[720px]">
@@ -208,6 +204,137 @@ function BarCard({ title, bars, fmt, accent = "#2E7D32" }: { title: string; bars
               <div className="mt-0.5 h-2 rounded-full bg-[#F0F0F0]"><div className="h-2 rounded-full" style={{ width: `${(b.value / max) * 100}%`, background: b.color ?? accent }} /></div>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Donut / pie — share of farmers per segment. */
+function DonutCard({ title, slices }: { title: string; slices: WbBar[] }) {
+  const shown = slices.filter((s) => s.value > 0);
+  const total = shown.reduce((a, b) => a + b.value, 0);
+  const R = 54, C = 2 * Math.PI * R;
+  let acc = 0;
+  return (
+    <div className={`${CARD} p-4`}>
+      <div className="mb-3 text-[13px] font-bold text-[#1A1C1A]">{title}</div>
+      {total === 0 ? <div className="py-6 text-center text-[12.5px] text-[#9E9E9E]">No data.</div> : (
+        <div className="flex flex-wrap items-center gap-5">
+          <div className="relative shrink-0">
+            <svg width="150" height="150" viewBox="0 0 150 150" className="-rotate-90">
+              <circle cx="75" cy="75" r={R} fill="none" stroke="#F0F0F0" strokeWidth="20" />
+              {shown.map((s) => {
+                const frac = s.value / total;
+                const el = (
+                  <circle key={s.label} cx="75" cy="75" r={R} fill="none" stroke={s.color ?? "#2E7D32"} strokeWidth="20"
+                    strokeDasharray={`${frac * C} ${C}`} strokeDashoffset={-acc * C}>
+                    <title>{`${s.label}: ${n(s.value)} (${((s.value / total) * 100).toFixed(1)}%)`}</title>
+                  </circle>
+                );
+                acc += frac;
+                return el;
+              })}
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <div className="text-[17px] font-bold text-[#1A1C1A]">{n(total)}</div>
+              <div className="text-[9.5px] uppercase text-[#9E9E9E]">farmers</div>
+            </div>
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            {shown.map((s) => (
+              <div key={s.label} className="flex items-center gap-2 text-[12px]">
+                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: s.color ?? "#2E7D32" }} />
+                <span className="truncate font-medium text-[#424242]">{s.label}</span>
+                <span className="ml-auto shrink-0 text-[#9E9E9E]">{n(s.value)} · {((s.value / total) * 100).toFixed(1)}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Vertical histogram — farmers per spend tier. */
+function HistogramCard({ title, bars, accent = "#1565C0" }: { title: string; bars: WbBar[]; accent?: string }) {
+  const max = Math.max(1, ...bars.map((b) => b.value));
+  return (
+    <div className={`${CARD} p-4`}>
+      <div className="mb-3 text-[13px] font-bold text-[#1A1C1A]">{title}</div>
+      {bars.every((b) => !b.value) ? <div className="py-6 text-center text-[12.5px] text-[#9E9E9E]">No data.</div> : (
+        <div className="flex items-end gap-2.5 pt-2">
+          {bars.map((b) => (
+            <div key={b.label} className="flex min-w-0 flex-1 flex-col items-center" title={`${b.label}: ${n(b.value)} farmers`}>
+              <div className="mb-1 text-[10.5px] font-bold text-[#424242]">{b.value ? n(b.value) : ""}</div>
+              <div className="w-full rounded-t-[6px]" style={{ height: `${Math.max(b.value > 0 ? 4 : 1, Math.round((b.value / max) * 110))}px`, background: b.color ?? accent }} />
+              <div className="mt-1 w-full truncate text-center text-[10px] text-[#9E9E9E]" title={b.label}>{b.label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Monthly purchase trend for one crop, coloured by cropping season (uses the per-line crop tags). */
+const SEASON_COLOR: Record<CropTrendPoint["season"], string> = { Kharif: "#2E7D32", Rabi: "#1565C0", Zaid: "#F9A825" };
+
+function CropTrendCard({ crops }: { crops: { crop: string; count: number }[] }) {
+  const [crop, setCrop] = useState(crops[0]?.crop ?? "");
+  const [points, setPoints] = useState<CropTrendPoint[] | null>(null);
+  const [loading, start] = useTransition();
+
+  useEffect(() => {
+    if (!crop) { setPoints([]); return; }
+    start(async () => setPoints(await getCropTrend(crop)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [crop]);
+
+  const pts = points ?? [];
+  const max = Math.max(1, ...pts.map((p) => p.revenue));
+  const totalRev = pts.reduce((a, p) => a + p.revenue, 0);
+  const seasonTotals = pts.reduce((m, p) => { m[p.season] = (m[p.season] ?? 0) + p.revenue; return m; }, {} as Record<string, number>);
+
+  return (
+    <div className={`${CARD} p-4`}>
+      <div className="mb-1 flex flex-wrap items-center gap-2.5">
+        <div className="text-[13px] font-bold text-[#1A1C1A]">Crop purchase trend</div>
+        <Sel value={crop} onChange={setCrop} ph="Pick a crop"
+          options={crops.map((c) => [c.crop, `${cropLabel(c.crop)} (${n(c.count)})`])} />
+        {loading && <span className="text-[11.5px] text-[#9E9E9E]">Loading…</span>}
+        <div className="ml-auto flex flex-wrap items-center gap-3 text-[11px] font-medium text-[#616161]">
+          {(["Kharif", "Rabi", "Zaid"] as const).map((s) => (
+            <span key={s} className="flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: SEASON_COLOR[s] }} />
+              {s}{seasonTotals[s] ? ` · ${money(seasonTotals[s])}` : ""}
+            </span>
+          ))}
+          {totalRev > 0 && <span className="rounded-full bg-[#F5F7F5] px-2.5 py-0.5 font-bold text-[#1A1C1A]">Total {money(totalRev)}</span>}
+        </div>
+      </div>
+      <div className="mb-3 text-[11px] text-[#9E9E9E]">
+        Monthly ₹ of {crop ? cropLabel(crop) : "—"}-tagged sale lines · seasons: Kharif Jun–Oct · Rabi Nov–Mar · Zaid Apr–May
+      </div>
+      {points == null ? (
+        <div className="py-10 text-center text-[12.5px] text-[#9E9E9E]">Loading…</div>
+      ) : pts.length === 0 ? (
+        <div className="py-10 text-center text-[12.5px] text-[#9E9E9E]">No crop-tagged sales recorded for this crop yet.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <div className="flex items-end gap-[3px]" style={{ minWidth: Math.max(560, pts.length * 22) }}>
+            {pts.map((p) => (
+              <div key={p.ym} className="group flex min-w-[16px] flex-1 flex-col justify-end"
+                title={`${p.label} ${p.year} · ${money(p.revenue)} · ${n(p.lines)} lines · ${p.season}`}>
+                <div className="w-full rounded-t-[4px] transition-opacity group-hover:opacity-75"
+                  style={{ height: `${Math.max(p.revenue > 0 ? 4 : 1, Math.round((p.revenue / max) * 140))}px`, background: SEASON_COLOR[p.season], opacity: p.revenue > 0 ? 1 : 0.25 }} />
+                <div className="mt-1 h-[24px] text-center">
+                  <div className="text-[9px] leading-tight text-[#9E9E9E]">{p.label[0]}</div>
+                  {(p.label === "Jan" || p.ym === pts[0].ym) && <div className="text-[9px] font-bold leading-tight text-[#616161]">{p.year}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

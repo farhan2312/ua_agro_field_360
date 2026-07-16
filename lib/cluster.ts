@@ -5,9 +5,9 @@ export const MAX_CLUSTER = 25_000;
 
 export interface FarmerFilters {
   villages?: string[]; // multi-select villages
-  crop?: string;
-  segment?: string; // display label
-  leadStatus?: string; // display label
+  crop?: string; // canonical crop tag (sales ∪ visit crops)
+  campaignSegment?: string; // HNI | POTENTIAL_HNI | REGULAR | AT_RISK | NEW | LAPSED
+  spendTier?: number; // index into SPEND_TIERS (P12M spend)
   category?: string; // product category from sales
   q?: string;
 }
@@ -17,14 +17,18 @@ export interface VillageFacet {
   count: number;
 }
 
+export interface CropFacet {
+  crop: string; // canonical tag
+  count: number;
+}
+
 export interface StoreFarmerRow {
   id: number;
   name: string;
   mobile: string | null;
   village: string | null;
-  crop: string | null;
-  segment: string | null; // label
-  leadStatus: string | null; // label
+  crops: string[]; // canonical crop tags (sales ∪ visit)
+  segment: string | null; // campaignSegment key (HNI | AT_RISK | …)
   ltv: number;
   bills: number;
 }
@@ -35,7 +39,7 @@ export interface StoreFarmersResult {
   page: number;
   pageSize: number;
   villages: VillageFacet[]; // per-store, with farmer counts, biggest first
-  crops: string[]; // per-store
+  crops: CropFacet[]; // per-store crop tags, most common first
   categories: string[]; // per-store (products purchased)
 }
 

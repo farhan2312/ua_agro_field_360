@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { cn } from "@/lib/cn";
 import { inr, grouped, initials } from "@/lib/format";
-import { SEGMENT_LABELS, SEGMENT_COLORS, SEGMENT_BGS, LEAD_STATUSES } from "@/lib/segments";
+import { SEGMENT_COLUMNS, segMeta } from "@/lib/campaign-segments";
+import { cropLabel } from "@/lib/crops";
+import { SPEND_TIERS } from "@/lib/spend-tiers";
 import { Badge } from "@/components/ui";
 import { Modal, ModalHeader } from "@/components/interactive";
 import { getStoreFarmers, createClusterFromSelection } from "@/app/actions/cluster-builder";
@@ -67,6 +69,10 @@ export function StoreFarmersPanel({
     setFilters((f) => ({ ...f, [k]: v || undefined }));
     resetSelection();
   };
+  const setSpendTier = (v: string) => {
+    setFilters((f) => ({ ...f, spendTier: v === "" ? undefined : Number(v) }));
+    resetSelection();
+  };
   const selectedVillages = useMemo(() => filters.villages ?? [], [filters.villages]);
   const villageSet = useMemo(() => new Set(selectedVillages), [selectedVillages]);
   const toggleVillage = (v: string) => {
@@ -79,8 +85,8 @@ export function StoreFarmersPanel({
     filters.q?.trim() ||
     filters.category ||
     filters.crop ||
-    filters.segment ||
-    filters.leadStatus ||
+    filters.campaignSegment ||
+    filters.spendTier != null ||
     selectedVillages.length
   );
   const clearFilters = () => {
@@ -117,9 +123,9 @@ export function StoreFarmersPanel({
     if (selectedVillages.length)
       parts.push(`${selectedVillages.length} village${selectedVillages.length > 1 ? "s" : ""}`);
     if (filters.category) parts.push(filters.category);
-    if (filters.crop) parts.push(filters.crop);
-    if (filters.segment) parts.push(filters.segment);
-    if (filters.leadStatus) parts.push(filters.leadStatus);
+    if (filters.crop) parts.push(cropLabel(filters.crop));
+    if (filters.campaignSegment) parts.push(segMeta(filters.campaignSegment).label);
+    if (filters.spendTier != null && SPEND_TIERS[filters.spendTier]) parts.push(SPEND_TIERS[filters.spendTier].label);
     if (filters.q?.trim()) parts.push(`"${filters.q.trim()}"`);
     return parts.length ? parts.join(" · ") : "no filters";
   }, [filters, selectedVillages.length]);
@@ -199,19 +205,19 @@ export function StoreFarmersPanel({
         <select value={filters.crop ?? ""} onChange={(e) => setFilter("crop", e.target.value)} className={selectClass}>
           <option value="">Any crop</option>
           {(data?.crops ?? []).map((c) => (
-            <option key={c} value={c}>{c}</option>
+            <option key={c.crop} value={c.crop}>{cropLabel(c.crop)} ({grouped(c.count)})</option>
           ))}
         </select>
-        <select value={filters.segment ?? ""} onChange={(e) => setFilter("segment", e.target.value)} className={selectClass}>
+        <select value={filters.campaignSegment ?? ""} onChange={(e) => setFilter("campaignSegment", e.target.value)} className={selectClass}>
           <option value="">Any segment</option>
-          {SEGMENT_LABELS.map((s) => (
-            <option key={s} value={s}>{s}</option>
+          {SEGMENT_COLUMNS.map((s) => (
+            <option key={s} value={s}>{segMeta(s).label}</option>
           ))}
         </select>
-        <select value={filters.leadStatus ?? ""} onChange={(e) => setFilter("leadStatus", e.target.value)} className={selectClass}>
-          <option value="">Any lead status</option>
-          {LEAD_STATUSES.map((s) => (
-            <option key={s} value={s}>{s}</option>
+        <select value={filters.spendTier != null ? String(filters.spendTier) : ""} onChange={(e) => setSpendTier(e.target.value)} className={selectClass}>
+          <option value="">Any spend (P12M)</option>
+          {SPEND_TIERS.map((t, i) => (
+            <option key={t.label} value={i}>{t.label}</option>
           ))}
         </select>
         <button
@@ -350,13 +356,15 @@ export function StoreFarmersPanel({
                     <td className="py-2.5 text-ink-600">{f.village ?? "—"}</td>
                     <td className="py-2.5">
                       <div className="flex flex-wrap items-center gap-1">
-                        {f.crop && <span className="text-[12px] text-ink-600">{f.crop}</span>}
+                        {f.crops.map((c) => (
+                          <span key={c} className="rounded-full bg-[#F5F7F5] px-1.5 py-0.5 text-[10.5px] font-medium text-ink-600">{cropLabel(c)}</span>
+                        ))}
                         {f.segment && (
-                          <Badge bg={SEGMENT_BGS[f.segment as never]} color={SEGMENT_COLORS[f.segment as never]}>
-                            {f.segment}
+                          <Badge bg={segMeta(f.segment).bg} color={segMeta(f.segment).color}>
+                            {segMeta(f.segment).label}
                           </Badge>
                         )}
-                        {!f.crop && !f.segment && <span className="text-[11px] text-ink-400">—</span>}
+                        {f.crops.length === 0 && !f.segment && <span className="text-[11px] text-ink-400">—</span>}
                       </div>
                     </td>
                     <td className="py-2.5 text-right font-semibold text-ink">{f.ltv > 0 ? inr(f.ltv) : "—"}</td>
