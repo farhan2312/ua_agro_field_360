@@ -490,12 +490,17 @@ export async function getCampaignMembers(campaignId: number, limit = 1000): Prom
   });
 }
 
-const APPROACHES = new Set(["CALL", "WHATSAPP", "SMS"]);
+const CONTACT_MEDIA = new Set(["CALL", "WHATSAPP", "SMS", "IN_PERSON"]); // an approach ⇒ reached
+const OUTCOMES = new Set([...CONTACT_MEDIA, "UNREACHABLE"]); // valid non-null medium values (UNREACHABLE = parked, not reached)
 
-/** Officer/RM (or central) records an outreach: mark reached + approach + optional note. Scope-guarded to own store/zone. */
+/**
+ * Officer/RM (or central) records an outreach outcome. `medium`:
+ *   CALL|WHATSAPP|SMS|IN_PERSON → reached; UNREACHABLE → parked (done, not reached); null → back to pending.
+ * `reached` is derived from the medium (never trusted from the client). Scope-guarded to own store/zone.
+ */
 export async function markCampaignMember(
   memberId: number,
-  patch: { reached?: boolean; medium?: string | null; comment?: string | null },
+  patch: { medium?: string | null; comment?: string | null },
 ): Promise<{ ok: boolean; error?: string }> {
   const { role, storeId, zone } = await getScope();
   const member = await prisma.campaignMember.findUnique({ where: { id: memberId }, select: { storeId: true, zone: true, group: true } });
@@ -509,16 +514,15 @@ export async function markCampaignMember(
   const data: Prisma.CampaignMemberUpdateInput = {};
   if (patch.medium !== undefined) {
     const med = patch.medium ? patch.medium.toUpperCase() : null;
-    if (med && !APPROACHES.has(med)) return { ok: false, error: "Approach must be Call, WhatsApp or SMS." };
+    if (med && !OUTCOMES.has(med)) return { ok: false, error: "Pick Call, WhatsApp, SMS, In-person or Unreachable." };
+    const reached = med != null && CONTACT_MEDIA.has(med); // UNREACHABLE / null ⇒ not reached
     data.medium = med;
+    data.reached = reached;
+    data.reachedAt = reached ? new Date() : null;
+    const persona = await getPersona();
+    data.reachedBy = med != null ? persona.name : null; // who contacted or marked unreachable
   }
   if (patch.comment !== undefined) data.comment = patch.comment?.trim() ? patch.comment.trim().slice(0, 500) : null;
-  if (patch.reached !== undefined) {
-    data.reached = patch.reached;
-    data.reachedAt = patch.reached ? new Date() : null;
-    const persona = await getPersona();
-    data.reachedBy = patch.reached ? persona.name : null;
-  }
   try {
     await prisma.campaignMember.update({ where: { id: memberId }, data });
     revalidatePath("/campaigns");
@@ -558,7 +562,9 @@ function matchedLineWhere(pf: ProductFilter, farmerIds: number[], start: Date, e
   const base: Prisma.SaleLineWhereInput = { farmerId: { in: farmerIds }, soldAt: { gte: start, lte: end } };
   if (pf.all) return base; // segment isn't product-specific → every purchase counts
   const or: Prisma.SaleLineWhereInput[] = [];
-  if (pf.crops.length) or.push({ product: { cropTag: { in: pf.crops } } });
+  // Prefer the per-line crop captured from the master file's Crops column (covers crops with no
+  // crop-specific product, e.g. potato); also match seed products carrying a crop tag.
+  if (pf.crops.length) { or.push({ cropTag: { in: pf.crops } }); or.push({ product: { cropTag: { in: pf.crops } } }); }
   if (pf.categories.length) or.push({ mainCategory: { in: pf.categories } });
   return { ...base, OR: or };
 }
@@ -574,7 +580,7 @@ async function matchedSpendByFarmer(pf: ProductFilter, farmerIds: number[], star
   return out;
 }
 
-export interface CampaignReach { testTotal: number; reached: number; byApproach: { CALL: number; WHATSAPP: number; SMS: number; unspecified: number } }
+export interface CampaignReach { testTotal: number; reached: number; byApproach: { CALL: number; WHATSAPP: number; SMS: number; IN_PERSON: number; unspecified: number } }
 export interface CampaignAttribution {
   basisLabel: string; crops: string[]; categories: string[]; all: boolean; noCatalogMatch: boolean;
   windowStart: string; windowEnd: string;
@@ -603,10 +609,15 @@ export async function getCampaignTracker(campaignId: number): Promise<CampaignTr
   const criteria = clusterRows.map((c) => parseCriteria(c.criteria)).filter((x): x is ClusterCriteria => !!x);
   const pf = productFilterOf(criteria);
 
-  // Product.cropTag is seed-only, so many crops (e.g. potato) match no catalogue product — flag that for the UI.
+  // Flag when the campaign's crop matches NO sales data at all (no per-line crop tag and no crop-tagged
+  // product) — e.g. before the SaleLine crop backfill has run, or a crop simply absent from sales.
   let noCatalogMatch = false;
   if (!pf.all && pf.crops.length && pf.categories.length === 0) {
-    noCatalogMatch = (await prisma.product.count({ where: { cropTag: { in: pf.crops } } })) === 0;
+    const [line, prod] = await Promise.all([
+      prisma.saleLine.findFirst({ where: { cropTag: { in: pf.crops } }, select: { id: true } }),
+      prisma.product.findFirst({ where: { cropTag: { in: pf.crops } }, select: { id: true } }),
+    ]);
+    noCatalogMatch = !line && !prod;
   }
 
   const start = camp.startDate;
@@ -615,10 +626,10 @@ export async function getCampaignTracker(campaignId: number): Promise<CampaignTr
   const members = await prisma.campaignMember.findMany({ where: { campaignId }, select: { farmerId: true, segment: true, group: true, reached: true, medium: true } });
   const test = members.filter((m) => m.group === "TEST");
   const reachedMembers = test.filter((m) => m.reached);
-  const byApproach = { CALL: 0, WHATSAPP: 0, SMS: 0, unspecified: 0 };
+  const byApproach = { CALL: 0, WHATSAPP: 0, SMS: 0, IN_PERSON: 0, unspecified: 0 };
   for (const m of reachedMembers) {
     const k = (m.medium ?? "").toUpperCase();
-    if (k === "CALL" || k === "WHATSAPP" || k === "SMS") byApproach[k]++; else byApproach.unspecified++;
+    if (k === "CALL" || k === "WHATSAPP" || k === "SMS" || k === "IN_PERSON") byApproach[k]++; else byApproach.unspecified++;
   }
 
   // Matched spend per farmer for ALL members (uplift needs the control baseline); total spend for reached test (context).

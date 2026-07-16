@@ -278,6 +278,7 @@ model SaleLine {
   custName      String?
   custPhone     String? // normalized
   b2b           Boolean   @default(false)
+  cropTag       String? // crop this sale was for — cleaned per-line from the master file's Crops column (campaign attribution)
   source        DataSource @default(REAL)
   createdAt     DateTime  @default(now())
 
@@ -287,6 +288,7 @@ model SaleLine {
   @@index([soldAt])
   @@index([storeId, soldAt])
   @@index([productId, soldAt])
+  @@index([cropTag])
   @@index([source])
 }
 

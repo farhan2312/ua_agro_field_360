@@ -92,6 +92,8 @@ function CampaignsTab({ campaigns, projects, canManage }: { campaigns: CampaignL
   const [tracker, setTracker] = useState<CampaignTracker | null>(null);
   const [membersOf, setMembersOf] = useState<CampaignListItem | null>(null);
   const [members, setMembers] = useState<CampaignMemberVM[] | null>(null);
+  const [memberPage, setMemberPage] = useState(0);
+  const [focusMode, setFocusMode] = useState(false);
   const [extendOf, setExtendOf] = useState<CampaignListItem | null>(null);
 
   const project = projects.find((p) => p.id === projectId) ?? null;
@@ -114,7 +116,8 @@ function CampaignsTab({ campaigns, projects, canManage }: { campaigns: CampaignL
     });
   };
   const openTracker = (c: CampaignListItem) => { setTrackerOf(c); setTracker(null); getCampaignTracker(c.id).then(setTracker); };
-  const openMembers = (c: CampaignListItem) => { setMembersOf(c); setMembers(null); getCampaignMembers(c.id).then(setMembers); };
+  const openMembers = (c: CampaignListItem) => { setMembersOf(c); setMembers(null); setMemberPage(0); setFocusMode(false); getCampaignMembers(c.id).then(setMembers); };
+  const patchMember = (u: CampaignMemberVM) => setMembers((list) => list?.map((x) => (x.id === u.id ? u : x)) ?? null);
 
   return (
     <div>
@@ -175,66 +178,75 @@ function CampaignsTab({ campaigns, projects, canManage }: { campaigns: CampaignL
               <div className="text-[11.5px] text-[#9E9E9E]">{c.startDate} → {c.endDate} · {c.target}</div>
             </div>
             <div className="text-[12px] text-[#616161]">{n(c.members)} farmers</div>
-            <button type="button" onClick={() => openMembers(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#1565C0] hover:bg-[#E3F2FD]">Farmers</button>
-            {canManage && <button type="button" onClick={() => openUplift(c.id)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9]">Uplift</button>}
+            <button type="button" onClick={() => openMembers(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#1565C0] hover:bg-[#E3F2FD]">{canManage ? "Farmers" : "Contact"}</button>
+            {canManage && <button type="button" onClick={() => openTracker(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9]">Campaign Tracker</button>}
             {canManage && <button type="button" onClick={() => setExtendOf(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#6A1B9A] hover:bg-[#F3E5F5]">Extend</button>}
           </div>
         ))}
       </div>
 
-      {/* Scoped farmer list (all roles) */}
-      <Modal open={membersOf != null} onClose={() => setMembersOf(null)} className="max-w-[720px]">
+      {/* Scoped contact list — outreach (TEST group): list view + one-at-a-time Focus mode */}
+      <Modal open={membersOf != null} onClose={() => setMembersOf(null)} className="max-w-[1040px]">
         {membersOf && (
           <>
-            <ModalHeader eyebrow="Campaign" eyebrowColor="#1565C0" title={membersOf.name} subtitle={canManage ? "Enrolled farmers" : "Enrolled farmers from your store / region"} onClose={() => setMembersOf(null)} />
-            <div className="max-h-[64vh] overflow-y-auto px-5 py-4">
+            <ModalHeader eyebrow="Campaign · outreach" eyebrowColor="#1565C0" title={membersOf.name}
+              subtitle={canManage ? "Contact list (test group)" : "Your farmers — call, then log how you reached them"} onClose={() => setMembersOf(null)} />
+            <div className="max-h-[74vh] overflow-y-auto px-5 py-4">
               {members == null ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">Loading…</div>
-                : members.length === 0 ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">No farmers.</div>
+                : members.length === 0 ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">No farmers to contact here.</div>
                 : (
-                  <div className="overflow-x-auto"><table className="w-full min-w-[600px] text-left text-[12.5px]">
-                    <thead><tr className="border-b border-[#EEE] text-[10px] font-bold uppercase text-[#9E9E9E]"><th className="py-2">Farmer</th><th>Store</th><th>Segment</th><th className="text-right">Group</th></tr></thead>
-                    <tbody>{members.map((m) => (
-                      <tr key={m.id} className="border-b border-[#F5F5F5]">
-                        <td className="py-2"><div className="font-semibold text-[#1A1C1A]">{m.name}</div><div className="text-[11px] text-[#9E9E9E]">{m.village ?? "—"} · {m.mobile ?? "—"}</div></td>
-                        <td className="text-[#616161]">{m.store ?? "—"}</td>
-                        <td><span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: segMeta(m.segment).bg, color: segMeta(m.segment).color }}>{segMeta(m.segment).label}</span></td>
-                        <td className="text-right text-[11px] font-semibold text-[#616161]">{m.group}</td>
-                      </tr>
-                    ))}</tbody>
-                  </table>
-                  {members.length >= 500 && <div className="mt-2 text-[11px] text-[#9E9E9E]">Showing first 500.</div>}
-                  </div>
+                  <>
+                    <OutreachProgress members={members} />
+                    <div className="mb-3 mt-3 flex items-center justify-between">
+                      <div className="text-[12px] text-[#757575]">{focusMode ? "Focus mode — one farmer at a time" : "Work the list, or switch to Focus mode for one-at-a-time calling."}</div>
+                      <button type="button" onClick={() => setFocusMode((v) => !v)}
+                        className="rounded-[10px] px-4 py-2 text-[12.5px] font-bold text-white" style={{ background: focusMode ? "#616161" : "#1565C0" }}>
+                        {focusMode ? "← Back to list" : "▶ Focus mode"}
+                      </button>
+                    </div>
+                    {focusMode
+                      ? <FocusMode members={members} onChange={patchMember} onExit={() => setFocusMode(false)} />
+                      : (() => {
+                          // List view: un-contacted first, reached/unreachable sink to the bottom.
+                          const sorted = [...members].sort((a, b) => rank(a) - rank(b));
+                          const PAGE = 25;
+                          const pages = Math.max(1, Math.ceil(sorted.length / PAGE));
+                          const page = Math.min(memberPage, pages - 1);
+                          const slice = sorted.slice(page * PAGE, page * PAGE + PAGE);
+                          return (
+                            <>
+                              <div className="flex flex-col gap-2.5">
+                                {slice.map((m) => <MemberRow key={m.id} member={m} onChange={patchMember} />)}
+                              </div>
+                              {pages > 1 && (
+                                <div className="mt-3 flex items-center justify-center gap-3">
+                                  <button type="button" onClick={() => setMemberPage(Math.max(0, page - 1))} disabled={page === 0}
+                                    className="rounded-[8px] border border-[#E0E0E0] px-3 py-1.5 text-[12px] font-semibold text-[#616161] disabled:opacity-40">← Prev</button>
+                                  <span className="text-[12px] text-[#757575]">{page * PAGE + 1}–{Math.min((page + 1) * PAGE, sorted.length)} of {n(sorted.length)}</span>
+                                  <button type="button" onClick={() => setMemberPage(Math.min(pages - 1, page + 1))} disabled={page >= pages - 1}
+                                    className="rounded-[8px] border border-[#E0E0E0] px-3 py-1.5 text-[12px] font-semibold text-[#616161] disabled:opacity-40">Next →</button>
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
+                  </>
                 )}
             </div>
           </>
         )}
       </Modal>
 
-      {/* Uplift (managers only) */}
-      <Modal open={upliftId != null} onClose={() => setUpliftId(null)} className="max-w-[760px]">
-        <ModalHeader eyebrow="Campaign" eyebrowColor="#2E7D32" title="Uplift dashboard" subtitle="Test vs control · purchases within the campaign window" onClose={() => setUpliftId(null)} />
-        <div className="max-h-[64vh] overflow-y-auto px-5 py-4">
-          {uplift == null ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">Loading…</div>
-            : uplift.length === 0 ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">No members / no sales in window yet. Uplift matures once the campaign period's sales are imported.</div>
-            : (
-              <div className="overflow-x-auto"><table className="w-full min-w-[640px] text-left text-[12px]">
-                <thead><tr className="border-b border-[#EEE] text-[10px] font-bold uppercase text-[#9E9E9E]">
-                  <th className="py-2">Segment</th><th className="text-right">Test</th><th className="text-right">Reached</th><th className="text-right">Test %buy</th><th className="text-right">Ctrl %buy</th><th className="text-right">Uplift</th><th className="text-right">Incremental ₹</th>
-                </tr></thead>
-                <tbody>{uplift.map((u) => { const testPct = u.test.reached > 0 ? (u.test.purchased / u.test.reached) : (u.test.farmers ? u.test.purchased / u.test.farmers : 0); const ctrlPct = u.control.farmers ? u.control.purchased / u.control.farmers : 0; return (
-                  <tr key={u.segment} className="border-b border-[#F5F5F5]">
-                    <td className="py-2 font-semibold" style={{ color: segMeta(u.segment).color }}>{segMeta(u.segment).label}</td>
-                    <td className="text-right">{n(u.test.farmers)}</td>
-                    <td className="text-right">{n(u.test.reached)}</td>
-                    <td className="text-right">{(testPct * 100).toFixed(0)}%</td>
-                    <td className="text-right">{(ctrlPct * 100).toFixed(0)}%</td>
-                    <td className="text-right font-semibold" style={{ color: u.upliftPurchasePct >= 0 ? "#2E7D32" : "#C62828" }}>{u.upliftPurchasePct > 0 ? "+" : ""}{u.upliftPurchasePct}pp</td>
-                    <td className="text-right font-bold text-[#1A1C1A]">₹{n(u.incremental)}</td>
-                  </tr>
-                ); })}</tbody>
-              </table></div>
-            )}
-        </div>
+      {/* Campaign Tracker (managers only) */}
+      <Modal open={trackerOf != null} onClose={() => setTrackerOf(null)} className="max-w-[840px]">
+        {trackerOf && (
+          <>
+            <ModalHeader eyebrow="Campaign Tracker" eyebrowColor="#2E7D32" title={trackerOf.name} subtitle="Outreach reach · real attributed revenue · test vs control uplift" onClose={() => setTrackerOf(null)} />
+            <div className="max-h-[72vh] overflow-y-auto px-5 py-4">
+              {tracker == null ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">Loading…</div> : <TrackerBody t={tracker} />}
+            </div>
+          </>
+        )}
       </Modal>
 
       {extendOf && <ExtendModal campaign={extendOf} project={projects.find((p) => p.id === projectId) ?? null} onClose={() => setExtendOf(null)} />}
@@ -267,6 +279,275 @@ function ExtendModal({ campaign, project, onClose }: { campaign: CampaignListIte
         </div>
       </div>
     </Modal>
+  );
+}
+
+/* ── Outreach: approach tiles, status, phone, progress, list row + Focus mode ── */
+const APPROACH_TILES: { key: string; label: string; color: string; bg: string }[] = [
+  { key: "CALL", label: "Call", color: "#1565C0", bg: "#E3F2FD" },
+  { key: "WHATSAPP", label: "WhatsApp", color: "#1B5E20", bg: "#E8F5E9" },
+  { key: "SMS", label: "SMS", color: "#6A1B9A", bg: "#F3E5F5" },
+  { key: "IN_PERSON", label: "In-person", color: "#E65100", bg: "#FFF3E0" },
+];
+const UNREACHABLE_TILE = { color: "#C62828", bg: "#FDECEA" };
+const APPROACH_KEYS = APPROACH_TILES.map((t) => t.key);
+function isApproach(med: string | null): boolean { return med != null && APPROACH_KEYS.includes(med); }
+function mediumLabel(k: string): string { return APPROACH_TILES.find((t) => t.key === k)?.label ?? k; }
+function statusOf(m: CampaignMemberVM): "reached" | "unreachable" | "pending" {
+  if (m.reached) return "reached";
+  if (m.medium === "UNREACHABLE") return "unreachable";
+  return "pending";
+}
+/** Sort order for the list — un-contacted first, unreachable next, reached last. */
+function rank(m: CampaignMemberVM): number { const s = statusOf(m); return s === "pending" ? 0 : s === "unreachable" ? 1 : 2; }
+/** Normalise an Indian mobile to its last 10 digits for tel:/wa.me links (null if not a usable number). */
+function digits10(mobile: string | null): string | null {
+  if (!mobile) return null;
+  const d = mobile.replace(/\D/g, "");
+  return d.length >= 10 ? d.slice(-10) : null;
+}
+
+function StatusBadge({ member }: { member: CampaignMemberVM }) {
+  const s = statusOf(member);
+  if (s === "reached") return <span className="rounded-full bg-[#E8F5E9] px-2.5 py-0.5 text-[10px] font-semibold text-[#2E7D32]">✓ Reached{member.medium && member.medium !== "UNREACHABLE" ? ` · ${mediumLabel(member.medium)}` : ""}{member.reachedAt ? ` · ${member.reachedAt}` : ""}</span>;
+  if (s === "unreachable") return <span className="rounded-full bg-[#FDECEA] px-2.5 py-0.5 text-[10px] font-semibold text-[#C62828]">Unreachable</span>;
+  return null;
+}
+
+/** Prominent, tappable phone number — what officers dial from. */
+function PhoneBlock({ mobile, big }: { mobile: string | null; big?: boolean }) {
+  const d10 = digits10(mobile);
+  if (!d10) return <div className="rounded-[12px] bg-[#FFF8E1] px-4 py-3 text-[13px] font-semibold text-[#8D6E00]">No phone number on file</div>;
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-[12px] bg-[#F5F8FF] px-4 py-3">
+      <a href={`tel:+91${d10}`} className={`flex items-center gap-2 font-bold leading-none tracking-wide text-[#0D47A1] hover:underline ${big ? "text-[32px]" : "text-[24px]"}`}>
+        <span className={big ? "text-[24px]" : "text-[18px]"}>📞</span>{mobile}
+      </a>
+      <div className="ml-auto flex gap-2">
+        <a href={`tel:+91${d10}`} className={`rounded-[10px] bg-[#1565C0] font-bold text-white ${big ? "px-5 py-3 text-[14px]" : "px-4 py-2.5 text-[13px]"}`}>Call</a>
+        <a href={`https://wa.me/91${d10}`} target="_blank" rel="noopener noreferrer" className={`rounded-[10px] bg-[#1B8A4B] font-bold text-white ${big ? "px-5 py-3 text-[14px]" : "px-4 py-2.5 text-[13px]"}`}>WhatsApp</a>
+      </div>
+    </div>
+  );
+}
+
+/** Approach tiles (Call/WhatsApp/SMS/In-person) + a right-aligned Unreachable tile. */
+function ApproachPicker({ value, onSelect, disabled }: { value: string | null; onSelect: (v: string | null) => void; disabled?: boolean }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-[11px] font-semibold uppercase text-[#757575]">How did you reach them?</span>
+      {APPROACH_TILES.map((t) => { const on = value === t.key; return (
+        <button key={t.key} type="button" disabled={disabled} onClick={() => onSelect(on ? null : t.key)}
+          className="rounded-full border-[1.5px] px-3.5 py-1.5 text-[12.5px] font-semibold disabled:opacity-50"
+          style={{ background: on ? t.bg : "#fff", color: on ? t.color : "#616161", borderColor: on ? t.color : "#DADADA" }}>{t.label}</button>
+      ); })}
+      <button type="button" disabled={disabled} onClick={() => onSelect(value === "UNREACHABLE" ? null : "UNREACHABLE")}
+        className="ml-auto rounded-full border-[1.5px] px-3.5 py-1.5 text-[12.5px] font-semibold disabled:opacity-50"
+        style={{ background: value === "UNREACHABLE" ? UNREACHABLE_TILE.bg : "#fff", color: value === "UNREACHABLE" ? UNREACHABLE_TILE.color : "#9E9E9E", borderColor: value === "UNREACHABLE" ? UNREACHABLE_TILE.color : "#E0E0E0" }}>
+        Unreachable
+      </button>
+    </div>
+  );
+}
+
+/** Reached (green) + unreachable (red) progress bar over the whole list. */
+function OutreachProgress({ members }: { members: CampaignMemberVM[] }) {
+  const total = members.length;
+  const reached = members.filter((m) => m.reached).length;
+  const unreachable = members.filter((m) => statusOf(m) === "unreachable").length;
+  const left = total - reached - unreachable;
+  const pct = (x: number) => (total ? (x / total) * 100 : 0);
+  return (
+    <div>
+      <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2 text-[12.5px]">
+        <span className="font-semibold text-[#1A1C1A]">{n(total)} to contact</span>
+        <span className="text-[#616161]"><b className="text-[#2E7D32]">{n(reached)} reached</b>{unreachable ? <> · <b className="text-[#C62828]">{n(unreachable)} unreachable</b></> : null} · {n(left)} left</span>
+      </div>
+      <div className="flex h-3 w-full overflow-hidden rounded-full bg-[#EDEDED]">
+        <div style={{ width: `${pct(reached)}%`, background: "#2E7D32" }} />
+        <div style={{ width: `${pct(unreachable)}%`, background: "#C62828" }} />
+      </div>
+    </div>
+  );
+}
+
+function MemberRow({ member, onChange }: { member: CampaignMemberVM; onChange: (m: CampaignMemberVM) => void }) {
+  const [medium, setMedium] = useState<string | null>(member.medium);
+  const [comment, setComment] = useState(member.comment ?? "");
+  const [pending, start] = useTransition();
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const dirty = medium !== member.medium || comment !== (member.comment ?? "");
+  const st = statusOf(member);
+
+  const save = () => {
+    setErr(null); setSaved(false);
+    start(async () => {
+      const res = await markCampaignMember(member.id, { medium, comment });
+      if (res.ok) { onChange({ ...member, reached: isApproach(medium), medium, comment: comment.trim() || null }); setSaved(true); }
+      else setErr(res.error ?? "Failed");
+    });
+  };
+
+  return (
+    <div className="rounded-[16px] border p-4" style={{ borderColor: st === "reached" ? "#81C784" : st === "unreachable" ? "#EF9A9A" : "#E8E8E8", background: st === "reached" ? "#F6FFF4" : st === "unreachable" ? "#FEF6F5" : "#fff" }}>
+      <div className="mb-2.5 flex flex-wrap items-center gap-2">
+        <span className="text-[16px] font-bold text-[#1A1C1A]">{member.name}</span>
+        <span className="rounded-full px-2.5 py-0.5 text-[10px] font-semibold" style={{ background: segMeta(member.segment).bg, color: segMeta(member.segment).color }}>{segMeta(member.segment).label}</span>
+        <StatusBadge member={member} />
+        <span className="text-[12px] text-[#9E9E9E]">{member.village ?? "—"}{member.store ? ` · ${member.store}` : ""}</span>
+      </div>
+      <div className="mb-3"><PhoneBlock mobile={member.mobile} /></div>
+      <div className="rounded-[12px] border border-[#EAEAEA] bg-[#FBFBFB] p-3">
+        <ApproachPicker value={medium} onSelect={(v) => { setMedium(v); setSaved(false); }} disabled={pending} />
+        <textarea value={comment} onChange={(e) => { setComment(e.target.value); setSaved(false); }} placeholder="Add a note (optional)…"
+          rows={2} className="mt-2 w-full resize-y rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" />
+        <div className="mt-2 flex items-center gap-2">
+          <button type="button" onClick={save} disabled={pending || !dirty}
+            className="rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-bold text-white disabled:opacity-40">
+            {pending ? "Saving…" : saved && !dirty ? "Saved ✓" : medium === "UNREACHABLE" ? "Save — mark unreachable" : medium ? "Save — mark reached" : "Save"}
+          </button>
+          {err && <span className="text-[12px] font-semibold text-[#C62828]">{err}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Focus mode: one farmer at a time (queue: head = current; skip requeues; back re-opens last) ── */
+function FocusMode({ members, onChange, onExit }: { members: CampaignMemberVM[]; onChange: (m: CampaignMemberVM) => void; onExit: () => void }) {
+  const [queue, setQueue] = useState<number[]>(() => members.filter((m) => statusOf(m) === "pending").map((m) => m.id));
+  const [history, setHistory] = useState<number[]>([]);
+  const currentId = queue[0];
+  const member = members.find((m) => m.id === currentId) ?? null;
+
+  const handled = () => { setHistory((h) => [...h, currentId]); setQueue((q) => q.slice(1)); };
+  const skip = () => setQueue((q) => (q.length > 1 ? [...q.slice(1), q[0]] : q));
+  const back = () => { if (!history.length) return; const id = history[history.length - 1]; setHistory((h) => h.slice(0, -1)); setQueue((q) => [id, ...q.filter((x) => x !== id)]); };
+
+  return (
+    <div className="mt-3">
+      {member
+        ? <FocusCard key={member.id} member={member} onChange={onChange} onHandled={handled} onSkip={skip} onBack={history.length ? back : undefined} remaining={queue.length} />
+        : (
+          <div className="rounded-[18px] border-2 border-[#A5D6A7] bg-[#F6FFF4] p-10 text-center">
+            <div className="text-[20px] font-bold text-[#1B5E20]">All done 🎉</div>
+            <div className="mt-1.5 text-[13px] text-[#616161]">You've worked through everyone in this list. Skipped farmers loop back until they're handled.</div>
+            <button type="button" onClick={onExit} className="mt-4 rounded-[10px] bg-[#2E7D32] px-6 py-2.5 text-[13px] font-bold text-white">Back to list</button>
+          </div>
+        )}
+    </div>
+  );
+}
+
+function FocusCard({ member, onChange, onHandled, onSkip, onBack, remaining }: {
+  member: CampaignMemberVM; onChange: (m: CampaignMemberVM) => void; onHandled: () => void; onSkip: () => void; onBack?: () => void; remaining: number;
+}) {
+  const [medium, setMedium] = useState<string | null>(member.medium);
+  const [comment, setComment] = useState(member.comment ?? "");
+  const [pending, start] = useTransition();
+  const [err, setErr] = useState<string | null>(null);
+
+  const commit = () => {
+    if (!medium) return; // pick an approach or Unreachable, else Skip
+    setErr(null);
+    start(async () => {
+      const res = await markCampaignMember(member.id, { medium, comment });
+      if (res.ok) { onChange({ ...member, reached: isApproach(medium), medium, comment: comment.trim() || null }); onHandled(); }
+      else setErr(res.error ?? "Failed");
+    });
+  };
+
+  return (
+    <div className="rounded-[18px] border-2 border-[#E3EAF5] bg-white p-5">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <span className="text-[22px] font-bold text-[#1A1C1A]">{member.name}</span>
+        <span className="rounded-full px-2.5 py-0.5 text-[10.5px] font-semibold" style={{ background: segMeta(member.segment).bg, color: segMeta(member.segment).color }}>{segMeta(member.segment).label}</span>
+        <StatusBadge member={member} />
+        <span className="ml-auto rounded-full bg-[#F5F7F5] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#616161]">{remaining} left</span>
+      </div>
+      <div className="mb-3 text-[12.5px] text-[#9E9E9E]">{member.village ?? "—"}{member.store ? ` · ${member.store}` : ""}</div>
+      <div className="mb-4"><PhoneBlock mobile={member.mobile} big /></div>
+      <div className="rounded-[12px] border border-[#EAEAEA] bg-[#FBFBFB] p-3.5">
+        <ApproachPicker value={medium} onSelect={setMedium} disabled={pending} />
+        <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Add a note (optional)…"
+          rows={2} className="mt-2.5 w-full resize-y rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" />
+      </div>
+      {err && <div className="mt-2 text-[12px] font-semibold text-[#C62828]">{err}</div>}
+      <div className="mt-4 flex items-center gap-2">
+        {onBack && <button type="button" onClick={onBack} disabled={pending} className="rounded-[10px] border border-[#E0E0E0] px-4 py-2.5 text-[13px] font-semibold text-[#616161] disabled:opacity-40">← Back</button>}
+        <button type="button" onClick={onSkip} disabled={pending} className="rounded-[10px] border border-[#E0E0E0] px-4 py-2.5 text-[13px] font-semibold text-[#616161] disabled:opacity-40">Skip →</button>
+        <button type="button" onClick={commit} disabled={pending || !medium}
+          className="ml-auto rounded-[10px] px-6 py-2.5 text-[13.5px] font-bold text-white disabled:opacity-40"
+          style={{ background: medium === "UNREACHABLE" ? "#C62828" : "#2E7D32" }}>
+          {pending ? "Saving…" : medium === "UNREACHABLE" ? "Mark unreachable & next" : "Save & next"}
+        </button>
+      </div>
+      {!medium && <div className="mt-2 text-right text-[11.5px] text-[#9E9E9E]">Pick how you reached them (or Unreachable), or Skip to come back later.</div>}
+    </div>
+  );
+}
+
+/* ── Campaign Tracker body: reach + real attributed revenue + uplift ── */
+function Kpi({ label, value, color }: { label: string; value: string; color?: string }) {
+  return <div className="rounded-[10px] bg-[#F5F7F5] px-3 py-2.5"><div className="text-[17px] font-bold" style={{ color: color ?? "#1A1C1A" }}>{value}</div><div className="text-[10.5px] text-[#757575]">{label}</div></div>;
+}
+
+function TrackerBody({ t }: { t: CampaignTracker }) {
+  const a = t.attribution;
+  const reachPct = t.reach.testTotal > 0 ? Math.round((t.reach.reached / t.reach.testTotal) * 100) : 0;
+  return (
+    <div className="flex flex-col gap-4">
+      <div className={`${CARD} p-4`}>
+        <div className="mb-2 text-[13px] font-bold text-[#1A1C1A]">Outreach</div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Kpi label="Test farmers" value={n(t.reach.testTotal)} />
+          <Kpi label={`Reached (${reachPct}%)`} value={n(t.reach.reached)} color="#2E7D32" />
+          <Kpi label="Call·WA·SMS·Visit" value={`${n(t.reach.byApproach.CALL)}·${n(t.reach.byApproach.WHATSAPP)}·${n(t.reach.byApproach.SMS)}·${n(t.reach.byApproach.IN_PERSON)}`} />
+          <Kpi label="Paying (contacted)" value={n(a.payingFarmers)} color="#1565C0" />
+        </div>
+      </div>
+
+      <div className={`${CARD} p-4`}>
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <div className="text-[13px] font-bold text-[#1A1C1A]">Attributed revenue</div>
+          <div className="text-[11px] text-[#9E9E9E]">{a.windowStart} → {a.windowEnd}</div>
+        </div>
+        <div className="mb-2 text-[11.5px] text-[#616161]">Counts purchases by <b>contacted</b> farmers · matched on — <b>{a.basisLabel}</b></div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-[10px] bg-[#E8F5E9] px-4 py-3"><div className="text-[20px] font-bold text-[#1B5E20]">{inr(a.matchedRevenue)}</div><div className="text-[11px] text-[#2E7D32]">Campaign-matched revenue</div></div>
+          <div className="rounded-[10px] bg-[#F5F7F5] px-4 py-3"><div className="text-[20px] font-bold text-[#1A1C1A]">{inr(a.totalRevenue)}</div><div className="text-[11px] text-[#9E9E9E]">All purchases by contacted farmers</div></div>
+        </div>
+        {a.noCatalogMatch && (
+          <div className="mt-2 rounded-[10px] border border-[#FFE0B2] bg-[#FFF8E1] px-3 py-2 text-[11.5px] text-[#8D6E00]">
+            No catalogue products carry a crop tag for this segment's crop, so crop-matched revenue reads ₹0. Crop tags exist for seeds only — use the "all purchases" figure for context, or target by product category for precise attribution.
+          </div>
+        )}
+      </div>
+
+      <div className={`${CARD} p-4`}>
+        <div className="mb-2 text-[13px] font-bold text-[#1A1C1A]">Test vs control uplift</div>
+        {t.uplift.length === 0 ? <div className="py-4 text-center text-[12.5px] text-[#9E9E9E]">No members / no matched sales yet. Uplift matures as monthly sales are imported.</div>
+          : (
+            <div className="overflow-x-auto"><table className="w-full min-w-[640px] text-left text-[12px]">
+              <thead><tr className="border-b border-[#EEE] text-[10px] font-bold uppercase text-[#9E9E9E]">
+                <th className="py-2">Segment</th><th className="text-right">Test</th><th className="text-right">Reached</th><th className="text-right">Test %buy</th><th className="text-right">Ctrl %buy</th><th className="text-right">Uplift</th><th className="text-right">Incremental ₹</th>
+              </tr></thead>
+              <tbody>{t.uplift.map((u) => { const testPct = u.test.reached > 0 ? (u.test.purchased / u.test.reached) : (u.test.farmers ? u.test.purchased / u.test.farmers : 0); const ctrlPct = u.control.farmers ? u.control.purchased / u.control.farmers : 0; return (
+                <tr key={u.segment} className="border-b border-[#F5F5F5]">
+                  <td className="py-2 font-semibold" style={{ color: segMeta(u.segment).color }}>{segMeta(u.segment).label}</td>
+                  <td className="text-right">{n(u.test.farmers)}</td>
+                  <td className="text-right">{n(u.test.reached)}</td>
+                  <td className="text-right">{(testPct * 100).toFixed(0)}%</td>
+                  <td className="text-right">{(ctrlPct * 100).toFixed(0)}%</td>
+                  <td className="text-right font-semibold" style={{ color: u.upliftPurchasePct >= 0 ? "#2E7D32" : "#C62828" }}>{u.upliftPurchasePct > 0 ? "+" : ""}{u.upliftPurchasePct}pp</td>
+                  <td className="text-right font-bold text-[#1A1C1A]">{inr(u.incremental)}</td>
+                </tr>
+              ); })}</tbody>
+            </table></div>
+          )}
+      </div>
+    </div>
   );
 }
 

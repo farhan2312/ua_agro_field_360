@@ -6,6 +6,7 @@ import { SEGMENT_COLUMNS, segMeta } from "@/lib/campaign-segments";
 import { inr } from "@/lib/format";
 import { createClusterFromCriteria } from "@/app/actions/cluster-builder";
 import type { ClusterCriteria } from "@/lib/cluster-rules";
+import { getScope } from "@/lib/scope";
 
 export type Lens = "sales" | "visit";
 
@@ -57,6 +58,20 @@ function farmerConds(f: WbFilters, alias = ""): Prisma.Sql[] {
 }
 const whereOf = (f: WbFilters, alias = "") => Prisma.sql`WHERE ${Prisma.join(farmerConds(f, alias), " AND ")}`;
 
+/**
+ * Enforce role scope on the workbench filters: an Agri Officer is pinned to their own store and a
+ * Regional Manager to their own region — they can narrow further, but never widen past their scope,
+ * whatever the client sends. Central/Sysadmin are unrestricted. "none" = a scoped user with no
+ * store/region assigned (show nothing).
+ */
+async function scopeFilters(f: WbFilters): Promise<WbFilters | "none"> {
+  const { role, storeId, zone } = await getScope();
+  if (role === "officer") return storeId == null ? "none" : { ...f, storeId, zone: undefined };
+  // RM: force their zone; a client storeId outside that zone simply yields no rows (zone AND store).
+  if (role === "regional") return zone == null ? "none" : { ...f, zone };
+  return f; // central / sysadmin
+}
+
 /* ── Facets for the filter bar ── */
 export interface WbFacets {
   stores: { id: number; name: string }[];
@@ -67,16 +82,37 @@ export interface WbFacets {
   spendTiers: string[];
 }
 export async function getWorkbenchFacets(): Promise<WbFacets> {
+  const { role, storeId, zone } = await getScope();
+  const isOfficer = role === "officer", isRM = role === "regional";
+
+  // Store dropdown: officer → only their store; RM → only their region's stores; else all.
+  const storeWhere: Prisma.StoreWhereInput = isOfficer
+    ? { id: storeId ?? -1 }
+    : isRM ? (zone != null ? { zone } : { id: -1 }) : {};
+  // Farmer-level scope predicate for the crop-facet COUNTS (so an officer doesn't see global crop totals).
+  const fScope: Prisma.Sql = isOfficer
+    ? (storeId != null ? Prisma.sql`"storeId" = ${storeId}` : Prisma.sql`false`)
+    : isRM ? (zone != null ? Prisma.sql`"zone" = ${zone}` : Prisma.sql`false`)
+    : Prisma.sql`true`;
+  // Visit-level scope predicate (officer by the visit's store; RM by the visit's farmer zone).
+  const vScope: Prisma.Sql = isOfficer
+    ? (storeId != null ? Prisma.sql`v."storeId" = ${storeId}` : Prisma.sql`false`)
+    : isRM ? (zone != null ? Prisma.sql`f."zone" = ${zone}` : Prisma.sql`false`)
+    : Prisma.sql`true`;
+
   const [stores, zoneRows, sc, vc, pr] = await Promise.all([
-    prisma.store.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
-    prisma.farmer.findMany({ where: { zone: { not: null }, source: "REAL" }, distinct: ["zone"], select: { zone: true }, orderBy: { zone: "asc" } }),
-    prisma.$queryRaw<{ crop: string; n: number }[]>`SELECT unnest("salesCropTags") crop, COUNT(*)::int n FROM "Farmer" WHERE source='REAL' GROUP BY 1 ORDER BY 2 DESC`,
-    prisma.$queryRaw<{ crop: string; n: number }[]>`SELECT unnest("visitCropTags") crop, COUNT(*)::int n FROM "Farmer" WHERE source='REAL' GROUP BY 1 ORDER BY 2 DESC`,
-    prisma.$queryRaw<{ problem: string; n: number }[]>`SELECT unnest("currentProblem") problem, COUNT(*)::int n FROM "Visit" WHERE array_length("currentProblem",1) > 0 GROUP BY 1 ORDER BY 2 DESC LIMIT 40`,
+    prisma.store.findMany({ where: storeWhere, orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    isOfficer || isRM
+      ? Promise.resolve([] as { zone: string | null }[])
+      : prisma.farmer.findMany({ where: { zone: { not: null }, source: "REAL" }, distinct: ["zone"], select: { zone: true }, orderBy: { zone: "asc" } }),
+    prisma.$queryRaw<{ crop: string; n: number }[]>(Prisma.sql`SELECT unnest("salesCropTags") crop, COUNT(*)::int n FROM "Farmer" WHERE source='REAL' AND ${fScope} GROUP BY 1 ORDER BY 2 DESC`),
+    prisma.$queryRaw<{ crop: string; n: number }[]>(Prisma.sql`SELECT unnest("visitCropTags") crop, COUNT(*)::int n FROM "Farmer" WHERE source='REAL' AND ${fScope} GROUP BY 1 ORDER BY 2 DESC`),
+    prisma.$queryRaw<{ problem: string; n: number }[]>(Prisma.sql`SELECT unnest(v."currentProblem") problem, COUNT(*)::int n FROM "Visit" v JOIN "Farmer" f ON f.id = v."farmerId" WHERE array_length(v."currentProblem",1) > 0 AND ${vScope} GROUP BY 1 ORDER BY 2 DESC LIMIT 40`),
   ]);
+  const zones = isRM ? (zone != null ? [zone] : []) : isOfficer ? [] : zoneRows.map((z) => z.zone!).filter(Boolean);
   return {
     stores: stores.map((s) => ({ id: s.id, name: shortStore(s.name) })),
-    zones: zoneRows.map((z) => z.zone!).filter(Boolean),
+    zones,
     salesCrops: sc.map((r) => ({ crop: r.crop, count: num(r.n) })),
     visitCrops: vc.map((r) => ({ crop: r.crop, count: num(r.n) })),
     problems: pr.map((r) => ({ problem: r.problem, count: num(r.n) })),
@@ -99,7 +135,16 @@ export interface WbData {
   secondaryTitle: string;
 }
 
+const EMPTY_WB: WbData = {
+  kpis: { farmers: 0, hni: 0, potentialHni: 0, atRisk: 0, lapsed: 0, spend: 0, visits: 0 },
+  matrix: { rows: [], totals: {}, grandTotal: 0 },
+  segmentDist: [], cropBreakdown: [], extra: [], extraTitle: "", secondary: [], secondaryTitle: "",
+};
+
 export async function getWorkbench(f: WbFilters): Promise<WbData> {
+  const scoped = await scopeFilters(f);
+  if (scoped === "none") return EMPTY_WB; // scoped user with no store/region → nothing to show
+  f = scoped;
   // Alias the outer Farmer as `f` everywhere so the visit-problem EXISTS correlates to Farmer.id
   // (a bare "id" would bind to Visit.id and collapse the visit lens to ~0).
   const whereF = whereOf(f, "f");
@@ -195,9 +240,11 @@ export async function getWorkbench(f: WbFilters): Promise<WbData> {
 /* ── Drill: farmers in a matrix cell (respects the active filters) ── */
 export interface WbCustomer { id: number; name: string; mobile: string | null; village: string | null; spend: string; segment: string; salesCrops: string[]; visitCrops: string[] }
 export async function getWorkbenchCustomers(f: WbFilters, storeId: number | null, segment: string, limit = 400): Promise<WbCustomer[]> {
-  const cellFilter: WbFilters = { ...f, storeId: storeId ?? undefined, segment };
-  const conds = farmerConds(cellFilter, "f"); // alias f so the visit-problem EXISTS correlates to Farmer.id
-  if (storeId == null) conds.push(Prisma.sql`f."storeId" IS NULL`);
+  // Scope LAST (after applying the clicked cell's store) so an officer/RM can't drill into a foreign store.
+  const scoped = await scopeFilters({ ...f, storeId: storeId ?? undefined, segment });
+  if (scoped === "none") return [];
+  const conds = farmerConds(scoped, "f"); // alias f so the visit-problem EXISTS correlates to Farmer.id
+  if (storeId == null && scoped.storeId == null) conds.push(Prisma.sql`f."storeId" IS NULL`);
   const rows = await prisma.$queryRaw<{ id: number; name: string; mobile: string | null; village: string | null; spend: number | null; seg: string | null; salesc: string[]; visitc: string[] }[]>(Prisma.sql`
     SELECT f.id, f.name, f.mobile, f.village, f."p12mSpend" spend, f."campaignSegment" seg, f."salesCropTags" salesc, f."visitCropTags" visitc
     FROM "Farmer" f WHERE ${Prisma.join(conds, " AND ")}
@@ -211,6 +258,9 @@ export async function getWorkbenchCustomers(f: WbFilters, storeId: number | null
 
 /* ── Save the current filter as a live dynamic segment ── */
 export async function saveWorkbenchSegment(f: WbFilters, name: string): Promise<{ ok: boolean; error?: string }> {
+  const scoped = await scopeFilters(f);
+  if (scoped === "none") return { ok: false, error: "No store or region is assigned to your account." };
+  f = scoped; // saved segment inherits the officer's store / RM's region
   const tier = f.lens === "sales" && f.spendTier != null ? SPEND_TIERS[f.spendTier] : undefined;
   const criteria: ClusterCriteria = {
     storeIds: f.storeId != null ? [f.storeId] : undefined,
