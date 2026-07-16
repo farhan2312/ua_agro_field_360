@@ -20,7 +20,7 @@ export function LoginForm() {
       const res = await loginAction(fd);
       if (res.error) setError(res.error);
       else {
-        router.replace("/dashboard");
+        router.replace("/analytics");
         router.refresh();
       }
     });

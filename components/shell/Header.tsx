@@ -31,8 +31,8 @@ export function Header({ role, counts }: { role: RoleKey; counts: HeaderCounts }
     subtitle = `${counts.activeUsers} active users · Role-based access`;
   if (view === "newVisit") subtitle = "Field visit entry · 5 steps";
 
-  // New Visit is a quick-action shortcut — only surface it on the dashboard.
-  const showNewVisit = view === "dashboard" && canAccess("newVisit", role);
+  // New Visit is a quick-action shortcut — only surface it on the home page (Analytics).
+  const showNewVisit = view === "analytics" && canAccess("newVisit", role);
   const isAdmin = role === "sysadmin";
 
   return (

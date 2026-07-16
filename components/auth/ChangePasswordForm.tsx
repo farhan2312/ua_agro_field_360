@@ -19,7 +19,7 @@ export function ChangePasswordForm() {
       const res = await changePasswordAction(fd);
       if (res.error) setError(res.error);
       else {
-        router.replace("/dashboard");
+        router.replace("/analytics");
         router.refresh();
       }
     });

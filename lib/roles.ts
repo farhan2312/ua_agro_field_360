@@ -141,9 +141,11 @@ export function viewTitle(
     case "analytics":
       return [
         "Analytics & Insights",
-        role === "central"
-          ? "Cross-region performance analysis"
-          : "Deep-dive into field operations data",
+        role === "officer"
+          ? "My store — overview & deep-dive"
+          : role === "regional"
+            ? "My region — overview & deep-dive"
+            : "Organization overview & cross-region analysis",
       ];
     case "newVisit":
       return ["New Visit Entry", `Step ${(extras?.step ?? 0) + 1} of 5`];
@@ -188,6 +190,6 @@ export function viewTitle(
     case "movement":
       return ["Stock / Movement", "Product velocity & demand signal across stores"];
     default:
-      return ["Dashboard", ""];
+      return ["Analytics & Insights", "Overview & deep-dive"];
   }
 }

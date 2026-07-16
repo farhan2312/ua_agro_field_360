@@ -22,7 +22,7 @@ export async function middleware(req: NextRequest) {
   // Signed in but on an auth page → send to the app.
   if (session && isPublic) {
     const url = req.nextUrl.clone();
-    url.pathname = session.mustChangePassword ? CHANGE_PW : "/dashboard";
+    url.pathname = session.mustChangePassword ? CHANGE_PW : "/analytics";
     url.search = "";
     return NextResponse.redirect(url);
   }

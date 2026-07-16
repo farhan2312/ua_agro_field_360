@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 export default async function NewVisitPage() {
   // Route guard: the `central` persona has no New Visit nav entry (spec §1).
   const role = await getRole();
-  if (role === "central") redirect("/dashboard");
+  if (role === "central") redirect("/analytics");
 
   let options: WizardOptions = resolveOptions([]);
   // Geo master: distinct districts/villages actually present in the farmer book,

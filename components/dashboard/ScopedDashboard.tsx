@@ -6,8 +6,8 @@ export interface ScopedKpi { farmers: number; hni: number; potentialHni: number;
 export interface ScopedSegBar { key: string; label: string; count: number; color: string; bg: string }
 export interface ScopedRecentVisit { id: number; farmer: string; village: string; officer: string; date: string; status: string }
 export interface ScopedDashboardData {
-  kind: "store" | "zone";
-  label: string; // store name, or region name
+  kind: "store" | "zone" | "global";
+  label: string; // store name, region name, or "All regions"
   sub: string; // secondary line
   kpi: ScopedKpi;
   segments: ScopedSegBar[];
@@ -17,10 +17,12 @@ export interface ScopedDashboardData {
 const n = (x: number) => x.toLocaleString("en-IN");
 const CARD = "rounded-[14px] border border-black/[0.04] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]";
 
-/** Officer/RM dashboard — every figure is scoped to the viewer's own store (officer) or region (RM). */
+/** Overview strip — every figure is real and scoped: officer→store, RM→region, central/sysadmin→org-wide. */
 export function ScopedDashboard({ data, name }: { data: ScopedDashboardData; name: string }) {
+  const scopeChip = data.kind === "store" ? "My store only" : data.kind === "zone" ? "My region only" : "Organization-wide";
+  const kpiChip = data.kind === "store" ? "Store" : data.kind === "zone" ? "Region" : "All";
   const kpis = [
-    { label: data.kind === "store" ? "Farmers in store" : "Farmers in region", value: n(data.kpi.farmers), color: "#2E7D32", bg: "#E8F5E9" },
+    { label: data.kind === "store" ? "Farmers in store" : data.kind === "zone" ? "Farmers in region" : "Farmers (all regions)", value: n(data.kpi.farmers), color: "#2E7D32", bg: "#E8F5E9" },
     { label: "HNI farmers", value: n(data.kpi.hni), color: "#6A1B9A", bg: "#F3E5F5" },
     { label: "12-mo revenue", value: inr(data.kpi.revenue12m), color: "#1565C0", bg: "#E3F2FD" },
     { label: "Visits logged", value: n(data.kpi.visits), color: "#E65100", bg: "#FFF3E0" },
@@ -38,7 +40,7 @@ export function ScopedDashboard({ data, name }: { data: ScopedDashboardData; nam
             <div className="mt-0.5 text-[12px] text-white/80">{data.sub}</div>
           </div>
           <span className="shrink-0 rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold text-white">
-            {data.kind === "store" ? "My store only" : "My region only"}
+            {scopeChip}
           </span>
         </div>
       </div>
@@ -47,7 +49,7 @@ export function ScopedDashboard({ data, name }: { data: ScopedDashboardData; nam
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
         {kpis.map((k) => (
           <div key={k.label} className={`${CARD} px-4 py-3.5`}>
-            <div className="mb-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: k.bg, color: k.color }}>{data.kind === "store" ? "Store" : "Region"}</div>
+            <div className="mb-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: k.bg, color: k.color }}>{kpiChip}</div>
             <div className="text-[22px] font-bold text-[#1A1C1A]">{k.value}</div>
             <div className="text-[11.5px] text-[#757575]">{k.label}</div>
           </div>

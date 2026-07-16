@@ -200,7 +200,7 @@ export async function submitVisitAction(
     });
 
     revalidatePath("/visits");
-    revalidatePath("/dashboard");
+    revalidatePath("/analytics");
     // Farmer count / segment summary may have changed — bust the cached stats.
     revalidateTag(STATS_TAG);
   } catch {
@@ -211,5 +211,5 @@ export async function submitVisitAction(
   // shows a success banner when ?created=1). Falls back to the dashboard if the DB
   // write was skipped (missing/empty DB).
   if (newVisitId) redirect(`/visits/${newVisitId}?created=1`);
-  redirect("/dashboard?visitLogged=1");
+  redirect("/analytics?visitLogged=1");
 }

@@ -16,13 +16,12 @@ export interface NavItem {
 }
 
 export const MAIN_NAV: NavItem[] = [
-  { id: "dashboard", label: "Dashboard", href: "/dashboard" },
+  { id: "analytics", label: "Analytics", href: "/analytics" },
   { id: "newVisit", label: "New Visit", href: "/visits/new" },
   { id: "visitRepo", label: "Visit Repo", href: "/visits" },
   { id: "farmers", label: "Farmer 360", href: "/farmers" },
   { id: "mapView", label: "Map View", href: "/map" },
   { id: "farmerCluster", label: "Farmer Clusters", href: "/clusters" },
-  { id: "analytics", label: "Analytics", href: "/analytics" },
   { id: "projects", label: "Projects", href: "/projects" },
   { id: "campaigns", label: "Campaigns", href: "/campaigns" },
 ];
@@ -88,5 +87,5 @@ export function routeToView(pathname: string): ViewId {
   if (pathname.startsWith("/users")) return "users";
   if (pathname.startsWith("/settings")) return "settings";
   if (pathname.startsWith("/audit")) return "audit";
-  return "dashboard";
+  return "analytics"; // Analytics is the home page (Dashboard was merged into it)
 }
