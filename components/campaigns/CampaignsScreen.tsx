@@ -3,10 +3,10 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { Modal, ModalHeader } from "@/components/interactive";
-import { segMeta, fillTemplate } from "@/lib/campaign-segments";
+import { segMeta, fillTemplate, SEGMENT_COLUMNS } from "@/lib/campaign-segments";
 import { inr } from "@/lib/format";
 import {
-  saveCommTemplate, createCampaign, getCampaignTracker, extendCampaign, getCampaignMembers, markCampaignMember,
+  saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, getCampaignTracker, extendCampaign, getCampaignMembers, markCampaignMember,
   type CampaignListItem, type CampaignTracker, type ProjectVM, type CampaignMemberVM,
 } from "@/app/actions/campaigns";
 
@@ -14,6 +14,7 @@ import {
 export interface CropOption { crop: string; count: number }
 
 export interface CommTemplateVM {
+  id: number; name: string; language: string; promoType: string;
   segment: string; priority: number; medium: string; offer: string; timingLabel: string; template: string;
 }
 export interface StoreLite { id: number; name: string }
@@ -24,44 +25,152 @@ const n = (x: number) => x.toLocaleString("en-IN");
 /* ══════════════════ Comm plan (WF3) ══════════════════ */
 const SAMPLE = { name: "Ramesh Kumar", hniGap: 2500, lastItem: "Maize Dekalb 9108", store: "Ram Nagar", phone: "98xxxxxxxx", deadline: "15 Aug" };
 
+const LANG_LABEL: Record<string, string> = { en: "English", hi: "हिंदी" };
+const MEDIUM_CHIPS = ["All", "WhatsApp", "Call", "SMS"];
+const PROMO_TYPES = ["General", "Discount", "Festival", "New launch", "Scheme/Credit", "Reminder"];
+
+/** Full editable form for one comm plan (used by both edit + create). */
+function CommPlanForm({ draft, setDraft }: { draft: CommTemplateVM; setDraft: (t: CommTemplateVM) => void }) {
+  const input = "rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]";
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Name</label>
+          <input className={`${input} w-full`} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. Festival Bonanza — English" /></div>
+        <div className="grid grid-cols-2 gap-2">
+          <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Language</label>
+            <select className={`${input} w-full bg-white`} value={draft.language} onChange={(e) => setDraft({ ...draft, language: e.target.value })}>
+              <option value="hi">हिंदी</option><option value="en">English</option>
+            </select></div>
+          <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Promotion</label>
+            <select className={`${input} w-full bg-white`} value={draft.promoType} onChange={(e) => setDraft({ ...draft, promoType: e.target.value })}>
+              {PROMO_TYPES.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select></div>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Segment</label>
+          <select className={`${input} w-full bg-white`} value={draft.segment} onChange={(e) => setDraft({ ...draft, segment: e.target.value })}>
+            {SEGMENT_COLUMNS.map((s) => <option key={s} value={s}>{segMeta(s).label}</option>)}
+          </select></div>
+        <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Medium</label>
+          <input className={`${input} w-full`} value={draft.medium} onChange={(e) => setDraft({ ...draft, medium: e.target.value })} placeholder="WhatsApp / Call / SMS" /></div>
+        <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Timing</label>
+          <input className={`${input} w-full`} value={draft.timingLabel} onChange={(e) => setDraft({ ...draft, timingLabel: e.target.value })} placeholder="e.g. Festival week" /></div>
+      </div>
+      <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Offer</label>
+        <input className={`${input} w-full`} value={draft.offer} onChange={(e) => setDraft({ ...draft, offer: e.target.value })} placeholder="Offer" /></div>
+      <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Message ([Naam] [gap] [last item] [Store] [number] [date])</label>
+        <textarea className={`${input} min-h-[90px] w-full`} value={draft.template} onChange={(e) => setDraft({ ...draft, template: e.target.value })} /></div>
+    </div>
+  );
+}
+
+const EMPTY_PLAN: CommTemplateVM = { id: 0, name: "", language: "hi", promoType: "General", segment: "REGULAR", priority: 5, medium: "WhatsApp", offer: "", timingLabel: "", template: "" };
+
 function CommPlanTab({ templates }: { templates: CommTemplateVM[] }) {
   const [rows, setRows] = useState(templates);
-  const [editing, setEditing] = useState<string | null>(null);
+  const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState<CommTemplateVM | null>(null);
+  const [adding, setAdding] = useState(false);
   const [saving, start] = useTransition();
+  const [err, setErr] = useState<string | null>(null);
+  // Filters: medium · promotion type · language
+  const [fMedium, setFMedium] = useState("All");
+  const [fPromo, setFPromo] = useState("");
+  const [fLang, setFLang] = useState("");
+
+  const shown = rows.filter((r) =>
+    (fMedium === "All" || r.medium.toLowerCase().includes(fMedium.toLowerCase())) &&
+    (!fPromo || r.promoType === fPromo) &&
+    (!fLang || r.language === fLang));
 
   const save = () => {
     if (!draft) return;
+    setErr(null);
     start(async () => {
-      const res = await saveCommTemplate(draft.segment, { medium: draft.medium, offer: draft.offer, timingLabel: draft.timingLabel, template: draft.template });
-      if (res.ok) { setRows((r) => r.map((x) => (x.segment === draft.segment ? draft : x))); setEditing(null); }
+      const patch = { name: draft.name, language: draft.language, promoType: draft.promoType, segment: draft.segment, medium: draft.medium, offer: draft.offer, timingLabel: draft.timingLabel, template: draft.template };
+      if (adding) {
+        const res = await createCommTemplate(patch);
+        if (res.ok && res.id != null) { setRows((r) => [...r, { ...draft, id: res.id! }]); setAdding(false); setDraft(null); }
+        else setErr(res.error ?? "Failed");
+      } else {
+        const res = await saveCommTemplate(draft.id, patch);
+        if (res.ok) { setRows((r) => r.map((x) => (x.id === draft.id ? draft : x))); setEditing(null); setDraft(null); }
+        else setErr(res.error ?? "Failed");
+      }
     });
   };
+  const remove = (id: number) =>
+    start(async () => { const res = await deleteCommTemplate(id); if (res.ok) setRows((r) => r.filter((x) => x.id !== id)); });
 
   return (
     <div className="flex flex-col gap-3.5">
-      <div className="text-[12.5px] text-[#757575]">One approved message per segment. Slots — <b>[Naam]</b>, <b>[gap]</b>, <b>[last item]</b>, <b>[Store name]</b>, <b>[number]</b>, <b>[date]</b> — fill per customer.</div>
-      {rows.map((t) => {
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="text-[12.5px] text-[#757575]">Reusable message templates — campaigns are tagged with one or more of these by name. Slots — <b>[Naam]</b>, <b>[gap]</b>, <b>[last item]</b>, <b>[Store]</b>, <b>[number]</b>, <b>[date]</b> — fill per customer.</div>
+        <button type="button" onClick={() => { setAdding(true); setEditing(null); setDraft({ ...EMPTY_PLAN }); setErr(null); }}
+          className="ml-auto rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white">+ New comm plan</button>
+      </div>
+
+      {/* Filters */}
+      <div className={`${CARD} flex flex-wrap items-center gap-2 p-3`}>
+        <span className="text-[11px] font-bold uppercase tracking-[0.5px] text-[#9E9E9E]">Filter:</span>
+        {MEDIUM_CHIPS.map((m) => (
+          <button key={m} type="button" onClick={() => setFMedium(m)}
+            className="rounded-full border-[1.5px] px-3 py-1 text-[11.5px] font-semibold"
+            style={{ background: fMedium === m ? "#2E7D32" : "#fff", color: fMedium === m ? "#fff" : "#616161", borderColor: fMedium === m ? "#2E7D32" : "#E0E0E0" }}>{m}</button>
+        ))}
+        <select value={fPromo} onChange={(e) => setFPromo(e.target.value)} className="rounded-lg border border-[#E0E0E0] bg-white px-2.5 py-1.5 text-[12px] text-[#424242]">
+          <option value="">All promotions</option>
+          {PROMO_TYPES.map((p) => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <select value={fLang} onChange={(e) => setFLang(e.target.value)} className="rounded-lg border border-[#E0E0E0] bg-white px-2.5 py-1.5 text-[12px] text-[#424242]">
+          <option value="">All languages</option>
+          <option value="en">English</option>
+          <option value="hi">हिंदी</option>
+        </select>
+        <span className="text-[11.5px] text-[#9E9E9E]">{shown.length} of {rows.length} plans</span>
+      </div>
+
+      {/* New plan */}
+      {adding && draft && (
+        <div className={`${CARD} border-l-4 border-l-[#2E7D32] p-[18px]`}>
+          <div className="mb-2 text-[13px] font-bold text-[#1A1C1A]">New comm plan</div>
+          <CommPlanForm draft={draft} setDraft={setDraft} />
+          {err && <div className="mt-2 text-[12px] text-[#C62828]">{err}</div>}
+          <div className="mt-3 flex gap-2">
+            <button type="button" onClick={save} disabled={saving || !draft.name.trim()} className="rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Create plan"}</button>
+            <button type="button" onClick={() => { setAdding(false); setDraft(null); }} className="rounded-[10px] border border-[#E0E0E0] px-4 py-2 text-[13px] font-semibold text-[#616161]">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {shown.length === 0 && !adding && <div className={`${CARD} px-4 py-10 text-center text-[13px] text-[#9E9E9E]`}>No comm plans match these filters.</div>}
+      {shown.map((t) => {
         const m = segMeta(t.segment);
-        const isEditing = editing === t.segment;
+        const isEditing = editing === t.id;
         const cur = isEditing && draft ? draft : t;
         return (
-          <div key={t.segment} className={`${CARD} p-[18px]`} style={{ borderLeft: `4px solid ${m.color}` }}>
+          <div key={t.id} className={`${CARD} p-[18px]`} style={{ borderLeft: `4px solid ${m.color}` }}>
             <div className="mb-2 flex flex-wrap items-center gap-2">
-              <span className="rounded-full px-2.5 py-0.5 text-[11px] font-bold" style={{ background: m.bg, color: m.color }}>#{t.priority} {m.label}</span>
+              <span className="text-[13.5px] font-bold text-[#1A1C1A]">{cur.name || "(unnamed)"}</span>
+              <span className="rounded-full px-2.5 py-0.5 text-[10px] font-bold" style={{ background: m.bg, color: m.color }}>{m.label}</span>
+              <span className="rounded-full bg-[#E3F2FD] px-2 py-0.5 text-[10px] font-semibold text-[#1565C0]">{LANG_LABEL[cur.language] ?? cur.language}</span>
+              <span className="rounded-full bg-[#F3E5F5] px-2 py-0.5 text-[10px] font-semibold text-[#6A1B9A]">{cur.promoType}</span>
               <span className="text-[11.5px] text-[#616161]">{cur.medium}</span>
               <span className="text-[11.5px] text-[#9E9E9E]">· {cur.timingLabel}</span>
-              <button type="button" onClick={() => { setEditing(isEditing ? null : t.segment); setDraft({ ...t }); }}
-                className="ml-auto text-[12px] font-semibold text-[#2E7D32] hover:underline">{isEditing ? "Cancel" : "Edit"}</button>
+              <div className="ml-auto flex items-center gap-3">
+                <button type="button" onClick={() => { setEditing(isEditing ? null : t.id); setAdding(false); setDraft({ ...t }); setErr(null); }}
+                  className="text-[12px] font-semibold text-[#2E7D32] hover:underline">{isEditing ? "Cancel" : "Edit"}</button>
+                <button type="button" onClick={() => remove(t.id)} disabled={saving} className="text-[12px] font-semibold text-[#C62828] hover:underline disabled:opacity-50">Delete</button>
+              </div>
             </div>
             {isEditing && draft ? (
-              <div className="flex flex-col gap-2">
-                <input className="rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" value={draft.medium} onChange={(e) => setDraft({ ...draft, medium: e.target.value })} placeholder="Medium" />
-                <input className="rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" value={draft.offer} onChange={(e) => setDraft({ ...draft, offer: e.target.value })} placeholder="Offer" />
-                <input className="rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" value={draft.timingLabel} onChange={(e) => setDraft({ ...draft, timingLabel: e.target.value })} placeholder="Timing" />
-                <textarea className="min-h-[90px] rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" value={draft.template} onChange={(e) => setDraft({ ...draft, template: e.target.value })} />
-                <button type="button" onClick={save} disabled={saving} className="self-start rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>
-              </div>
+              <>
+                <CommPlanForm draft={draft} setDraft={setDraft} />
+                {err && <div className="mt-2 text-[12px] text-[#C62828]">{err}</div>}
+                <button type="button" onClick={save} disabled={saving || !draft.name.trim()} className="mt-3 self-start rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>
+              </>
             ) : (
               <>
                 <div className="text-[10px] font-bold uppercase text-[#9E9E9E]">Offer</div>
@@ -79,7 +188,7 @@ function CommPlanTab({ templates }: { templates: CommTemplateVM[] }) {
 }
 
 /* ══════════════════ Campaigns + tracking (WF4) ══════════════════ */
-function CampaignsTab({ campaigns, projects, canManage, initialProjectId }: { campaigns: CampaignListItem[]; projects: ProjectVM[]; canManage: boolean; initialProjectId?: number }) {
+function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPlanNames }: { campaigns: CampaignListItem[]; projects: ProjectVM[]; canManage: boolean; initialProjectId?: number; commPlanNames: string[] }) {
   // Chain: arriving via /campaigns?forProject=<id> opens the create form with that project preselected.
   const initialProject = initialProjectId != null ? projects.find((p) => p.id === initialProjectId) ?? null : null;
   const defaultProject = initialProject ?? projects[0] ?? null;
@@ -88,6 +197,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId }: { ca
   const [name, setName] = useState("");
   const [projectId, setProjectId] = useState<number | null>(defaultProject?.id ?? null);
   const [clusterId, setClusterId] = useState<number | null>(null); // null = whole project
+  const [commPlans, setCommPlans] = useState<string[]>([]); // every campaign must be tagged with ≥1 comm plan (by name)
   const [startDate, setStart] = useState(defaultProject?.startDate ?? "");
   const [endDate, setEnd] = useState(defaultProject?.endDate ?? "");
   const [pending, start] = useTransition();
@@ -109,12 +219,16 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId }: { ca
     setStart(p?.startDate ?? ""); setEnd(p?.endDate ?? "");
   };
 
+  const toggleCommPlan = (p: string) =>
+    setCommPlans((cur) => (cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p]));
+
   const submit = () => {
     if (!projectId) { setMsg("Pick a project first."); return; }
     if (!name.trim()) { setMsg("Name the campaign."); return; }
+    if (commPlans.length === 0) { setMsg("Tag at least one comm plan."); return; }
     setMsg(null);
     start(async () => {
-      const res = await createCampaign({ name, startDate, endDate, projectId, clusterId });
+      const res = await createCampaign({ name, startDate, endDate, projectId, clusterId, commPlans });
       if (res.ok) { setMsg(`Created "${name}" · ${n(res.members ?? 0)} enrolled${res.skipped ? ` · ${n(res.skipped)} skipped (already in another campaign of this project)` : ""}.`); setCreating(false); location.reload(); }
       else setMsg(res.error ?? "Failed");
     });
@@ -163,11 +277,32 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId }: { ca
             </div>
           </div>
           <div className="mt-2 text-[11px] text-[#9E9E9E]">Campaign dates must fall within the project window{project.endDate ? ` (${project.startDate} → ${project.endDate})` : ""}. To run past the project end, extend the project first.</div>
+          {/* Required: every campaign is tagged with one or more comm plans (by name) */}
+          <div className="mt-3">
+            <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Comm plans <span className="normal-case text-[#C62828]">*</span> — tag one or more</label>
+            {commPlanNames.length === 0 ? (
+              <div className="mt-1 rounded-[10px] border border-[#FFE0B2] bg-[#FFF8E1] px-3 py-2 text-[12px] text-[#8D6E00]">No comm plans yet — create one on the Comm Plan tab first.</div>
+            ) : (
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {commPlanNames.map((p) => {
+                  const on = commPlans.includes(p);
+                  return (
+                    <button key={p} type="button" onClick={() => toggleCommPlan(p)}
+                      className="rounded-full border-[1.5px] px-3 py-1 text-[11.5px] font-semibold"
+                      style={{ background: on ? "#2E7D32" : "#fff", color: on ? "#fff" : "#616161", borderColor: on ? "#2E7D32" : "#E0E0E0" }}>
+                      {on ? "✓ " : ""}{p}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {commPlans.length > 0 && <div className="mt-1 text-[11px] text-[#2E7D32]">{commPlans.length} tagged</div>}
+          </div>
           <div className="mt-3 flex items-center justify-between rounded-[10px] bg-[#F5F7F5] px-4 py-3">
             <div className="text-[12px] text-[#616161]">Audience {clusterId ? "(cluster)" : "(project, de-duplicated)"} · before cross-campaign de-dup</div>
             <div className="text-[18px] font-bold text-[#2E7D32]">{n(audience)}</div>
           </div>
-          <button type="button" onClick={submit} disabled={pending || !name.trim()} className="mt-4 rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{pending ? "Creating…" : "Create & enrol"}</button>
+          <button type="button" onClick={submit} disabled={pending || !name.trim() || commPlans.length === 0} className="mt-4 rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{pending ? "Creating…" : "Create & enrol"}</button>
         </div>
       )}
       {msg && <div className="mb-3 rounded-[10px] border border-[#A5D6A7] bg-[#E8F5E9] px-3.5 py-2.5 text-[12.5px] font-medium text-[#2E7D32]">{msg}</div>}
@@ -180,6 +315,13 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId }: { ca
             <div className="min-w-0 flex-1">
               <div className="text-[13.5px] font-bold text-[#1A1C1A]">{c.name}</div>
               <div className="text-[11.5px] text-[#9E9E9E]">{c.startDate} → {c.endDate} · {c.target}</div>
+              {c.commPlans.length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {c.commPlans.map((p) => (
+                    <span key={p} className="rounded-full bg-[#E8F5E9] px-2 py-0.5 text-[10px] font-semibold text-[#2E7D32]">💬 {p}</span>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="text-[12px] text-[#616161]">{n(c.members)} farmers</div>
             <button type="button" onClick={() => openMembers(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#1565C0] hover:bg-[#E3F2FD]">{canManage ? "Farmers" : "Contact"}</button>
@@ -587,7 +729,7 @@ export function CampaignsScreen({ templates, campaigns, stores: _stores, project
         </div>
       )}
       {tab === "comms" && canManage && <CommPlanTab templates={templates} />}
-      {tab === "campaigns" && <CampaignsTab campaigns={campaigns} projects={projects} canManage={canManage} initialProjectId={initialProjectId} />}
+      {tab === "campaigns" && <CampaignsTab campaigns={campaigns} projects={projects} canManage={canManage} initialProjectId={initialProjectId} commPlanNames={[...new Set(templates.map((t) => t.name).filter(Boolean))]} />}
     </div>
   );
 }

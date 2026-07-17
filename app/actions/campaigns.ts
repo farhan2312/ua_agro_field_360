@@ -299,17 +299,45 @@ export async function deleteProject(id: number): Promise<{ ok: boolean; error?: 
 
 /* ─────────────────────────── WF3 · Communication plan ─────────────────────────── */
 
-export async function saveCommTemplate(
-  segment: string,
-  patch: { medium?: string; offer?: string; timingLabel?: string; template?: string },
-): Promise<{ ok: boolean; error?: string }> {
+export interface CommTemplatePatch {
+  name?: string; language?: string; promoType?: string; segment?: string;
+  medium?: string; offer?: string; timingLabel?: string; template?: string;
+}
+
+export async function saveCommTemplate(id: number, patch: CommTemplatePatch): Promise<{ ok: boolean; error?: string }> {
   const perm = await requireManager(); if (!perm.ok) return perm; // central-only config (read-only for officers/RMs)
+  if (patch.name !== undefined && !patch.name.trim()) return { ok: false, error: "Give the comm plan a name." };
   try {
-    await prisma.commTemplate.update({ where: { segment }, data: patch });
+    await prisma.commTemplate.update({ where: { id }, data: patch });
     revalidatePath("/campaigns");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Save failed" };
+  }
+}
+
+export async function createCommTemplate(data: Required<CommTemplatePatch>): Promise<{ ok: boolean; id?: number; error?: string }> {
+  const perm = await requireManager(); if (!perm.ok) return perm;
+  if (!data.name.trim()) return { ok: false, error: "Give the comm plan a name." };
+  const dup = await prisma.commTemplate.findFirst({ where: { name: data.name.trim() }, select: { id: true } });
+  if (dup) return { ok: false, error: "A comm plan with that name already exists." };
+  try {
+    const row = await prisma.commTemplate.create({ data: { ...data, name: data.name.trim(), priority: 5 } });
+    revalidatePath("/campaigns");
+    return { ok: true, id: row.id };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Create failed" };
+  }
+}
+
+export async function deleteCommTemplate(id: number): Promise<{ ok: boolean; error?: string }> {
+  const perm = await requireManager(); if (!perm.ok) return perm;
+  try {
+    await prisma.commTemplate.delete({ where: { id } });
+    revalidatePath("/campaigns");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Delete failed" };
   }
 }
 
@@ -321,6 +349,7 @@ export interface CreateCampaignInput {
   endDate: string;
   projectId: number; // Step 3: campaign runs on a project…
   clusterId?: number | null; // …or one specific cluster within it (null = whole project)
+  commPlans: string[]; // comm-plan names this campaign is tagged with (1+ required)
   testPct?: number;
 }
 
@@ -332,6 +361,9 @@ export async function createCampaign(input: CreateCampaignInput): Promise<{ ok: 
     if (!input.name.trim()) return { ok: false, error: "Name is required." };
     if (!input.projectId) return { ok: false, error: "Pick a project." };
     if (!input.startDate || !input.endDate) return { ok: false, error: "Set the campaign start and end date." };
+    // Every campaign must carry its communication plan(s) — tagged by comm-plan name.
+    const commPlans = [...new Set((input.commPlans ?? []).map((s) => s.trim()).filter(Boolean))];
+    if (!commPlans.length) return { ok: false, error: "Tag at least one comm plan." };
 
     // Load the project (its duration + segments).
     const project = await prisma.project.findUnique({ where: { id: input.projectId }, include: { clusters: { select: CLUSTER_SELECT } } });
@@ -373,7 +405,7 @@ export async function createCampaign(input: CreateCampaignInput): Promise<{ ok: 
     if (ids.length >= ENROLL_CAP) return { ok: false, error: `Audience is too large to enrol in one campaign (${ENROLL_CAP.toLocaleString("en-IN")}+). Narrow the project first.` };
 
     const camp = await prisma.campaign.create({
-      data: { name: input.name.trim(), startDate: cs, endDate: ce, projectId: input.projectId, clusterId: input.clusterId ?? null, testPct: input.testPct ?? 75, status: "ACTIVE" },
+      data: { name: input.name.trim(), startDate: cs, endDate: ce, projectId: input.projectId, clusterId: input.clusterId ?? null, commPlans, testPct: input.testPct ?? 75, status: "ACTIVE" },
     });
 
     // Enrol snapshot; store/zone denormalized so officers/RMs see only their own farmers. 75/25 test/control.
@@ -418,6 +450,7 @@ export async function extendCampaign(campaignId: number, newEndDate: string): Pr
 export interface CampaignListItem {
   id: number; name: string; status: string; startDate: string; endDate: string;
   target: string; members: number;
+  commPlans: string[]; // comm-plan names the campaign is tagged with
 }
 
 /** Member `where` for the current user's scope (officer→their store, RM→their zone). null = see all. */
@@ -450,6 +483,7 @@ export async function listCampaigns(): Promise<CampaignListItem[]> {
     id: c.id, name: c.name, status: c.status,
     startDate: c.startDate.toISOString().slice(0, 10),
     endDate: c.endDate.toISOString().slice(0, 10),
+    commPlans: c.commPlans,
     target: c.clusterId
       ? `Cluster · ${cName.get(c.clusterId) ?? "removed"}`
       : c.projectId

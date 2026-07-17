@@ -1,13 +1,14 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { SEGMENT_COLUMNS, segMeta } from "@/lib/campaign-segments";
+import { SPEND_TIERS } from "@/lib/spend-tiers";
 import { statusColor } from "@/lib/status";
 import { initials, inr, avatarColor } from "@/lib/format";
 import { shortStoreName, storeColor } from "@/lib/store-utils";
 import { FarmerFilterBar } from "@/components/farmers/FarmerFilterBar";
 import { FarmerTable } from "@/components/farmers/FarmerTable";
 import { FarmerPagination } from "@/components/farmers/FarmerPagination";
-import type { FarmerRowVM, SegFilterVM } from "@/components/farmers/types";
+import type { FarmerRowVM, SegFilterVM, FarmerFacetsVM, FarmerSelectedVM } from "@/components/farmers/types";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,10 @@ const PAGE_SIZE = 25;
 type SearchParams = {
   q?: string;
   segment?: string;
+  store?: string;
+  zone?: string;
+  crop?: string;
+  spend?: string;
   page?: string;
 };
 
@@ -33,15 +38,30 @@ export default async function FarmersPage({
   const q = (sp.q ?? "").trim();
   // Normalise the campaign-segment key from the URL (HNI | POTENTIAL_HNI | …).
   const segKey = sp.segment && SEGMENT_COLUMNS.includes(sp.segment) ? sp.segment : null;
+  const storeId = Number.parseInt(sp.store ?? "", 10) || null;
+  const zone = (sp.zone ?? "").trim() || null;
+  const crop = (sp.crop ?? "").trim() || null;
+  const spendIdx = /^\d+$/.test(sp.spend ?? "") ? Number(sp.spend) : null;
+  const spendTier = spendIdx != null ? SPEND_TIERS[spendIdx] ?? null : null;
   const page = Math.max(1, Number.parseInt(sp.page ?? "1", 10) || 1);
 
   let rows: FarmerRowVM[] = [];
   let total = 0;
+  let facets: FarmerFacetsVM = { stores: [], zones: [], crops: [], spendTiers: SPEND_TIERS.map((t) => t.label) };
 
   try {
     // ── Paginated, filtered farmer table (campaign segments + crop tags)
     const where: Prisma.FarmerWhereInput = {};
     if (segKey) where.campaignSegment = segKey;
+    if (storeId) where.storeId = storeId;
+    if (zone) where.store = { zone };
+    if (crop) where.cropTags = { has: crop };
+    if (spendTier) {
+      where.p12mSpend = {
+        ...(spendTier.min != null ? { gte: spendTier.min } : {}),
+        ...(spendTier.max != null ? { lt: spendTier.max } : {}),
+      };
+    }
     if (q) {
       where.OR = [
         { name: { contains: q, mode: "insensitive" } },
@@ -49,6 +69,26 @@ export default async function FarmersPage({
         { mobile: { contains: q } },
       ];
     }
+
+    // Dropdown option lists (stores · regions · top crops) — independent of the active filters.
+    const [storeOpts, zoneRows, cropRows] = await Promise.all([
+      prisma.store.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
+      prisma.store.findMany({
+        where: { zone: { not: null } },
+        distinct: ["zone"],
+        select: { zone: true },
+        orderBy: { zone: "asc" },
+      }),
+      // Canonical crop tags (sales ∪ visit) across all farmers, most common first.
+      prisma.$queryRaw<{ crop: string; n: number }[]>(Prisma.sql`
+        SELECT unnest("cropTags") crop, COUNT(*)::int n FROM "Farmer" GROUP BY 1 ORDER BY 2 DESC LIMIT 40`),
+    ]);
+    facets = {
+      stores: storeOpts.map((s) => ({ id: s.id, name: shortStoreName(s.name) || s.name })),
+      zones: zoneRows.map((z) => z.zone!).filter(Boolean),
+      crops: cropRows.map((c) => ({ crop: c.crop, count: c.n })),
+      spendTiers: SPEND_TIERS.map((t) => t.label),
+    };
 
     const [count, farmers] = await Promise.all([
       prisma.farmer.count({ where }),
@@ -136,10 +176,16 @@ export default async function FarmersPage({
   ];
 
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const selected: FarmerSelectedVM = {
+    store: storeId ? String(storeId) : null,
+    zone,
+    crop,
+    spend: spendTier ? String(spendIdx) : null,
+  };
 
   return (
     <div className="animate-[fadeUp_0.4s_ease-out]">
-      <FarmerFilterBar search={q} filters={filters} />
+      <FarmerFilterBar search={q} filters={filters} facets={facets} selected={selected} />
       <FarmerTable rows={rows} />
       <FarmerPagination
         page={Math.min(page, pageCount)}

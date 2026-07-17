@@ -6,6 +6,25 @@ export interface SegFilterVM {
   active: boolean;
 }
 
+/** Dropdown-filter option lists for the farmers page. */
+export interface FarmerFacetsVM {
+  stores: { id: number; name: string }[];
+  /** Distinct store zones (regions). */
+  zones: string[];
+  /** Canonical crop tags with farmer counts, most common first. */
+  crops: { crop: string; count: number }[];
+  /** Spend-tier labels; the URL value is the tier's index. */
+  spendTiers: string[];
+}
+
+/** Currently-selected dropdown filters (URL param values, null = All). */
+export interface FarmerSelectedVM {
+  store: string | null;
+  zone: string | null;
+  crop: string | null;
+  spend: string | null;
+}
+
 /** A single farmer table row view-model (plain, serialisable). */
 export interface FarmerRowVM {
   id: number;

@@ -27,12 +27,13 @@ export default async function CampaignsPage({ searchParams }: { searchParams?: {
       await prisma.commTemplate.createMany({ data: DEFAULT_COMM_TEMPLATES, skipDuplicates: true });
     }
     const [tpls, camps, sts, projs] = await Promise.all([
-      prisma.commTemplate.findMany({ orderBy: { priority: "asc" } }),
+      prisma.commTemplate.findMany({ orderBy: [{ priority: "asc" }, { name: "asc" }] }),
       listCampaigns(),
       prisma.store.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
       manage ? listProjects() : Promise.resolve<ProjectVM[]>([]), // project catalog is central-only; don't leak it to officers/RMs
     ]);
     templates = tpls.map((t) => ({
+      id: t.id, name: t.name, language: t.language, promoType: t.promoType,
       segment: t.segment, priority: t.priority, medium: t.medium,
       offer: t.offer, timingLabel: t.timingLabel, template: t.template,
     }));
