@@ -355,17 +355,22 @@ model CampaignMember {
   @@index([campaignId, zone])
 }
 
-/// Editable communication plan row per campaign segment (WF3).
+/// Editable communication plan template (WF3) — many per segment, per language & promotion type.
 model CommTemplate {
   id          Int      @id @default(autoincrement())
-  segment     String   @unique // HNI | POTENTIAL_HNI | REGULAR | AT_RISK | NEW | LAPSED
+  name        String   @default("") // display name — campaigns tag comm plans by this
+  language    String   @default("hi") // "hi" | "en"
+  promoType   String   @default("General") // Discount | Festival | New launch | Scheme/Credit | Reminder | General
+  segment     String // target segment: HNI | POTENTIAL_HNI | REGULAR | AT_RISK | NEW | LAPSED
   priority    Int
-  medium      String
+  medium      String // WhatsApp | Call | SMS (or combos)
   offer       String
   timingLabel String
-  template    String   @db.Text // Hindi text with [Naam] [gap] [last item] [Store] [number] [date]
+  template    String   @db.Text // message with [Naam] [gap] [last item] [Store] [number] [date] slots
   active      Boolean  @default(true)
   updatedAt   DateTime @updatedAt
+
+  @@index([segment])
 }
 
 // A Visit doubles as the per-farmer visit log entry and the Visit Repository record.

@@ -1,19 +1,8 @@
-import type { SegmentLabel } from "@/lib/segments";
-
-/** Segmentation summary card view-model (one per segment label). */
-export interface SegmentCardVM {
-  label: SegmentLabel;
-  count: number;
-  color: string;
-  /** e.g. "₹128K total revenue" */
-  revenue: string;
-}
-
 /** Filter chip view-model. `null` value === the "All" chip. */
 export interface SegFilterVM {
   label: string;
-  /** Segment label this chip filters to, or null for "All". */
-  value: SegmentLabel | null;
+  /** campaignSegment key this chip filters to (HNI | AT_RISK | …), or null for "All". */
+  value: string | null;
   active: boolean;
 }
 
@@ -23,9 +12,10 @@ export interface FarmerRowVM {
   name: string;
   mobile: string;
   village: string;
-  crop: string;
-  /** Segment display label, or null for un-enriched real farmers. */
-  segment: SegmentLabel | null;
+  /** Canonical crop tags (sales ∪ visit), first few. */
+  crops: string[];
+  /** Campaign-segment display label (HNI, At Risk, …), or null when unsegmented. */
+  segment: string | null;
   segBg: string;
   segColor: string;
   /** Formatted lifetime value, e.g. "₹26,200" or "—". */

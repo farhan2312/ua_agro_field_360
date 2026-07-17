@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { Modal, ModalHeader } from "@/components/interactive";
 import { segMeta, fillTemplate } from "@/lib/campaign-segments";
 import { inr } from "@/lib/format";
@@ -200,12 +201,16 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId }: { ca
                 : (
                   <>
                     <OutreachProgress members={members} />
-                    <div className="mb-3 mt-3 flex items-center justify-between">
-                      <div className="text-[12px] text-[#757575]">{focusMode ? "Focus mode — one farmer at a time" : "Work the list, or switch to Focus mode for one-at-a-time calling."}</div>
-                      <button type="button" onClick={() => setFocusMode((v) => !v)}
-                        className="rounded-[10px] px-4 py-2 text-[12.5px] font-bold text-white" style={{ background: focusMode ? "#616161" : "#1565C0" }}>
-                        {focusMode ? "← Back to list" : "▶ Focus mode"}
-                      </button>
+                    <div className="mb-3 mt-3 flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-[12px] text-[#757575]">{focusMode ? "Focus mode — one farmer at a time" : "Work the list, switch to Focus mode, or open the full-page matrix."}</div>
+                      <div className="flex gap-2">
+                        <Link href={`/campaigns/${membersOf.id}/outreach`}
+                          className="rounded-[10px] bg-[#6A1B9A] px-4 py-2 text-[12.5px] font-bold text-white">⛶ Matrix view</Link>
+                        <button type="button" onClick={() => setFocusMode((v) => !v)}
+                          className="rounded-[10px] px-4 py-2 text-[12.5px] font-bold text-white" style={{ background: focusMode ? "#616161" : "#1565C0" }}>
+                          {focusMode ? "← Back to list" : "▶ Focus mode"}
+                        </button>
+                      </div>
                     </div>
                     {focusMode
                       ? <FocusMode members={members} onChange={patchMember} onExit={() => setFocusMode(false)} />
@@ -285,32 +290,33 @@ function ExtendModal({ campaign, project, onClose }: { campaign: CampaignListIte
   );
 }
 
-/* ── Outreach: approach tiles, status, phone, progress, list row + Focus mode ── */
-const APPROACH_TILES: { key: string; label: string; color: string; bg: string }[] = [
+/* ── Outreach: approach tiles, status, phone, progress, list row + Focus mode ──
+   (exported pieces are shared with the full-page Matrix view, OutreachMatrix.tsx) */
+export const APPROACH_TILES: { key: string; label: string; color: string; bg: string }[] = [
   { key: "CALL", label: "Call", color: "#1565C0", bg: "#E3F2FD" },
   { key: "WHATSAPP", label: "WhatsApp", color: "#1B5E20", bg: "#E8F5E9" },
   { key: "SMS", label: "SMS", color: "#6A1B9A", bg: "#F3E5F5" },
   { key: "IN_PERSON", label: "In-person", color: "#E65100", bg: "#FFF3E0" },
 ];
-const UNREACHABLE_TILE = { color: "#C62828", bg: "#FDECEA" };
+export const UNREACHABLE_TILE = { color: "#C62828", bg: "#FDECEA" };
 const APPROACH_KEYS = APPROACH_TILES.map((t) => t.key);
-function isApproach(med: string | null): boolean { return med != null && APPROACH_KEYS.includes(med); }
-function mediumLabel(k: string): string { return APPROACH_TILES.find((t) => t.key === k)?.label ?? k; }
-function statusOf(m: CampaignMemberVM): "reached" | "unreachable" | "pending" {
+export function isApproach(med: string | null): boolean { return med != null && APPROACH_KEYS.includes(med); }
+export function mediumLabel(k: string): string { return APPROACH_TILES.find((t) => t.key === k)?.label ?? k; }
+export function statusOf(m: CampaignMemberVM): "reached" | "unreachable" | "pending" {
   if (m.reached) return "reached";
   if (m.medium === "UNREACHABLE") return "unreachable";
   return "pending";
 }
 /** Sort order for the list — un-contacted first, unreachable next, reached last. */
-function rank(m: CampaignMemberVM): number { const s = statusOf(m); return s === "pending" ? 0 : s === "unreachable" ? 1 : 2; }
+export function rank(m: CampaignMemberVM): number { const s = statusOf(m); return s === "pending" ? 0 : s === "unreachable" ? 1 : 2; }
 /** Normalise an Indian mobile to its last 10 digits for tel:/wa.me links (null if not a usable number). */
-function digits10(mobile: string | null): string | null {
+export function digits10(mobile: string | null): string | null {
   if (!mobile) return null;
   const d = mobile.replace(/\D/g, "");
   return d.length >= 10 ? d.slice(-10) : null;
 }
 
-function StatusBadge({ member }: { member: CampaignMemberVM }) {
+export function StatusBadge({ member }: { member: CampaignMemberVM }) {
   const s = statusOf(member);
   const who = member.reachedBy ? ` · by ${member.reachedBy}` : "";
   const audit = member.reachedBy ? `Recorded by ${member.reachedBy}${member.reachedByCode ? ` (${member.reachedByCode})` : ""}${member.reachedAt ? ` on ${member.reachedAt}` : ""}` : undefined;
@@ -358,7 +364,7 @@ function ApproachPicker({ value, onSelect, disabled }: { value: string | null; o
 }
 
 /** Reached (green) + unreachable (red) progress bar over the whole list. */
-function OutreachProgress({ members }: { members: CampaignMemberVM[] }) {
+export function OutreachProgress({ members }: { members: CampaignMemberVM[] }) {
   const total = members.length;
   const reached = members.filter((m) => m.reached).length;
   const unreachable = members.filter((m) => statusOf(m) === "unreachable").length;

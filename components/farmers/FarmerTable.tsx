@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { EmptyState } from "@/components/ui";
+import { cropLabel } from "@/lib/crops";
 import type { FarmerRowVM } from "./types";
 
 /** Shared 8-column grid template (header + rows must stay aligned). */
@@ -49,8 +50,16 @@ function FarmerTableRow({ row }: { row: FarmerRowVM }) {
       </div>
       {/* Col 2 — Village */}
       <div className="text-xs text-[#616161]">{row.village || "—"}</div>
-      {/* Col 3 — Crop */}
-      <div className="text-xs text-[#616161]">{row.crop || "—"}</div>
+      {/* Col 3 — Crops (canonical tags, sales ∪ visit) */}
+      <div className="flex flex-wrap gap-1">
+        {row.crops.length === 0 ? (
+          <span className="text-[12px] text-[#BDBDBD]">—</span>
+        ) : (
+          row.crops.map((c) => (
+            <span key={c} className="rounded-full bg-[#F5F7F5] px-1.5 py-0.5 text-[10px] font-medium text-[#616161]">{cropLabel(c)}</span>
+          ))
+        )}
+      </div>
       {/* Col 4 — Segment */}
       <StatusPill label={row.segment} bg={row.segBg} color={row.segColor} />
       {/* Col 5 — LTV */}

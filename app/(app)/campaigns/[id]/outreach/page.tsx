@@ -1,0 +1,24 @@
+import { notFound } from "next/navigation";
+import { getRole } from "@/lib/session";
+import { canAccess } from "@/lib/roles";
+import { listCampaigns, getCampaignMembers } from "@/app/actions/campaigns";
+import { OutreachMatrix } from "@/components/campaigns/OutreachMatrix";
+
+export const dynamic = "force-dynamic";
+
+/** Full-page outreach matrix for one campaign — every farmer on a single line. */
+export default async function OutreachMatrixPage({ params }: { params: { id: string } }) {
+  const role = await getRole();
+  if (!canAccess("campaigns", role)) notFound();
+
+  const id = Number(params.id);
+  if (!Number.isInteger(id) || id <= 0) notFound();
+
+  // listCampaigns is role-scoped (officer→store, RM→zone) — an out-of-scope campaign 404s.
+  const camps = await listCampaigns();
+  const campaign = camps.find((c) => c.id === id);
+  if (!campaign) notFound();
+
+  const members = await getCampaignMembers(id); // scoped, TEST group only
+  return <OutreachMatrix campaign={campaign} initial={members} />;
+}

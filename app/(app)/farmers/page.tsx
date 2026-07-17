@@ -1,25 +1,13 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import {
-  SEGMENT_LABELS,
-  SEGMENT_COLORS,
-  SEGMENT_BGS,
-  SEGMENT_ENUM_TO_LABEL,
-  type SegmentLabel,
-} from "@/lib/segments";
+import { SEGMENT_COLUMNS, segMeta } from "@/lib/campaign-segments";
 import { statusColor } from "@/lib/status";
-import { getSegmentSummary } from "@/lib/stats";
 import { initials, inr, avatarColor } from "@/lib/format";
 import { shortStoreName, storeColor } from "@/lib/store-utils";
-import { SegmentSummaryCards } from "@/components/farmers/SegmentSummaryCards";
 import { FarmerFilterBar } from "@/components/farmers/FarmerFilterBar";
 import { FarmerTable } from "@/components/farmers/FarmerTable";
 import { FarmerPagination } from "@/components/farmers/FarmerPagination";
-import type {
-  FarmerRowVM,
-  SegmentCardVM,
-  SegFilterVM,
-} from "@/components/farmers/types";
+import type { FarmerRowVM, SegFilterVM } from "@/components/farmers/types";
 
 export const dynamic = "force-dynamic";
 
@@ -43,45 +31,17 @@ export default async function FarmersPage({
 }) {
   const sp = searchParams ?? {};
   const q = (sp.q ?? "").trim();
-  // Normalise the segment enum from the URL (only accept valid enum keys).
-  const segEnum =
-    sp.segment && sp.segment in SEGMENT_ENUM_TO_LABEL ? sp.segment : null;
-  const activeSegment: SegmentLabel | null = segEnum
-    ? SEGMENT_ENUM_TO_LABEL[segEnum]
-    : null;
+  // Normalise the campaign-segment key from the URL (HNI | POTENTIAL_HNI | …).
+  const segKey = sp.segment && SEGMENT_COLUMNS.includes(sp.segment) ? sp.segment : null;
   const page = Math.max(1, Number.parseInt(sp.page ?? "1", 10) || 1);
 
-  let cards: SegmentCardVM[] = SEGMENT_LABELS.map((label) => ({
-    label,
-    count: 0,
-    color: SEGMENT_COLORS[label],
-    revenue: "₹0K total revenue",
-  }));
   let rows: FarmerRowVM[] = [];
   let total = 0;
-  let registeredTotal = 0;
 
   try {
-    // ── Segment summary cards: global counts + revenue (cached; identical for
-    //    every user and independent of the table filters below).
-    const summary = await getSegmentSummary();
-    registeredTotal = summary.registeredTotal;
-
-    cards = SEGMENT_LABELS.map((label) => {
-      const rev = summary.revByLabel[label] ?? 0;
-      return {
-        label,
-        count: summary.countByLabel[label] ?? 0,
-        color: SEGMENT_COLORS[label],
-        revenue: `₹${Math.round(rev / 1000).toLocaleString("en-IN")}K total revenue`,
-      };
-    });
-
-    // ── Paginated, filtered farmer table
+    // ── Paginated, filtered farmer table (campaign segments + crop tags)
     const where: Prisma.FarmerWhereInput = {};
-    if (segEnum) {
-      where.segment = segEnum as Prisma.FarmerWhereInput["segment"];
-    }
+    if (segKey) where.campaignSegment = segKey;
     if (q) {
       where.OR = [
         { name: { contains: q, mode: "insensitive" } },
@@ -102,8 +62,8 @@ export default async function FarmersPage({
           name: true,
           mobile: true,
           village: true,
-          crop: true,
-          segment: true,
+          cropTags: true,
+          campaignSegment: true,
           status: true,
           store: { select: { id: true, name: true } },
           visits: {
@@ -129,10 +89,7 @@ export default async function FarmersPage({
     const ltvById = new Map(ltvRows.map((r) => [r.farmerId, r._sum.amountNum ?? 0]));
 
     rows = farmers.map((f): FarmerRowVM => {
-      const segLabel: SegmentLabel | null = f.segment
-        ? SEGMENT_ENUM_TO_LABEL[f.segment] ?? null
-        : null;
-      const seg = statusColor(segLabel);
+      const seg = f.campaignSegment && f.campaignSegment !== "OTHER" ? segMeta(f.campaignSegment) : null;
 
       const ltvNum = ltvById.get(f.id) ?? 0;
       const lastVisit = f.visits[0];
@@ -148,10 +105,10 @@ export default async function FarmersPage({
         name: f.name,
         mobile: f.mobile ?? "",
         village: f.village ?? "",
-        crop: f.crop ?? "—",
-        segment: segLabel,
-        segBg: segLabel ? SEGMENT_BGS[segLabel] : seg.bg,
-        segColor: segLabel ? SEGMENT_COLORS[segLabel] : seg.c,
+        crops: f.cropTags.slice(0, 3),
+        segment: seg?.label ?? null,
+        segBg: seg?.bg ?? "#F5F5F5",
+        segColor: seg?.color ?? "#757575",
         ltv: ltvNum > 0 ? inr(ltvNum) : "—",
         lastVisit: lastVisitLabel,
         storeName: storeShort || "—",
@@ -165,23 +122,16 @@ export default async function FarmersPage({
       };
     });
   } catch {
-    cards = SEGMENT_LABELS.map((label) => ({
-      label,
-      count: 0,
-      color: SEGMENT_COLORS[label],
-      revenue: "₹0K total revenue",
-    }));
     rows = [];
     total = 0;
-    registeredTotal = 0;
   }
 
   const filters: SegFilterVM[] = [
-    { label: "All", value: null, active: activeSegment === null },
-    ...SEGMENT_LABELS.map((label) => ({
-      label,
-      value: label,
-      active: activeSegment === label,
+    { label: "All", value: null, active: segKey === null },
+    ...SEGMENT_COLUMNS.map((k) => ({
+      label: segMeta(k).label,
+      value: k,
+      active: segKey === k,
     })),
   ];
 
@@ -189,7 +139,6 @@ export default async function FarmersPage({
 
   return (
     <div className="animate-[fadeUp_0.4s_ease-out]">
-      <SegmentSummaryCards cards={cards} />
       <FarmerFilterBar search={q} filters={filters} />
       <FarmerTable rows={rows} />
       <FarmerPagination
@@ -198,12 +147,6 @@ export default async function FarmersPage({
         total={total}
         pageSize={PAGE_SIZE}
       />
-      {registeredTotal > 0 && (
-        <div className="mt-2 px-1 text-[11px] text-[#BDBDBD]">
-          {registeredTotal.toLocaleString("en-IN")} registered farmers · Segmented
-          view
-        </div>
-      )}
     </div>
   );
 }
