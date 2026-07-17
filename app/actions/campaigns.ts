@@ -10,8 +10,7 @@ import {
   parseCriteria, resolveClusterCount, resolveClusterIds, scopedCriteriaWhere,
   hasConditions, type ClusterCriteria,
 } from "@/lib/cluster-rules";
-import { getScope, canManage } from "@/lib/scope";
-import { getPersona } from "@/lib/session";
+import { getScope, canManage, getActor } from "@/lib/scope";
 import { cropLabel } from "@/lib/crops";
 
 const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
@@ -464,6 +463,7 @@ export async function listCampaigns(): Promise<CampaignListItem[]> {
 export interface CampaignMemberVM {
   id: number; name: string; mobile: string | null; village: string | null; store: string | null;
   segment: string; reached: boolean; medium: string | null; comment: string | null; reachedAt: string | null;
+  reachedBy: string | null; reachedByCode: string | null;
 }
 export async function getCampaignMembers(campaignId: number, limit = 1000): Promise<CampaignMemberVM[]> {
   const scope = await memberScopeWhere();
@@ -471,7 +471,7 @@ export async function getCampaignMembers(campaignId: number, limit = 1000): Prom
   const members = await prisma.campaignMember.findMany({
     where: { campaignId, group: "TEST", ...(scope ?? {}) }, // officers/RMs contact only the TEST group
     take: limit, orderBy: { id: "asc" },
-    select: { id: true, farmerId: true, segment: true, reached: true, medium: true, comment: true, reachedAt: true, storeId: true },
+    select: { id: true, farmerId: true, segment: true, reached: true, medium: true, comment: true, reachedAt: true, reachedBy: true, reachedByCode: true, storeId: true },
   });
   if (!members.length) return [];
   const [farmers, stores] = await Promise.all([
@@ -486,6 +486,7 @@ export async function getCampaignMembers(campaignId: number, limit = 1000): Prom
       id: m.id, name: f?.name ?? `Farmer #${m.farmerId}`, mobile: f?.mobile ?? null, village: f?.village ?? null,
       store: m.storeId != null ? sMap.get(m.storeId) ?? null : null,
       segment: m.segment, reached: m.reached, medium: m.medium, comment: m.comment, reachedAt: iso(m.reachedAt),
+      reachedBy: m.reachedBy, reachedByCode: m.reachedByCode,
     };
   });
 }
@@ -518,9 +519,10 @@ export async function markCampaignMember(
     const reached = med != null && CONTACT_MEDIA.has(med); // UNREACHABLE / null ⇒ not reached
     data.medium = med;
     data.reached = reached;
-    data.reachedAt = reached ? new Date() : null;
-    const persona = await getPersona();
-    data.reachedBy = med != null ? persona.name : null; // who contacted or marked unreachable
+    data.reachedAt = med != null ? new Date() : null; // when the outcome (reach OR unreachable) was recorded
+    const actor = await getActor(); // audit: the ACTUAL logged-in user, never the impersonated persona
+    data.reachedBy = med != null ? actor.name : null;
+    data.reachedByCode = med != null ? actor.code : null;
   }
   if (patch.comment !== undefined) data.comment = patch.comment?.trim() ? patch.comment.trim().slice(0, 500) : null;
   try {

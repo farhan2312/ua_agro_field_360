@@ -26,3 +26,20 @@ export async function getScope(): Promise<Scope> {
 export function canManage(role: RoleKey): boolean {
   return role === "central" || role === "sysadmin";
 }
+
+export interface Actor {
+  name: string;
+  code: string | null; // User.employeeCode, e.g. "UA123"
+  userId: number | null;
+}
+
+/**
+ * Audit identity: the ACTUAL logged-in user (never the impersonated persona) —
+ * recorded on visit forms and campaign-outreach marks alongside the timestamp.
+ */
+export async function getActor(): Promise<Actor> {
+  const session = await getSession();
+  if (!session) return { name: "Unknown", code: null, userId: null };
+  const u = await prisma.user.findUnique({ where: { id: session.userId }, select: { name: true, employeeCode: true } });
+  return { name: u?.name ?? "Unknown", code: u?.employeeCode ?? null, userId: session.userId };
+}

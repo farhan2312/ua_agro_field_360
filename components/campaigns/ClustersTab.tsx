@@ -11,6 +11,7 @@ import {
   listClustersWithCounts, deleteCluster, previewClusterCount, type ClusterVM,
 } from "@/app/actions/campaigns";
 import { createClusterFromCriteria } from "@/app/actions/cluster-builder";
+import { ChainNext } from "@/components/ChainNext";
 import { getClusterFarmers } from "@/app/actions/clusters";
 import type { ClusterMembersResult } from "@/components/clusters/types";
 
@@ -26,7 +27,7 @@ const ORIGIN_LABEL: Record<string, string> = { map: "Map", segment: "Builder", a
 
 export interface StoreOption { id: number; name: string; zone: string | null }
 
-export function ClustersTab({ initial, zones, crops, stores }: { initial: ClusterVM[]; zones: string[]; crops: CropOption[]; stores: StoreOption[] }) {
+export function ClustersTab({ initial, zones, crops, stores, canChain }: { initial: ClusterVM[]; zones: string[]; crops: CropOption[]; stores: StoreOption[]; canChain: boolean }) {
   const [list, setList] = useState(initial);
   const [building, setBuilding] = useState(false);
   const [viewing, setViewing] = useState<ClusterVM | null>(null);
@@ -66,15 +67,16 @@ export function ClustersTab({ initial, zones, crops, stores }: { initial: Cluste
         ))}
       </div>
 
-      {building && <RuleBuilder zones={zones} crops={crops} stores={stores} onClose={() => setBuilding(false)} onCreated={() => { setBuilding(false); refresh(); }} />}
+      {building && <RuleBuilder zones={zones} crops={crops} stores={stores} canChain={canChain} onClose={() => setBuilding(false)} onCreated={() => { setBuilding(false); refresh(); }} />}
       {viewing && <MembersModal cluster={viewing} onClose={() => setViewing(null)} />}
     </div>
   );
 }
 
 /* ── Rule builder ── */
-function RuleBuilder({ zones, crops: cropOpts, stores, onClose, onCreated }: { zones: string[]; crops: CropOption[]; stores: StoreOption[]; onClose: () => void; onCreated: () => void }) {
+function RuleBuilder({ zones, crops: cropOpts, stores, canChain, onClose, onCreated }: { zones: string[]; crops: CropOption[]; stores: StoreOption[]; canChain: boolean; onClose: () => void; onCreated: () => void }) {
   const [name, setName] = useState("");
+  const [createdId, setCreatedId] = useState<number | null>(null); // chain: cluster → project
   const [segs, setSegs] = useState<string[]>([]);
   const [crops, setCrops] = useState<string[]>([]);
   const [zoneList, setZoneList] = useState<string[]>([]);
@@ -125,15 +127,22 @@ function RuleBuilder({ zones, crops: cropOpts, stores, onClose, onCreated }: { z
     setErr(null);
     start(async () => {
       const res = await createClusterFromCriteria({ name, criteria: criteria(), origin: "segment", mode: "dynamic" });
-      if (res.ok) onCreated();
-      else setErr(res.error ?? "Failed");
+      if (res.ok) {
+        // Chain: offer the hop to the next pipeline step (central/sysadmin only).
+        if (canChain && res.id != null) setCreatedId(res.id);
+        else onCreated();
+      } else setErr(res.error ?? "Failed");
     });
   };
 
   return (
-    <Modal open onClose={onClose} className="max-w-[560px]">
-      <ModalHeader eyebrow="Cluster" eyebrowColor="#2E7D32" title="Build a cluster" subtitle="Pick filters — membership stays live" onClose={onClose} />
+    <Modal open onClose={createdId != null ? onCreated : onClose} className="max-w-[560px]">
+      <ModalHeader eyebrow="Cluster" eyebrowColor="#2E7D32" title="Build a cluster" subtitle="Pick filters — membership stays live" onClose={createdId != null ? onCreated : onClose} />
       <div className="max-h-[68vh] overflow-y-auto px-5 py-4">
+        {createdId != null ? (
+          <ChainNext message={`Cluster "${name.trim()}" created`} nextLabel="Next: create a project →"
+            nextHref={`/projects?withCluster=${createdId}`} onDone={onCreated} />
+        ) : (<>
         <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Name</label>
         <input className="mt-1 mb-3 w-full rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Amethi At-Risk HNI" />
 
@@ -196,6 +205,7 @@ function RuleBuilder({ zones, crops: cropOpts, stores, onClose, onCreated }: { z
           <button type="button" onClick={onClose} className="rounded-[10px] border border-[#E0E0E0] px-4 py-2 text-[13px] font-semibold text-[#616161]">Cancel</button>
           <button type="button" onClick={save} disabled={saving || !name.trim() || !hasAny || !count} className="rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Create cluster"}</button>
         </div>
+        </>)}
       </div>
     </Modal>
   );

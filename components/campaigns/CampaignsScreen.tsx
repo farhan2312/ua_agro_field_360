@@ -78,14 +78,17 @@ function CommPlanTab({ templates }: { templates: CommTemplateVM[] }) {
 }
 
 /* ══════════════════ Campaigns + tracking (WF4) ══════════════════ */
-function CampaignsTab({ campaigns, projects, canManage }: { campaigns: CampaignListItem[]; projects: ProjectVM[]; canManage: boolean }) {
+function CampaignsTab({ campaigns, projects, canManage, initialProjectId }: { campaigns: CampaignListItem[]; projects: ProjectVM[]; canManage: boolean; initialProjectId?: number }) {
+  // Chain: arriving via /campaigns?forProject=<id> opens the create form with that project preselected.
+  const initialProject = initialProjectId != null ? projects.find((p) => p.id === initialProjectId) ?? null : null;
+  const defaultProject = initialProject ?? projects[0] ?? null;
   const [list] = useState(campaigns);
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState(canManage && initialProject != null);
   const [name, setName] = useState("");
-  const [projectId, setProjectId] = useState<number | null>(projects[0]?.id ?? null);
+  const [projectId, setProjectId] = useState<number | null>(defaultProject?.id ?? null);
   const [clusterId, setClusterId] = useState<number | null>(null); // null = whole project
-  const [startDate, setStart] = useState(projects[0]?.startDate ?? "");
-  const [endDate, setEnd] = useState(projects[0]?.endDate ?? "");
+  const [startDate, setStart] = useState(defaultProject?.startDate ?? "");
+  const [endDate, setEnd] = useState(defaultProject?.endDate ?? "");
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
   const [trackerOf, setTrackerOf] = useState<CampaignListItem | null>(null);
@@ -309,8 +312,12 @@ function digits10(mobile: string | null): string | null {
 
 function StatusBadge({ member }: { member: CampaignMemberVM }) {
   const s = statusOf(member);
-  if (s === "reached") return <span className="rounded-full bg-[#E8F5E9] px-2.5 py-0.5 text-[10px] font-semibold text-[#2E7D32]">✓ Reached{member.medium && member.medium !== "UNREACHABLE" ? ` · ${mediumLabel(member.medium)}` : ""}{member.reachedAt ? ` · ${member.reachedAt}` : ""}</span>;
-  if (s === "unreachable") return <span className="rounded-full bg-[#FDECEA] px-2.5 py-0.5 text-[10px] font-semibold text-[#C62828]">Unreachable</span>;
+  const who = member.reachedBy ? ` · by ${member.reachedBy}` : "";
+  const audit = member.reachedBy ? `Recorded by ${member.reachedBy}${member.reachedByCode ? ` (${member.reachedByCode})` : ""}${member.reachedAt ? ` on ${member.reachedAt}` : ""}` : undefined;
+  if (s === "reached")
+    return <span title={audit} className="rounded-full bg-[#E8F5E9] px-2.5 py-0.5 text-[10px] font-semibold text-[#2E7D32]">✓ Reached{member.medium && member.medium !== "UNREACHABLE" ? ` · ${mediumLabel(member.medium)}` : ""}{member.reachedAt ? ` · ${member.reachedAt}` : ""}{who}</span>;
+  if (s === "unreachable")
+    return <span title={audit} className="rounded-full bg-[#FDECEA] px-2.5 py-0.5 text-[10px] font-semibold text-[#C62828]">Unreachable{member.reachedAt ? ` · ${member.reachedAt}` : ""}{who}</span>;
   return null;
 }
 
@@ -552,8 +559,8 @@ function TrackerBody({ t }: { t: CampaignTracker }) {
 }
 
 /* ══════════════════ Shell ══════════════════ */
-export function CampaignsScreen({ templates, campaigns, stores: _stores, projects, canManage }: {
-  templates: CommTemplateVM[]; campaigns: CampaignListItem[]; stores: StoreLite[]; projects: ProjectVM[]; canManage: boolean;
+export function CampaignsScreen({ templates, campaigns, stores: _stores, projects, canManage, initialProjectId }: {
+  templates: CommTemplateVM[]; campaigns: CampaignListItem[]; stores: StoreLite[]; projects: ProjectVM[]; canManage: boolean; initialProjectId?: number;
 }) {
   const [tab, setTab] = useState<"comms" | "campaigns">("campaigns");
   // Officers/RMs get the scoped campaign view only; the comm-plan config is central.
@@ -574,7 +581,7 @@ export function CampaignsScreen({ templates, campaigns, stores: _stores, project
         </div>
       )}
       {tab === "comms" && canManage && <CommPlanTab templates={templates} />}
-      {tab === "campaigns" && <CampaignsTab campaigns={campaigns} projects={projects} canManage={canManage} />}
+      {tab === "campaigns" && <CampaignsTab campaigns={campaigns} projects={projects} canManage={canManage} initialProjectId={initialProjectId} />}
     </div>
   );
 }

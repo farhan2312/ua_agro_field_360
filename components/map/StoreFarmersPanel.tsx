@@ -9,6 +9,7 @@ import { SPEND_TIERS } from "@/lib/spend-tiers";
 import { Badge } from "@/components/ui";
 import { Modal, ModalHeader } from "@/components/interactive";
 import { getStoreFarmers, createClusterFromSelection } from "@/app/actions/cluster-builder";
+import { ChainNext } from "@/components/ChainNext";
 import type { FarmerFilters, StoreFarmersResult } from "@/lib/cluster";
 import type { StoreListItem } from "./types";
 
@@ -18,8 +19,10 @@ const selectClass =
 
 export function StoreFarmersPanel({
   stores,
+  canChain = false,
 }: {
   stores: StoreListItem[];
+  canChain?: boolean;
 }) {
   const storeIds = useMemo(() => stores.map((s) => s.id), [stores]);
   const storeKey = storeIds.join(",");
@@ -35,6 +38,7 @@ export function StoreFarmersPanel({
   const [allMatching, setAllMatching] = useState(false);
 
   const [modalOpen, setModalOpen] = useState(false);
+  const [createdId, setCreatedId] = useState<number | null>(null); // chain: cluster → project
   const [clusterName, setClusterName] = useState("");
   const [saving, startSave] = useTransition();
   const [toast, setToast] = useState<string | null>(null);
@@ -132,6 +136,7 @@ export function StoreFarmersPanel({
 
   const openCluster = () => {
     setClusterName(`${storeShort} — ${new Date().getFullYear()}`);
+    setCreatedId(null);
     setModalOpen(true);
   };
 
@@ -146,11 +151,15 @@ export function StoreFarmersPanel({
         allMatching,
       });
       if (res.ok) {
-        setModalOpen(false);
         setSelected(new Set());
         setAllMatching(false);
-        setToast(`Cluster "${clusterName}" created with ${grouped(res.count ?? 0)} farmers.`);
-        setTimeout(() => setToast(null), 5000);
+        if (canChain && res.id != null) {
+          setCreatedId(res.id); // keep the modal open with the chain-to-project box
+        } else {
+          setModalOpen(false);
+          setToast(`Cluster "${clusterName}" created with ${grouped(res.count ?? 0)} farmers.`);
+          setTimeout(() => setToast(null), 5000);
+        }
       } else {
         setToast(res.error ?? "Could not create cluster.");
         setTimeout(() => setToast(null), 5000);
@@ -405,6 +414,10 @@ export function StoreFarmersPanel({
           onClose={() => setModalOpen(false)}
         />
         <div className="px-6 py-5">
+          {createdId != null ? (
+            <ChainNext message={`Cluster "${clusterName}" created`} nextLabel="Next: create a project →"
+              nextHref={`/projects?withCluster=${createdId}`} onDone={() => { setCreatedId(null); setModalOpen(false); }} />
+          ) : (<>
           <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.4px] text-ink-600">
             Cluster name
           </label>
@@ -430,6 +443,7 @@ export function StoreFarmersPanel({
               {saving ? "Saving…" : `Save cluster (${grouped(selectedCount)})`}
             </button>
           </div>
+          </>)}
         </div>
       </Modal>
     </div>

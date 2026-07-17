@@ -3,6 +3,7 @@ import { getPersona } from "@/lib/session";
 import { getScope } from "@/lib/scope";
 import { canAccess } from "@/lib/roles";
 import { loadOverview } from "@/lib/overview";
+import { canManage } from "@/lib/scope";
 import { getWorkbench, getWorkbenchFacets, type WbData, type WbFacets } from "@/app/actions/analytics-segments";
 import { AnalyticsWorkbench } from "@/components/analytics/AnalyticsWorkbench";
 import { ScopedDashboard, UnassignedDashboard, type ScopedDashboardData } from "@/components/dashboard/ScopedDashboard";
@@ -47,7 +48,7 @@ export default async function AnalyticsPage() {
       {overview && <ScopedDashboard data={overview} name={persona.name} />}
       <div className="mt-6">
         <div className="mb-3 text-[14px] font-bold text-[#1A1C1A]">Explore — filter, drill in, save as a cluster</div>
-        <AnalyticsWorkbench initial={data} facets={facets} />
+        <AnalyticsWorkbench initial={data} facets={facets} canChain={canManage(scope.role)} />
       </div>
     </div>
   );

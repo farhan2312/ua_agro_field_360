@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { getRole } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { canAccess } from "@/lib/roles";
+import { canManage } from "@/lib/scope";
 import { listClustersWithCounts, getCropOptions, type ClusterVM } from "@/app/actions/campaigns";
 import { ClustersTab, type StoreOption } from "@/components/campaigns/ClustersTab";
 import type { CropOption } from "@/components/campaigns/CampaignsScreen";
@@ -33,7 +34,7 @@ export default async function FarmerClustersPage() {
 
   return (
     <div className="animate-[fadeUp_0.4s_ease-out]">
-      <ClustersTab initial={clusters} zones={zones} crops={crops} stores={stores} />
+      <ClustersTab initial={clusters} zones={zones} crops={crops} stores={stores} canChain={canManage(role)} />
     </div>
   );
 }

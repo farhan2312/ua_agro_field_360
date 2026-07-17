@@ -24,6 +24,9 @@ type VisitRow = {
   purpose: string | null;
   notes: string | null;
   officerName: string | null;
+  recordedBy: string | null;
+  recordedByCode: string | null;
+  createdAt: Date;
   visitMode: string | null;
   gpsLat: number | null;
   gpsLng: number | null;
@@ -101,6 +104,7 @@ function emptyDetail(id: number, justCreated: boolean): VisitDetailData {
     purpose: "",
     notes: "",
     officer: "",
+    recordedBy: "",
     village: "",
     district: "",
     crop: "",
@@ -177,6 +181,9 @@ export default async function VisitDetailPage({
         purpose: true,
         notes: true,
         officerName: true,
+        recordedBy: true,
+        recordedByCode: true,
+        createdAt: true,
         visitMode: true,
         gpsLat: true,
         gpsLng: true,
@@ -249,6 +256,10 @@ export default async function VisitDetailPage({
     purpose: visit.purpose ?? "",
     notes: visit.notes ?? "",
     officer: visit.officerName ?? "",
+    // Audit: the actual logged-in user who filled the form + the fill timestamp.
+    recordedBy: visit.recordedBy
+      ? `${visit.recordedBy}${visit.recordedByCode ? ` (${visit.recordedByCode})` : ""} · ${visit.createdAt.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true })}`
+      : "",
     village: visit.farmer?.village ?? "",
     district: visit.farmer?.district ?? "",
     crop: headerCrop,

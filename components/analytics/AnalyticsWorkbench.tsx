@@ -2,20 +2,23 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
+import { ChainNext } from "@/components/ChainNext";
 import { SEGMENT_COLUMNS, segMeta } from "@/lib/campaign-segments";
 import { cropLabel } from "@/lib/crops";
 import {
-  getWorkbench, getWorkbenchCustomers, saveWorkbenchSegment, getCropTrend,
+  getWorkbench, getWorkbenchCustomers, saveWorkbenchSegment, getCropTrend, getVisitAnalytics,
   type Lens, type WbFilters, type WbData, type WbFacets, type WbBar, type WbCustomer, type CropTrendPoint,
+  type VisitAnalytics, type VisitMonth, type VisitAdoption, type VisitStoreRow,
 } from "@/app/actions/analytics-segments";
 
 const CARD = "rounded-[14px] border border-black/[0.04] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]";
 const n = (x: number) => Math.round(x).toLocaleString("en-IN");
 const money = (x: number) => (x >= 1e7 ? `₹${(x / 1e7).toFixed(2)} Cr` : x >= 1e5 ? `₹${(x / 1e5).toFixed(1)} L` : `₹${n(x)}`);
 
-export function AnalyticsWorkbench({ initial, facets }: { initial: WbData; facets: WbFacets }) {
+export function AnalyticsWorkbench({ initial, facets, canChain = false }: { initial: WbData; facets: WbFacets; canChain?: boolean }) {
   const [filters, setFilters] = useState<WbFilters>({ lens: "sales" });
   const [data, setData] = useState(initial);
+  const [visitData, setVisitData] = useState<VisitAnalytics | null>(null);
   const [loading, start] = useTransition();
   const [cell, setCell] = useState<{ storeId: number | null; storeName: string; seg: string } | null>(null);
   const [rows, setRows] = useState<WbCustomer[] | null>(null);
@@ -24,9 +27,16 @@ export function AnalyticsWorkbench({ initial, facets }: { initial: WbData; facet
   const apply = (patch: Partial<WbFilters>) => {
     const f = { ...filters, ...patch };
     setFilters(f);
-    start(async () => setData(await getWorkbench(f)));
+    start(async () => {
+      const [wb, va] = await Promise.all([
+        getWorkbench(f),
+        f.lens === "visit" ? getVisitAnalytics(f) : Promise.resolve(null),
+      ]);
+      setData(wb);
+      setVisitData(va);
+    });
   };
-  const setLens = (lens: Lens) => apply({ lens, crop: undefined, spendTier: undefined, problem: undefined });
+  const setLens = (lens: Lens) => apply({ lens, crop: undefined, segment: undefined, spendTier: undefined, problem: undefined });
   const clearAll = () => apply({ storeId: undefined, zone: undefined, crop: undefined, segment: undefined, spendTier: undefined, problem: undefined });
 
   const openCell = (storeId: number | null, storeName: string, seg: string) => {
@@ -37,9 +47,12 @@ export function AnalyticsWorkbench({ initial, facets }: { initial: WbData; facet
   const cropOpts = filters.lens === "sales" ? facets.salesCrops : facets.visitCrops;
   const activeFilterCount = [filters.storeId, filters.zone, filters.crop, filters.segment, filters.spendTier, filters.problem].filter((x) => x != null && x !== "").length;
   const k = data.kpis;
-  const KPIS = filters.lens === "sales"
+  const vk = visitData?.kpis;
+  const vd = (x: number | undefined) => (visitData ? n(x ?? 0) : "…");
+  // Visit lens shows ONLY what the field team collected — no sales-derived numbers.
+  const KPIS: [string, string][] = filters.lens === "sales"
     ? [["Farmers", n(k.farmers)], ["HNI", n(k.hni)], ["Potential HNI", n(k.potentialHni)], ["At-Risk", n(k.atRisk)], ["Lapsed", n(k.lapsed)], ["P12M spend", money(k.spend)]]
-    : [["Farmers", n(k.farmers)], ["Visits", n(k.visits)], ["HNI", n(k.hni)], ["At-Risk", n(k.atRisk)], ["Lapsed", n(k.lapsed)], ["P12M spend", money(k.spend)]];
+    : [["Visits", vd(vk?.visits)], ["Farmers visited", vd(vk?.farmers)], ["Villages", vd(vk?.villages)], ["Officers", vd(vk?.officers)], ["Field GPS", visitData ? `${vk?.fieldPct ?? 0}%` : "…"], ["Photos", vd(vk?.photos)]];
 
   return (
     <div className="animate-[fadeUp_0.4s_ease-out]">
@@ -69,8 +82,10 @@ export function AnalyticsWorkbench({ initial, facets }: { initial: WbData; facet
         <Sel value={filters.zone ?? ""} onChange={(v) => apply({ zone: v || undefined })} ph="All zones" options={facets.zones} />
         <Sel value={filters.crop ?? ""} onChange={(v) => apply({ crop: v || undefined })} ph="All crops"
           options={cropOpts.map((c) => [c.crop, `${cropLabel(c.crop)} (${n(c.count)})`])} />
-        <Sel value={filters.segment ?? ""} onChange={(v) => apply({ segment: v || undefined })} ph="All segments"
-          options={SEGMENT_COLUMNS.map((s) => [s, segMeta(s).label])} />
+        {filters.lens === "sales" && (
+          <Sel value={filters.segment ?? ""} onChange={(v) => apply({ segment: v || undefined })} ph="All segments"
+            options={SEGMENT_COLUMNS.map((s) => [s, segMeta(s).label])} />
+        )}
         {filters.lens === "sales" ? (
           <Sel value={filters.spendTier != null ? String(filters.spendTier) : ""} onChange={(v) => apply({ spendTier: v ? Number(v) : undefined })}
             ph="Any spend" options={facets.spendTiers.map((t, i) => [String(i), t])} />
@@ -91,19 +106,16 @@ export function AnalyticsWorkbench({ initial, facets }: { initial: WbData; facet
         ))}
       </div>
 
-      {/* One board — trend, charts, and the matrix together */}
+      {/* Sales board — trend, charts, matrix. The Visit lens gets its own board built purely from visit data. */}
+      {filters.lens === "sales" ? (
       <div className="flex flex-col gap-[14px]">
-        {filters.lens === "sales" && <CropTrendCard crops={facets.salesCrops} />}
+        <CropTrendCard crops={facets.salesCrops} />
 
         <div className="grid grid-cols-1 gap-[14px] lg:grid-cols-2">
           <DonutCard title="Segment share" slices={data.segmentDist} />
-          {filters.lens === "sales" ? (
-            <HistogramCard title="Spend tiers (P12M) — farmer histogram" bars={data.extra} />
-          ) : (
-            <BarCard title={data.extraTitle} bars={data.extra} fmt={n} accent="#1565C0" />
-          )}
-          <BarCard title={filters.lens === "sales" ? "Sales-crop breakdown (farmers)" : "Visit-crop breakdown (farmers)"} bars={data.cropBreakdown.map((b) => ({ ...b, label: cropLabel(b.label) }))} fmt={n} accent="#F9A825" />
-          <BarCard title={data.secondaryTitle} bars={data.secondary} fmt={filters.lens === "sales" ? money : n} accent="#6A1B9A" />
+          <HistogramCard title="Spend tiers (P12M) — farmer histogram" bars={data.extra} />
+          <BarCard title="Sales-crop breakdown (farmers)" bars={data.cropBreakdown.map((b) => ({ ...b, label: cropLabel(b.label) }))} fmt={n} accent="#F9A825" />
+          <BarCard title={data.secondaryTitle} bars={data.secondary} fmt={money} accent="#6A1B9A" />
         </div>
 
         <div className={`${CARD} overflow-hidden`}>
@@ -143,6 +155,9 @@ export function AnalyticsWorkbench({ initial, facets }: { initial: WbData; facet
           <div className="px-4 py-2 text-[11px] text-[#9E9E9E]">Click any count to see that store × segment farmer list. Segments are exclusive.</div>
         </div>
       </div>
+      ) : (
+        <VisitBoard va={visitData} />
+      )}
 
       {/* Drill modal */}
       <Modal open={!!cell} onClose={() => setCell(null)} className="max-w-[720px]">
@@ -176,7 +191,7 @@ export function AnalyticsWorkbench({ initial, facets }: { initial: WbData; facet
         )}
       </Modal>
 
-      {saving && <SaveModal filters={filters} kpi={k.farmers} onClose={() => setSaving(false)} />}
+      {saving && <SaveModal filters={filters} kpi={k.farmers} canChain={canChain} onClose={() => setSaving(false)} />}
     </div>
   );
 }
@@ -210,8 +225,8 @@ function BarCard({ title, bars, fmt, accent = "#2E7D32" }: { title: string; bars
   );
 }
 
-/** Donut / pie — share of farmers per segment. */
-function DonutCard({ title, slices }: { title: string; slices: WbBar[] }) {
+/** Donut / pie — share of a whole (farmers, visits, …). */
+function DonutCard({ title, slices, unit = "farmers" }: { title: string; slices: WbBar[]; unit?: string }) {
   const shown = slices.filter((s) => s.value > 0);
   const total = shown.reduce((a, b) => a + b.value, 0);
   const R = 54, C = 2 * Math.PI * R;
@@ -238,7 +253,7 @@ function DonutCard({ title, slices }: { title: string; slices: WbBar[] }) {
             </svg>
             <div className="absolute inset-0 flex flex-col items-center justify-center">
               <div className="text-[17px] font-bold text-[#1A1C1A]">{n(total)}</div>
-              <div className="text-[9.5px] uppercase text-[#9E9E9E]">farmers</div>
+              <div className="text-[9.5px] uppercase text-[#9E9E9E]">{unit}</div>
             </div>
           </div>
           <div className="flex min-w-0 flex-1 flex-col gap-1.5">
@@ -341,14 +356,126 @@ function CropTrendCard({ crops }: { crops: { crop: string; count: number }[] }) 
   );
 }
 
-function SaveModal({ filters, kpi, onClose }: { filters: WbFilters; kpi: number; onClose: () => void }) {
+/* ── Visit lens board: everything the field-visit wizard collects, nothing sales-derived ── */
+const PALETTE = ["#2E7D32", "#1565C0", "#F9A825", "#6A1B9A", "#C62828", "#00838F", "#E65100", "#5D4037", "#3949AB", "#7CB342"];
+const paint = (bars: WbBar[]): WbBar[] => bars.map((b, i) => ({ ...b, color: b.color ?? PALETTE[i % PALETTE.length] }));
+
+function VisitBoard({ va }: { va: VisitAnalytics | null }) {
+  if (va == null) return <div className={`${CARD} py-12 text-center text-[13px] text-[#9E9E9E]`}>Loading visit analytics…</div>;
+  if (va.kpis.visits === 0) return <div className={`${CARD} py-12 text-center text-[13px] text-[#9E9E9E]`}>No field visits match these filters yet — data appears here as officers log visits.</div>;
+  return (
+    <div className="flex flex-col gap-[14px]">
+      <VisitTrendCard monthly={va.monthly} />
+      <div className="grid grid-cols-1 gap-[14px] lg:grid-cols-2">
+        <DonutCard title="Visit purpose" slices={paint(va.purposes)} unit="visits" />
+        <AdoptionCard title="Services & readiness (share of visits)" rows={va.adoption} />
+        <HistogramCard title="Land holding (Bigha)" bars={va.landHolding} accent="#2E7D32" />
+        <HistogramCard title="Annual agri expense" bars={va.expense} accent="#F9A825" />
+        <BarCard title="Field problems (farmers)" bars={va.problems} fmt={n} accent="#C62828" />
+        <BarCard title="Crops recorded in visits" bars={va.crops} fmt={n} accent="#F9A825" />
+        <BarCard title="Products in use" bars={va.productsUsed} fmt={n} accent="#1565C0" />
+        <BarCard title="Products required — demand signal" bars={va.productsNeeded} fmt={n} accent="#2E7D32" />
+        <DonutCard title="Water sources" slices={paint(va.water)} unit="mentions" />
+        <BarCard title="Soil types" bars={va.soilTypes} fmt={n} accent="#5D4037" />
+        <BarCard title="Crop risks flagged" bars={va.risks} fmt={n} accent="#E65100" />
+        <BarCard title="Purchase frequency" bars={va.purchaseFreq} fmt={n} accent="#6A1B9A" />
+        <BarCard title="Officer activity (visits)" bars={va.officers} fmt={n} accent="#0D47A1" />
+        <StoreVisitsTable rows={va.byStore} />
+      </div>
+    </div>
+  );
+}
+
+/** Monthly visit volume — simple bar timeline. */
+function VisitTrendCard({ monthly }: { monthly: VisitMonth[] }) {
+  const max = Math.max(1, ...monthly.map((m) => m.count));
+  const total = monthly.reduce((a, m) => a + m.count, 0);
+  return (
+    <div className={`${CARD} p-4`}>
+      <div className="mb-1 flex flex-wrap items-center gap-2.5">
+        <div className="text-[13px] font-bold text-[#1A1C1A]">Visits per month</div>
+        {total > 0 && <span className="rounded-full bg-[#F5F7F5] px-2.5 py-0.5 text-[11px] font-bold text-[#1A1C1A]">{n(total)} dated visits</span>}
+      </div>
+      {monthly.length === 0 ? (
+        <div className="py-8 text-center text-[12.5px] text-[#9E9E9E]">No dated visits yet.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <div className="flex items-end gap-[3px] pt-2" style={{ minWidth: Math.max(360, monthly.length * 26) }}>
+            {monthly.map((m) => (
+              <div key={m.ym} className="flex min-w-[20px] flex-1 flex-col justify-end" title={`${m.label} ${m.year} · ${n(m.count)} visits`}>
+                <div className="mx-auto mb-0.5 text-[9.5px] font-bold text-[#424242]">{m.count || ""}</div>
+                <div className="w-full rounded-t-[4px] bg-[#2E7D32]" style={{ height: `${Math.max(3, Math.round((m.count / max) * 110))}px` }} />
+                <div className="mt-1 text-center text-[9px] leading-tight text-[#9E9E9E]">{m.label}<br /><b className="text-[#616161]">{String(m.year).slice(2)}</b></div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Progress list — share of visits where each service / readiness flag was recorded. */
+function AdoptionCard({ title, rows }: { title: string; rows: VisitAdoption[] }) {
+  return (
+    <div className={`${CARD} p-4`}>
+      <div className="mb-3 text-[13px] font-bold text-[#1A1C1A]">{title}</div>
+      <div className="flex flex-col gap-2.5">
+        {rows.map((r, i) => (
+          <div key={r.label}>
+            <div className="flex justify-between text-[11.5px]">
+              <span className="font-medium text-[#424242]">{r.label}</span>
+              <span className="text-[#9E9E9E]">{r.pct}% · {n(r.count)}</span>
+            </div>
+            <div className="mt-0.5 h-2 rounded-full bg-[#F0F0F0]">
+              <div className="h-2 rounded-full" style={{ width: `${r.pct}%`, background: PALETTE[i % PALETTE.length] }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Visits by store — table with an inline share bar. */
+function StoreVisitsTable({ rows }: { rows: VisitStoreRow[] }) {
+  const max = Math.max(1, ...rows.map((r) => r.visits));
+  return (
+    <div className={`${CARD} overflow-hidden lg:col-span-2`}>
+      <div className="border-b border-[#F0F0F0] px-4 py-2.5 text-[13px] font-bold text-[#1A1C1A]">Visits by store</div>
+      {rows.length === 0 ? (
+        <div className="py-8 text-center text-[12.5px] text-[#9E9E9E]">No store-tagged visits.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[520px] text-left text-[12px]">
+            <thead><tr className="border-b border-[#EEE] text-[10px] font-bold uppercase text-[#9E9E9E]">
+              <th className="px-4 py-2">Store</th><th className="py-2">Share</th><th className="py-2 text-right">Visits</th><th className="py-2 pr-4 text-right">Farmers visited</th>
+            </tr></thead>
+            <tbody>{rows.map((r) => (
+              <tr key={r.store} className="border-b border-[#F8F8F8]">
+                <td className="px-4 py-2 font-semibold text-[#1A1C1A]">{r.store}</td>
+                <td className="py-2 pr-4"><div className="h-2 w-full max-w-[220px] rounded-full bg-[#F0F0F0]"><div className="h-2 rounded-full bg-[#2E7D32]" style={{ width: `${(r.visits / max) * 100}%` }} /></div></td>
+                <td className="py-2 text-right font-bold text-[#1A1C1A]">{n(r.visits)}</td>
+                <td className="py-2 pr-4 text-right text-[#616161]">{n(r.farmers)}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SaveModal({ filters, kpi, canChain, onClose }: { filters: WbFilters; kpi: number; canChain: boolean; onClose: () => void }) {
   const [name, setName] = useState("");
   const [saving, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
+  const [createdId, setCreatedId] = useState<number | null>(null);
   const save = () => {
     setMsg(null);
     start(async () => {
       const res = await saveWorkbenchSegment(filters, name);
+      if (res.ok && res.id != null) setCreatedId(res.id);
       setMsg(res.ok ? "ok" : res.error ?? "Failed");
     });
   };
@@ -357,7 +484,12 @@ function SaveModal({ filters, kpi, onClose }: { filters: WbFilters; kpi: number;
       <ModalHeader eyebrow="Cluster" eyebrowColor="#2E7D32" title="Save filtered set as a cluster" subtitle={`~${n(kpi)} farmers · membership stays live`} onClose={onClose} />
       <div className="px-5 py-4">
         {msg === "ok" ? (
-          <div className="rounded-[10px] border border-[#A5D6A7] bg-[#E8F5E9] px-3.5 py-3 text-[13px] font-medium text-[#2E7D32]">✓ Saved — find it on the Farmer Clusters page (live, re-resolving membership).</div>
+          canChain && createdId != null ? (
+            <ChainNext message={`Cluster "${name.trim()}" created`} nextLabel="Next: create a project →"
+              nextHref={`/projects?withCluster=${createdId}`} onDone={onClose} />
+          ) : (
+            <div className="rounded-[10px] border border-[#A5D6A7] bg-[#E8F5E9] px-3.5 py-3 text-[13px] font-medium text-[#2E7D32]">✓ Saved — find it on the Farmer Clusters page (live, re-resolving membership).</div>
+          )
         ) : (
           <>
             <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Cluster name</label>

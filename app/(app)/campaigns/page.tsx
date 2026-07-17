@@ -9,10 +9,14 @@ import { CampaignsScreen, type CommTemplateVM, type StoreLite } from "@/componen
 
 export const dynamic = "force-dynamic";
 
-export default async function CampaignsPage() {
+export default async function CampaignsPage({ searchParams }: { searchParams?: { forProject?: string } }) {
   const role = await getRole();
   if (!canAccess("campaigns", role)) notFound();
   const manage = canManage(role);
+
+  // Chain: /campaigns?forProject=<id> opens the create form with that project preselected.
+  const forProject = Number(searchParams?.forProject);
+  const initialProjectId = manage && Number.isInteger(forProject) && forProject > 0 ? forProject : undefined;
 
   let templates: CommTemplateVM[] = [];
   let campaigns: CampaignListItem[] = [];
@@ -46,6 +50,7 @@ export default async function CampaignsPage() {
       stores={stores}
       projects={projects}
       canManage={manage}
+      initialProjectId={initialProjectId}
     />
   );
 }

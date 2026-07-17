@@ -4,6 +4,7 @@ import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getPersona } from "@/lib/session";
+import { getActor } from "@/lib/scope";
 import { STATS_TAG } from "@/lib/stats";
 import {
   LEAD_LABEL_TO_ENUM,
@@ -83,6 +84,7 @@ export async function submitVisitAction(
 ): Promise<void> {
   const persona = await getPersona();
   const officerName = persona.name;
+  const actor = await getActor(); // audit: the ACTUAL logged-in user (name + employee code)
   let newVisitId: number | undefined;
 
   try {
@@ -137,6 +139,8 @@ export async function submitVisitAction(
       data: {
         farmerId,
         officerName,
+        recordedBy: actor.name, // audit trail — actual logged-in user (createdAt = fill timestamp)
+        recordedByCode: actor.code,
         date: new Date().toLocaleDateString("en-GB", {
           day: "numeric",
           month: "short",

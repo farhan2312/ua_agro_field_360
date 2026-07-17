@@ -342,11 +342,12 @@ model CampaignMember {
   group      String // TEST | CONTROL
   storeId    Int? // snapshot of the farmer's store (for officer-scoped visibility)
   zone       String? // snapshot of the farmer's zone (for regional-scoped visibility)
-  reached    Boolean   @default(false)
-  reachedAt  DateTime?
-  medium     String? // CALL | WHATSAPP | SMS (outreach approach recorded by the officer/RM)
-  reachedBy  String?
-  comment    String? // optional free-text note from the officer/RM about the contact
+  reached       Boolean   @default(false)
+  reachedAt     DateTime? // when the outcome (reach OR unreachable) was recorded
+  medium        String? // CALL | WHATSAPP | SMS | IN_PERSON | UNREACHABLE
+  reachedBy     String? // audit: ACTUAL logged-in user's name who recorded the outcome
+  reachedByCode String? // audit: their User.employeeCode (e.g. "UA123")
+  comment       String? // optional free-text note from the officer/RM about the contact
 
   @@unique([campaignId, farmerId])
   @@index([campaignId])
@@ -384,6 +385,10 @@ model Visit {
   leadStatus  LeadStatus?
 
   // New-Visit wizard captured fields
+  // Audit: the ACTUAL logged-in user who filled the form (not the impersonated persona).
+  recordedBy     String? // User.name
+  recordedByCode String? // User.employeeCode (e.g. "UA123"); createdAt is the fill timestamp
+
   visitMode       String? // "field" (GPS recorded) | "store" (no farmer location)
   gpsLat          Float?
   gpsLng          Float?

@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
+import { ChainNext } from "@/components/ChainNext";
 import {
   listProjects, createProject, setProjectClusters, deleteProject, extendProject,
   type ProjectVM, type ClusterVM,
@@ -15,9 +16,10 @@ const STATUS_STYLE: Record<string, { bg: string; color: string }> = {
   COMPLETED: { bg: "#F5F5F5", color: "#616161" },
 };
 
-export function ProjectsTab({ initial, clusters }: { initial: ProjectVM[]; clusters: ClusterVM[] }) {
+export function ProjectsTab({ initial, clusters, initialClusterId }: { initial: ProjectVM[]; clusters: ClusterVM[]; initialClusterId?: number }) {
   const [list, setList] = useState(initial);
-  const [building, setBuilding] = useState(false);
+  // Chain: arriving via /projects?withCluster=<id> opens the builder with that cluster pre-ticked.
+  const [building, setBuilding] = useState(() => initialClusterId != null && clusters.some((c) => c.id === initialClusterId));
   const [editing, setEditing] = useState<ProjectVM | null>(null);
   const [extendingP, setExtendingP] = useState<ProjectVM | null>(null);
   const [pending, start] = useTransition();
@@ -82,6 +84,7 @@ export function ProjectsTab({ initial, clusters }: { initial: ProjectVM[]; clust
       {building && (
         <ProjectBuilder
           clusters={clusters}
+          preselect={initialClusterId}
           onClose={() => setBuilding(false)}
           onSaved={() => { setBuilding(false); refresh(); }}
         />
@@ -125,11 +128,14 @@ function ExtendProjectModal({ project, onClose, onSaved }: { project: ProjectVM;
 }
 
 /* ── Create / edit ── */
-function ProjectBuilder({ clusters, project, onClose, onSaved }: {
-  clusters: ClusterVM[]; project?: ProjectVM; onClose: () => void; onSaved: () => void;
+function ProjectBuilder({ clusters, project, preselect, onClose, onSaved }: {
+  clusters: ClusterVM[]; project?: ProjectVM; preselect?: number; onClose: () => void; onSaved: () => void;
 }) {
   const [name, setName] = useState(project?.name ?? "");
-  const [picked, setPicked] = useState<number[]>(project?.clusters.map((c) => c.id) ?? []);
+  const [picked, setPicked] = useState<number[]>(
+    project?.clusters.map((c) => c.id) ?? (preselect != null && clusters.some((c) => c.id === preselect) ? [preselect] : []),
+  );
+  const [createdId, setCreatedId] = useState<number | null>(null); // chain: project → campaign
   const [startDate, setStart] = useState(project?.startDate ?? "");
   const [endDate, setEnd] = useState(project?.endDate ?? "");
   const [saving, start] = useTransition();
@@ -144,24 +150,34 @@ function ProjectBuilder({ clusters, project, onClose, onSaved }: {
   const save = () => {
     setErr(null);
     start(async () => {
-      const res = project
-        ? await setProjectClusters(project.id, picked)
-        : await createProject(name, picked, startDate, endDate);
-      if (res.ok) onSaved();
-      else setErr(res.error ?? "Failed");
+      if (project) {
+        const res = await setProjectClusters(project.id, picked);
+        if (res.ok) onSaved(); else setErr(res.error ?? "Failed");
+        return;
+      }
+      const res = await createProject(name, picked, startDate, endDate);
+      if (res.ok) {
+        // Chain: offer the hop straight into a campaign for this project.
+        if (res.id != null) setCreatedId(res.id);
+        else onSaved();
+      } else setErr(res.error ?? "Failed");
     });
   };
 
   return (
-    <Modal open onClose={onClose} className="max-w-[560px]">
+    <Modal open onClose={createdId != null ? onSaved : onClose} className="max-w-[560px]">
       <ModalHeader
         eyebrow="Step 2 · Project"
         eyebrowColor="#2E7D32"
         title={project ? "Edit project" : "New project"}
         subtitle="Bundle reusable clusters — audience is their live union"
-        onClose={onClose}
+        onClose={createdId != null ? onSaved : onClose}
       />
       <div className="max-h-[68vh] overflow-y-auto px-5 py-4">
+        {createdId != null ? (
+          <ChainNext message={`Project "${name.trim()}" created`} nextLabel="Next: create a campaign →"
+            nextHref={`/campaigns?forProject=${createdId}`} onDone={onSaved} />
+        ) : (<>
         {!project && (
           <>
             <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Name</label>
@@ -205,6 +221,7 @@ function ProjectBuilder({ clusters, project, onClose, onSaved }: {
             {saving ? "Saving…" : project ? "Save changes" : "Create project"}
           </button>
         </div>
+        </>)}
       </div>
     </Modal>
   );

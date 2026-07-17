@@ -230,6 +230,164 @@ export async function getWorkbench(f: WbFilters): Promise<WbData> {
   };
 }
 
+/* ── Visit analytics: PURELY what the field-visit wizard collects (no sales data) ── */
+export interface VisitKpis {
+  visits: number; farmers: number; villages: number; officers: number;
+  fieldPct: number; photos: number; voiceNotes: number; whatsappPct: number;
+}
+export interface VisitMonth { ym: string; label: string; year: number; count: number }
+export interface VisitAdoption { label: string; count: number; pct: number }
+export interface VisitStoreRow { store: string; visits: number; farmers: number }
+export interface VisitAnalytics {
+  kpis: VisitKpis;
+  monthly: VisitMonth[];
+  purposes: WbBar[];
+  problems: WbBar[];
+  crops: WbBar[];
+  water: WbBar[];
+  landHolding: WbBar[];
+  expense: WbBar[];
+  productsUsed: WbBar[];
+  productsNeeded: WbBar[];
+  soilTypes: WbBar[];
+  purchaseFreq: WbBar[];
+  risks: WbBar[];
+  adoption: VisitAdoption[];
+  officers: WbBar[];
+  byStore: VisitStoreRow[];
+}
+
+const EMPTY_VISITS: VisitAnalytics = {
+  kpis: { visits: 0, farmers: 0, villages: 0, officers: 0, fieldPct: 0, photos: 0, voiceNotes: 0, whatsappPct: 0 },
+  monthly: [], purposes: [], problems: [], crops: [], water: [], landHolding: [], expense: [],
+  productsUsed: [], productsNeeded: [], soilTypes: [], purchaseFreq: [], risks: [], adoption: [], officers: [], byStore: [],
+};
+
+// Canonical bucket orders from the visit wizard's option catalog.
+const LAND_ORDER = ["< 1 Bigha", "1–3 Bigha", "3–5 Bigha", "5–10 Bigha", "10–20 Bigha", "20–50 Bigha", "50–100 Bigha", "100+ Bigha"];
+const EXPENSE_ORDER = ["< ₹10K", "₹10–25K", "₹25–50K", "₹50K–1L", "₹1–2.5L", "₹2.5L+"];
+const FREQ_ORDER = ["Weekly", "Monthly", "Seasonal", "As Required"];
+const orderBars = (bars: WbBar[], order: string[]) =>
+  [...bars].sort((a, b) => {
+    const ia = order.indexOf(a.label), ib = order.indexOf(b.label);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  });
+
+/** Everything the field team collects on visits, aggregated over the filtered farmer set's visits. */
+export async function getVisitAnalytics(f: WbFilters): Promise<VisitAnalytics> {
+  const scoped = await scopeFilters({ ...f, lens: "visit" });
+  if (scoped === "none") return EMPTY_VISITS;
+  const whereF = whereOf(scoped, "f");
+  const BASE = Prisma.sql`FROM "Visit" v JOIN "Farmer" f ON f.id = v."farmerId" ${whereF}`;
+  const bars = (rows: { x: string | null; n: number }[]): WbBar[] =>
+    rows.filter((r) => r.x != null && r.x !== "").map((r) => ({ label: r.x as string, value: num(r.n) }));
+
+  const [kpiRows, monthlyRows, purposeRows, problemRows, cropRows] = await Promise.all([
+    prisma.$queryRaw<{ visits: number; farmers: number; villages: number; officers: number; field: number; photos: number; voices: number; wa: number }[]>(Prisma.sql`
+      SELECT COUNT(*)::int visits, COUNT(DISTINCT v."farmerId")::int farmers,
+        COUNT(DISTINCT f."village")::int villages, COUNT(DISTINCT v."officerName")::int officers,
+        COUNT(*) FILTER (WHERE v."visitMode" = 'field')::int field,
+        COALESCE(SUM(cardinality(v."photos")), 0)::int photos,
+        COALESCE(SUM(cardinality(v."voiceNotes")), 0)::int voices,
+        COUNT(*) FILTER (WHERE v."whatsappAvail")::int wa
+      ${BASE}`),
+    prisma.$queryRaw<{ ym: string; n: number }[]>(Prisma.sql`
+      SELECT to_char(date_trunc('month', v."visitedAt"), 'YYYY-MM') ym, COUNT(*)::int n
+      ${BASE} AND v."visitedAt" IS NOT NULL GROUP BY 1 ORDER BY 1`),
+    prisma.$queryRaw<{ x: string | null; n: number }[]>(Prisma.sql`
+      SELECT COALESCE(NULLIF(TRIM(v."purpose"), ''), 'Not recorded') x, COUNT(*)::int n ${BASE} GROUP BY 1 ORDER BY 2 DESC LIMIT 10`),
+    prisma.$queryRaw<{ x: string | null; n: number }[]>(Prisma.sql`
+      SELECT p x, COUNT(DISTINCT fid)::int n
+      FROM (SELECT v."farmerId" fid, unnest(v."currentProblem") p ${BASE}) t
+      GROUP BY 1 ORDER BY 2 DESC LIMIT 12`),
+    prisma.$queryRaw<{ x: string | null; n: number }[]>(Prisma.sql`
+      SELECT c x, COUNT(*)::int n FROM (SELECT unnest(array_append(v."crops", v."mainCrop")) c ${BASE}) t
+      WHERE c IS NOT NULL AND c <> '' GROUP BY 1 ORDER BY 2 DESC LIMIT 12`),
+  ]);
+
+  const [waterRows, landRows, expenseRows, usedRows, neededRows] = await Promise.all([
+    prisma.$queryRaw<{ x: string | null; n: number }[]>(Prisma.sql`
+      SELECT w x, COUNT(*)::int n FROM (SELECT unnest(v."waterSource") w ${BASE}) t GROUP BY 1 ORDER BY 2 DESC LIMIT 9`),
+    prisma.$queryRaw<{ x: string | null; n: number }[]>(Prisma.sql`
+      SELECT v."landHoldingUnit" x, COUNT(*)::int n ${BASE} AND v."landHoldingUnit" IS NOT NULL GROUP BY 1`),
+    prisma.$queryRaw<{ x: string | null; n: number }[]>(Prisma.sql`
+      SELECT v."annualExpense" x, COUNT(*)::int n ${BASE} AND v."annualExpense" IS NOT NULL GROUP BY 1`),
+    prisma.$queryRaw<{ x: string | null; n: number }[]>(Prisma.sql`
+      SELECT p x, COUNT(*)::int n FROM (SELECT unnest(v."products") p ${BASE}) t GROUP BY 1 ORDER BY 2 DESC LIMIT 10`),
+    prisma.$queryRaw<{ x: string | null; n: number }[]>(Prisma.sql`
+      SELECT p x, COUNT(*)::int n FROM (SELECT unnest(v."productRequired") p ${BASE}) t GROUP BY 1 ORDER BY 2 DESC LIMIT 10`),
+  ]);
+
+  const [soilRows, freqRows, riskRows, adoptRows, officerRows, storeRows] = await Promise.all([
+    prisma.$queryRaw<{ x: string | null; n: number }[]>(Prisma.sql`
+      SELECT v."soilType" x, COUNT(*)::int n ${BASE} AND v."soilType" IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10`),
+    prisma.$queryRaw<{ x: string | null; n: number }[]>(Prisma.sql`
+      SELECT v."purchaseFreq" x, COUNT(*)::int n ${BASE} AND v."purchaseFreq" IS NOT NULL GROUP BY 1`),
+    prisma.$queryRaw<{ x: string | null; n: number }[]>(Prisma.sql`
+      SELECT r x, COUNT(*)::int n FROM (SELECT unnest(v."cropRisk") r ${BASE}) t GROUP BY 1 ORDER BY 2 DESC LIMIT 10`),
+    prisma.$queryRaw<{ fpo: number; contract: number; dairy: number; wa: number; insured: number; soil: number }[]>(Prisma.sql`
+      SELECT COUNT(*) FILTER (WHERE v."fpoMember")::int fpo,
+        COUNT(*) FILTER (WHERE v."contractFarming")::int contract,
+        COUNT(*) FILTER (WHERE v."dairyServices")::int dairy,
+        COUNT(*) FILTER (WHERE v."whatsappAvail")::int wa,
+        COUNT(*) FILTER (WHERE v."cropInsured")::int insured,
+        COUNT(*) FILTER (WHERE v."soilTesting" = 'Required')::int soil
+      ${BASE}`),
+    prisma.$queryRaw<{ x: string | null; n: number }[]>(Prisma.sql`
+      SELECT v."officerName" x, COUNT(*)::int n ${BASE} AND v."officerName" IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10`),
+    prisma.$queryRaw<{ store: string | null; visits: number; farmers: number }[]>(Prisma.sql`
+      SELECT st."name" store, COUNT(*)::int visits, COUNT(DISTINCT v."farmerId")::int farmers
+      FROM "Visit" v JOIN "Farmer" f ON f.id = v."farmerId" LEFT JOIN "Store" st ON st.id = v."storeId"
+      ${whereF} GROUP BY 1 ORDER BY 2 DESC LIMIT 15`),
+  ]);
+
+  const k = kpiRows[0];
+  const visits = num(k?.visits);
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const monthly: VisitMonth[] = monthlyRows.map((r) => {
+    const [y, m] = r.ym.split("-").map(Number);
+    return { ym: r.ym, label: MONTHS[m - 1], year: y, count: num(r.n) };
+  });
+  const a = adoptRows[0];
+  const pct = (x: number) => (visits ? Math.round((x / visits) * 100) : 0);
+  const adoption: VisitAdoption[] = [
+    { label: "WhatsApp available", count: num(a?.wa), pct: pct(num(a?.wa)) },
+    { label: "Soil testing required", count: num(a?.soil), pct: pct(num(a?.soil)) },
+    { label: "Crop insured", count: num(a?.insured), pct: pct(num(a?.insured)) },
+    { label: "FPO member", count: num(a?.fpo), pct: pct(num(a?.fpo)) },
+    { label: "Contract farming", count: num(a?.contract), pct: pct(num(a?.contract)) },
+    { label: "Dairy services", count: num(a?.dairy), pct: pct(num(a?.dairy)) },
+  ];
+
+  return {
+    kpis: {
+      visits,
+      farmers: num(k?.farmers),
+      villages: num(k?.villages),
+      officers: num(k?.officers),
+      fieldPct: pct(num(k?.field)),
+      photos: num(k?.photos),
+      voiceNotes: num(k?.voices),
+      whatsappPct: pct(num(k?.wa)),
+    },
+    monthly,
+    purposes: bars(purposeRows),
+    problems: bars(problemRows),
+    crops: bars(cropRows),
+    water: bars(waterRows),
+    landHolding: orderBars(bars(landRows), LAND_ORDER),
+    expense: orderBars(bars(expenseRows), EXPENSE_ORDER),
+    productsUsed: bars(usedRows),
+    productsNeeded: bars(neededRows),
+    soilTypes: bars(soilRows),
+    purchaseFreq: orderBars(bars(freqRows), FREQ_ORDER),
+    risks: bars(riskRows),
+    adoption,
+    officers: bars(officerRows),
+    byStore: storeRows.filter((r) => r.store).map((r) => ({ store: r.store as string, visits: num(r.visits), farmers: num(r.farmers) })),
+  };
+}
+
 /* ── Drill: farmers in a matrix cell (respects the active filters) ── */
 export interface WbCustomer { id: number; name: string; mobile: string | null; village: string | null; spend: string; segment: string; salesCrops: string[]; visitCrops: string[] }
 export async function getWorkbenchCustomers(f: WbFilters, storeId: number | null, segment: string, limit = 400): Promise<WbCustomer[]> {
@@ -297,7 +455,7 @@ export async function getCropTrend(crop: string): Promise<CropTrendPoint[]> {
 }
 
 /* ── Save the current filter as a live dynamic segment ── */
-export async function saveWorkbenchSegment(f: WbFilters, name: string): Promise<{ ok: boolean; error?: string }> {
+export async function saveWorkbenchSegment(f: WbFilters, name: string): Promise<{ ok: boolean; id?: number; error?: string }> {
   const scoped = await scopeFilters(f);
   if (scoped === "none") return { ok: false, error: "No store or region is assigned to your account." };
   f = scoped; // saved segment inherits the officer's store / RM's region

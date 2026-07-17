@@ -15,10 +15,12 @@ export function MapView({
   farmers,
   stores,
   allStores,
+  canChain = false,
 }: {
   farmers: MapFarmer[];
   stores: MapStore[];
   allStores: StoreListItem[];
+  canChain?: boolean;
 }) {
   const [layer] = useState<MapLayerKey>("segment");
   const [selectedStoreIds, setSelectedStoreIds] = useState<Set<number>>(new Set());
@@ -195,7 +197,7 @@ export function MapView({
 
       {/* Selected stores' farmers + cluster builder */}
       {selectedStores.length > 0 ? (
-        <StoreFarmersPanel key={selectedIdList.join(",")} stores={selectedStores} />
+        <StoreFarmersPanel key={selectedIdList.join(",")} stores={selectedStores} canChain={canChain} />
       ) : (
         <div className="mt-3.5 rounded-[14px] border border-dashed border-line bg-white px-6 py-10 text-center">
           <div className="text-[14px] font-semibold text-ink">Select one or more stores to build a cluster</div>

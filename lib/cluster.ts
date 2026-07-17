@@ -57,5 +57,6 @@ export interface CreateClusterInput {
 export interface CreateClusterResult {
   ok: boolean;
   count?: number;
+  id?: number; // the created cluster — used by the "Next: create a project →" chain
   error?: string;
 }

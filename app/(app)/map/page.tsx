@@ -4,6 +4,8 @@ import { shortStoreName, storeColor } from "@/lib/store-utils";
 import { SEGMENT_ENUM_TO_LABEL, LEAD_ENUM_TO_LABEL } from "@/lib/segments";
 import { MapView } from "@/components/map/MapView";
 import type { MapFarmer, MapStore, StoreListItem } from "@/components/map/types";
+import { getRole } from "@/lib/session";
+import { canManage } from "@/lib/scope";
 
 export const dynamic = "force-dynamic";
 
@@ -131,5 +133,5 @@ export default async function MapViewPage() {
     allStores = [];
   }
 
-  return <MapView farmers={farmers} stores={stores} allStores={allStores} />;
+  return <MapView farmers={farmers} stores={stores} allStores={allStores} canChain={canManage(await getRole())} />;
 }

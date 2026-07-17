@@ -9,6 +9,7 @@ export interface VisitDetailData {
   purpose: string;
   notes: string;
   officer: string;
+  recordedBy: string; // audit — "Name (UA123) · 16 Jul 2026, 4:32 pm"
   village: string;
   district: string;
   crop: string;
@@ -187,6 +188,7 @@ export function VisitDetailView({ data }: { data: VisitDetailData }) {
             <div className="flex flex-col border border-[#F0F0F0] rounded-[10px] overflow-hidden">
               <div className="grid grid-cols-2 px-[14px] py-[9px] bg-[#FAFAFA] border-b border-[#F5F5F5]">
                 <Field label="Officer">{data.officer || "—"}</Field>
+                <Field label="Recorded by">{data.recordedBy || "—"}</Field>
                 <Field label="Date">{data.date || "—"}</Field>
               </div>
               <div className="grid grid-cols-2 px-[14px] py-[9px] border-b border-[#F5F5F5]">
