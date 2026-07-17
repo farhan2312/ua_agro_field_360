@@ -324,6 +324,7 @@ model Campaign {
   targetSegments String[]         @default([]) // campaign segments included
   targetCrops    String[]         @default([]) // maize / potato (empty = all)
   testPct        Int              @default(75)
+  commPlans      String[]         @default([]) // comm-plan names this campaign is tagged with (1+)
   status         String           @default("DRAFT") // DRAFT | ACTIVE | CLOSED
   projectId      Int? // Step 3: campaign runs on a project (all its clusters)…
   clusterId      Int? // …or one specific cluster within it
