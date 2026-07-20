@@ -442,11 +442,24 @@ export const APPROACH_TILES: { key: string; label: string; color: string; bg: st
 ];
 export const UNREACHABLE_TILE = { color: "#C62828", bg: "#FDECEA" };
 const APPROACH_KEYS = APPROACH_TILES.map((t) => t.key);
-export function isApproach(med: string | null): boolean { return med != null && APPROACH_KEYS.includes(med); }
+/** True if the outcome set contains at least one real approach (⇒ reached). */
+export function isApproach(meds: string[]): boolean { return meds.some((m) => APPROACH_KEYS.includes(m)); }
 export function mediumLabel(k: string): string { return APPROACH_TILES.find((t) => t.key === k)?.label ?? k; }
+/** "Call + WhatsApp" — approaches in tile order, for badges. */
+export function mediumsLabel(meds: string[]): string {
+  return APPROACH_TILES.filter((t) => meds.includes(t.key)).map((t) => t.label).join(" + ");
+}
+/** Toggle one outcome in the set: approaches are multi-select; Unreachable is exclusive. */
+export function toggleMedium(meds: string[], key: string): string[] {
+  if (key === "UNREACHABLE") return meds.includes("UNREACHABLE") ? [] : ["UNREACHABLE"];
+  const rest = meds.filter((m) => m !== "UNREACHABLE"); // picking an approach clears Unreachable
+  return rest.includes(key) ? rest.filter((m) => m !== key) : [...rest, key];
+}
+/** Stable key for change detection (order-insensitive). */
+export function medKey(meds: string[]): string { return [...meds].sort().join(","); }
 export function statusOf(m: CampaignMemberVM): "reached" | "unreachable" | "pending" {
   if (m.reached) return "reached";
-  if (m.medium === "UNREACHABLE") return "unreachable";
+  if (m.mediums.includes("UNREACHABLE")) return "unreachable";
   return "pending";
 }
 /** Sort order for the list — un-contacted first, unreachable next, reached last. */
@@ -463,7 +476,7 @@ export function StatusBadge({ member }: { member: CampaignMemberVM }) {
   const who = member.reachedBy ? ` · by ${member.reachedBy}` : "";
   const audit = member.reachedBy ? `Recorded by ${member.reachedBy}${member.reachedByCode ? ` (${member.reachedByCode})` : ""}${member.reachedAt ? ` on ${member.reachedAt}` : ""}` : undefined;
   if (s === "reached")
-    return <span title={audit} className="rounded-full bg-[#E8F5E9] px-2.5 py-0.5 text-[10px] font-semibold text-[#2E7D32]">✓ Reached{member.medium && member.medium !== "UNREACHABLE" ? ` · ${mediumLabel(member.medium)}` : ""}{member.reachedAt ? ` · ${member.reachedAt}` : ""}{who}</span>;
+    return <span title={audit} className="rounded-full bg-[#E8F5E9] px-2.5 py-0.5 text-[10px] font-semibold text-[#2E7D32]">✓ Reached{mediumsLabel(member.mediums) ? ` · ${mediumsLabel(member.mediums)}` : ""}{member.reachedAt ? ` · ${member.reachedAt}` : ""}{who}</span>;
   if (s === "unreachable")
     return <span title={audit} className="rounded-full bg-[#FDECEA] px-2.5 py-0.5 text-[10px] font-semibold text-[#C62828]">Unreachable{member.reachedAt ? ` · ${member.reachedAt}` : ""}{who}</span>;
   return null;
@@ -486,19 +499,21 @@ function PhoneBlock({ mobile, big }: { mobile: string | null; big?: boolean }) {
   );
 }
 
-/** Approach tiles (Call/WhatsApp/SMS/In-person) + a right-aligned Unreachable tile. */
-function ApproachPicker({ value, onSelect, disabled }: { value: string | null; onSelect: (v: string | null) => void; disabled?: boolean }) {
+/** Approach tiles (Call/WhatsApp/SMS/In-person) — MULTI-select — + a right-aligned exclusive Unreachable tile.
+ *  Emits the tapped KEY; the parent applies it with a functional update so two fast taps can't drop one. */
+function ApproachPicker({ value, onToggle, disabled }: { value: string[]; onToggle: (key: string) => void; disabled?: boolean }) {
+  const unreachable = value.includes("UNREACHABLE");
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="text-[11px] font-semibold uppercase text-[#757575]">How did you reach them?</span>
-      {APPROACH_TILES.map((t) => { const on = value === t.key; return (
-        <button key={t.key} type="button" disabled={disabled} onClick={() => onSelect(on ? null : t.key)}
+      <span className="text-[11px] font-semibold uppercase text-[#757575]">How did you reach them? <span className="normal-case text-[#9E9E9E]">(pick all that apply)</span></span>
+      {APPROACH_TILES.map((t) => { const on = value.includes(t.key); return (
+        <button key={t.key} type="button" disabled={disabled} onClick={() => onToggle(t.key)}
           className="rounded-full border-[1.5px] px-3.5 py-1.5 text-[12.5px] font-semibold disabled:opacity-50"
-          style={{ background: on ? t.bg : "#fff", color: on ? t.color : "#616161", borderColor: on ? t.color : "#DADADA" }}>{t.label}</button>
+          style={{ background: on ? t.bg : "#fff", color: on ? t.color : "#616161", borderColor: on ? t.color : "#DADADA" }}>{on ? "✓ " : ""}{t.label}</button>
       ); })}
-      <button type="button" disabled={disabled} onClick={() => onSelect(value === "UNREACHABLE" ? null : "UNREACHABLE")}
+      <button type="button" disabled={disabled} onClick={() => onToggle("UNREACHABLE")}
         className="ml-auto rounded-full border-[1.5px] px-3.5 py-1.5 text-[12.5px] font-semibold disabled:opacity-50"
-        style={{ background: value === "UNREACHABLE" ? UNREACHABLE_TILE.bg : "#fff", color: value === "UNREACHABLE" ? UNREACHABLE_TILE.color : "#9E9E9E", borderColor: value === "UNREACHABLE" ? UNREACHABLE_TILE.color : "#E0E0E0" }}>
+        style={{ background: unreachable ? UNREACHABLE_TILE.bg : "#fff", color: unreachable ? UNREACHABLE_TILE.color : "#9E9E9E", borderColor: unreachable ? UNREACHABLE_TILE.color : "#E0E0E0" }}>
         Unreachable
       </button>
     </div>
@@ -527,19 +542,20 @@ export function OutreachProgress({ members }: { members: CampaignMemberVM[] }) {
 }
 
 function MemberRow({ member, onChange }: { member: CampaignMemberVM; onChange: (m: CampaignMemberVM) => void }) {
-  const [medium, setMedium] = useState<string | null>(member.medium);
+  const [mediums, setMediums] = useState<string[]>(member.mediums);
   const [comment, setComment] = useState(member.comment ?? "");
   const [pending, start] = useTransition();
   const [saved, setSaved] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const dirty = medium !== member.medium || comment !== (member.comment ?? "");
+  const dirty = medKey(mediums) !== medKey(member.mediums) || comment !== (member.comment ?? "");
   const st = statusOf(member);
+  const unreachable = mediums.includes("UNREACHABLE");
 
   const save = () => {
     setErr(null); setSaved(false);
     start(async () => {
-      const res = await markCampaignMember(member.id, { medium, comment });
-      if (res.ok) { onChange({ ...member, reached: isApproach(medium), medium, comment: comment.trim() || null }); setSaved(true); }
+      const res = await markCampaignMember(member.id, { mediums, comment });
+      if (res.ok) { onChange({ ...member, reached: isApproach(mediums), mediums, comment: comment.trim() || null }); setSaved(true); }
       else setErr(res.error ?? "Failed");
     });
   };
@@ -554,13 +570,13 @@ function MemberRow({ member, onChange }: { member: CampaignMemberVM; onChange: (
       </div>
       <div className="mb-3"><PhoneBlock mobile={member.mobile} /></div>
       <div className="rounded-[12px] border border-[#EAEAEA] bg-[#FBFBFB] p-3">
-        <ApproachPicker value={medium} onSelect={(v) => { setMedium(v); setSaved(false); }} disabled={pending} />
+        <ApproachPicker value={mediums} onToggle={(k) => { setMediums((cur) => toggleMedium(cur, k)); setSaved(false); }} disabled={pending} />
         <textarea value={comment} onChange={(e) => { setComment(e.target.value); setSaved(false); }} placeholder="Add a note (optional)…"
           rows={2} className="mt-2 w-full resize-y rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" />
         <div className="mt-2 flex items-center gap-2">
           <button type="button" onClick={save} disabled={pending || !dirty}
             className="rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-bold text-white disabled:opacity-40">
-            {pending ? "Saving…" : saved && !dirty ? "Saved ✓" : medium === "UNREACHABLE" ? "Save — mark unreachable" : medium ? "Save — mark reached" : "Save"}
+            {pending ? "Saving…" : saved && !dirty ? "Saved ✓" : unreachable ? "Save — mark unreachable" : mediums.length ? `Save — reached via ${mediumsLabel(mediums)}` : "Save"}
           </button>
           {err && <span className="text-[12px] font-semibold text-[#C62828]">{err}</span>}
         </div>
@@ -598,17 +614,18 @@ function FocusMode({ members, onChange, onExit }: { members: CampaignMemberVM[];
 function FocusCard({ member, onChange, onHandled, onSkip, onBack, remaining }: {
   member: CampaignMemberVM; onChange: (m: CampaignMemberVM) => void; onHandled: () => void; onSkip: () => void; onBack?: () => void; remaining: number;
 }) {
-  const [medium, setMedium] = useState<string | null>(member.medium);
+  const [mediums, setMediums] = useState<string[]>(member.mediums);
   const [comment, setComment] = useState(member.comment ?? "");
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
+  const unreachable = mediums.includes("UNREACHABLE");
 
   const commit = () => {
-    if (!medium) return; // pick an approach or Unreachable, else Skip
+    if (!mediums.length) return; // pick at least one approach (or Unreachable), else Skip
     setErr(null);
     start(async () => {
-      const res = await markCampaignMember(member.id, { medium, comment });
-      if (res.ok) { onChange({ ...member, reached: isApproach(medium), medium, comment: comment.trim() || null }); onHandled(); }
+      const res = await markCampaignMember(member.id, { mediums, comment });
+      if (res.ok) { onChange({ ...member, reached: isApproach(mediums), mediums, comment: comment.trim() || null }); onHandled(); }
       else setErr(res.error ?? "Failed");
     });
   };
@@ -624,7 +641,7 @@ function FocusCard({ member, onChange, onHandled, onSkip, onBack, remaining }: {
       <div className="mb-3 text-[12.5px] text-[#9E9E9E]">{member.village ?? "—"}{member.store ? ` · ${member.store}` : ""}</div>
       <div className="mb-4"><PhoneBlock mobile={member.mobile} big /></div>
       <div className="rounded-[12px] border border-[#EAEAEA] bg-[#FBFBFB] p-3.5">
-        <ApproachPicker value={medium} onSelect={setMedium} disabled={pending} />
+        <ApproachPicker value={mediums} onToggle={(k) => setMediums((cur) => toggleMedium(cur, k))} disabled={pending} />
         <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Add a note (optional)…"
           rows={2} className="mt-2.5 w-full resize-y rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" />
       </div>
@@ -632,13 +649,13 @@ function FocusCard({ member, onChange, onHandled, onSkip, onBack, remaining }: {
       <div className="mt-4 flex items-center gap-2">
         {onBack && <button type="button" onClick={onBack} disabled={pending} className="rounded-[10px] border border-[#E0E0E0] px-4 py-2.5 text-[13px] font-semibold text-[#616161] disabled:opacity-40">← Back</button>}
         <button type="button" onClick={onSkip} disabled={pending} className="rounded-[10px] border border-[#E0E0E0] px-4 py-2.5 text-[13px] font-semibold text-[#616161] disabled:opacity-40">Skip →</button>
-        <button type="button" onClick={commit} disabled={pending || !medium}
+        <button type="button" onClick={commit} disabled={pending || !mediums.length}
           className="ml-auto rounded-[10px] px-6 py-2.5 text-[13.5px] font-bold text-white disabled:opacity-40"
-          style={{ background: medium === "UNREACHABLE" ? "#C62828" : "#2E7D32" }}>
-          {pending ? "Saving…" : medium === "UNREACHABLE" ? "Mark unreachable & next" : "Save & next"}
+          style={{ background: unreachable ? "#C62828" : "#2E7D32" }}>
+          {pending ? "Saving…" : unreachable ? "Mark unreachable & next" : "Save & next"}
         </button>
       </div>
-      {!medium && <div className="mt-2 text-right text-[11.5px] text-[#9E9E9E]">Pick how you reached them (or Unreachable), or Skip to come back later.</div>}
+      {!mediums.length && <div className="mt-2 text-right text-[11.5px] text-[#9E9E9E]">Pick how you reached them — one or more (or Unreachable), or Skip to come back later.</div>}
     </div>
   );
 }
@@ -661,6 +678,7 @@ function TrackerBody({ t }: { t: CampaignTracker }) {
           <Kpi label="Call·WA·SMS·Visit" value={`${n(t.reach.byApproach.CALL)}·${n(t.reach.byApproach.WHATSAPP)}·${n(t.reach.byApproach.SMS)}·${n(t.reach.byApproach.IN_PERSON)}`} />
           <Kpi label="Paying (contacted)" value={n(a.payingFarmers)} color="#1565C0" />
         </div>
+        <div className="mt-2 text-[11px] text-[#9E9E9E]">A farmer can be reached by more than one approach, so the Call·WA·SMS·Visit counts can add up to more than “Reached”.</div>
       </div>
 
       <div className={`${CARD} p-4`}>

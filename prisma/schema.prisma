@@ -345,7 +345,7 @@ model CampaignMember {
   zone       String? // snapshot of the farmer's zone (for regional-scoped visibility)
   reached       Boolean   @default(false)
   reachedAt     DateTime? // when the outcome (reach OR unreachable) was recorded
-  medium        String? // CALL | WHATSAPP | SMS | IN_PERSON | UNREACHABLE
+  mediums       String[]  @default([]) // outcome set: any of CALL|WHATSAPP|SMS|IN_PERSON (multi-select), or the single value UNREACHABLE
   reachedBy     String? // audit: ACTUAL logged-in user's name who recorded the outcome
   reachedByCode String? // audit: their User.employeeCode (e.g. "UA123")
   comment       String? // optional free-text note from the officer/RM about the contact

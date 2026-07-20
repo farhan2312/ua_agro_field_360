@@ -5,7 +5,7 @@ import Link from "next/link";
 import { segMeta } from "@/lib/campaign-segments";
 import { markCampaignMember, type CampaignListItem, type CampaignMemberVM } from "@/app/actions/campaigns";
 import {
-  APPROACH_TILES, UNREACHABLE_TILE, isApproach, statusOf, rank, digits10, OutreachProgress,
+  APPROACH_TILES, UNREACHABLE_TILE, isApproach, statusOf, rank, digits10, OutreachProgress, toggleMedium, medKey,
 } from "@/components/campaigns/CampaignsScreen";
 
 const CARD = "rounded-[14px] border border-black/[0.04] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]";
@@ -77,20 +77,21 @@ export function OutreachMatrix({ campaign, initial }: { campaign: CampaignListIt
 }
 
 function MatrixRow({ member, onChange }: { member: CampaignMemberVM; onChange: (m: CampaignMemberVM) => void }) {
-  const [medium, setMedium] = useState<string | null>(member.medium);
+  const [mediums, setMediums] = useState<string[]>(member.mediums);
   const [comment, setComment] = useState(member.comment ?? "");
   const [pending, start] = useTransition();
   const [saved, setSaved] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const d10 = digits10(member.mobile);
   const st = statusOf(member);
-  const dirty = medium !== member.medium || comment !== (member.comment ?? "");
+  const dirty = medKey(mediums) !== medKey(member.mediums) || comment !== (member.comment ?? "");
+  const unreachable = mediums.includes("UNREACHABLE");
 
   const save = () => {
     setErr(null); setSaved(false);
     start(async () => {
-      const res = await markCampaignMember(member.id, { medium, comment });
-      if (res.ok) { onChange({ ...member, reached: isApproach(medium), medium, comment: comment.trim() || null }); setSaved(true); }
+      const res = await markCampaignMember(member.id, { mediums, comment });
+      if (res.ok) { onChange({ ...member, reached: isApproach(mediums), mediums, comment: comment.trim() || null }); setSaved(true); }
       else setErr(res.error ?? "Failed");
     });
   };
@@ -114,16 +115,19 @@ function MatrixRow({ member, onChange }: { member: CampaignMemberVM; onChange: (
           <span className="text-[11px] text-[#BDBDBD]">no number</span>
         )}
       </div>
-      {/* Outcome tiles — approaches + unreachable, single line */}
+      {/* Outcome tiles — approaches (multi-select) + exclusive unreachable, single line */}
       <div className="flex items-center gap-1" title={member.reachedBy ? `Recorded by ${member.reachedBy}${member.reachedByCode ? ` (${member.reachedByCode})` : ""}${member.reachedAt ? ` on ${member.reachedAt}` : ""}` : undefined}>
-        {APPROACH_TILES.map((t) => { const on = medium === t.key; return (
-          <button key={t.key} type="button" disabled={pending} onClick={() => { setMedium(on ? null : t.key); setSaved(false); }}
+        {APPROACH_TILES.map((t) => { const on = mediums.includes(t.key); return (
+          <button key={t.key} type="button" disabled={pending} onClick={() => { setMediums((cur) => toggleMedium(cur, t.key)); setSaved(false); }}
             className="rounded-full border px-2.5 py-1 text-[11px] font-semibold disabled:opacity-50"
-            style={{ background: on ? t.bg : "#fff", color: on ? t.color : "#757575", borderColor: on ? t.color : "#E0E0E0" }}>{t.label}</button>
+            style={{ background: on ? t.bg : "#fff", color: on ? t.color : "#757575", borderColor: on ? t.color : "#E0E0E0" }}>
+            {/* tick space is always reserved — each row is its own grid, so a widening tile would skew the columns */}
+            <span className="inline-block w-[10px]">{on ? "✓" : ""}</span>{t.label}
+          </button>
         ); })}
-        <button type="button" disabled={pending} onClick={() => { setMedium(medium === "UNREACHABLE" ? null : "UNREACHABLE"); setSaved(false); }}
+        <button type="button" disabled={pending} onClick={() => { setMediums((cur) => toggleMedium(cur, "UNREACHABLE")); setSaved(false); }}
           className="rounded-full border px-2.5 py-1 text-[11px] font-semibold disabled:opacity-50"
-          style={{ background: medium === "UNREACHABLE" ? UNREACHABLE_TILE.bg : "#fff", color: medium === "UNREACHABLE" ? UNREACHABLE_TILE.color : "#9E9E9E", borderColor: medium === "UNREACHABLE" ? UNREACHABLE_TILE.color : "#E0E0E0" }}>
+          style={{ background: unreachable ? UNREACHABLE_TILE.bg : "#fff", color: unreachable ? UNREACHABLE_TILE.color : "#9E9E9E", borderColor: unreachable ? UNREACHABLE_TILE.color : "#E0E0E0" }}>
           Unreachable
         </button>
       </div>
@@ -135,7 +139,7 @@ function MatrixRow({ member, onChange }: { member: CampaignMemberVM; onChange: (
         {err && <span className="text-[10.5px] font-semibold text-[#C62828]" title={err}>!</span>}
         <button type="button" onClick={save} disabled={pending || !dirty}
           className="rounded-[8px] px-3.5 py-1.5 text-[12px] font-bold text-white disabled:opacity-40"
-          style={{ background: medium === "UNREACHABLE" ? "#C62828" : "#2E7D32" }}>
+          style={{ background: unreachable ? "#C62828" : "#2E7D32" }}>
           {pending ? "…" : saved && !dirty ? "✓" : "Save"}
         </button>
       </div>
