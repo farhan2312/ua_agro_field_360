@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { getScope, visitScopeWhere } from "@/lib/scope";
 import { initials, avatarColor } from "@/lib/format";
 import { shortStoreName, storeColor } from "@/lib/store-utils";
 import {
@@ -169,11 +170,16 @@ export default async function VisitDetailPage({
   if (!Number.isInteger(id) || id <= 0) notFound();
   const justCreated = searchParams?.created === "1";
 
+  // RBAC: the id lookup is AND-ed with the caller's scope, so an out-of-store /
+  // out-of-region visit 404s instead of opening by direct URL.
+  const visitScope = visitScopeWhere(await getScope());
+  if (visitScope === "none") notFound();
+
   let visit: VisitRow | null = null;
   let dbError = false;
   try {
-    visit = (await prisma.visit.findUnique({
-      where: { id },
+    visit = (await prisma.visit.findFirst({
+      where: visitScope ? { AND: [{ id }, visitScope] } : { id },
       select: {
         id: true,
         date: true,

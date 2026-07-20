@@ -10,7 +10,7 @@ import {
   parseCriteria, resolveClusterCount, resolveClusterIds, scopedCriteriaWhere,
   hasConditions, type ClusterCriteria,
 } from "@/lib/cluster-rules";
-import { getScope, canManage, getActor } from "@/lib/scope";
+import { getScope, canManage, getActor, farmerScopeWhere } from "@/lib/scope";
 import { cropLabel } from "@/lib/crops";
 
 const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
@@ -39,100 +39,11 @@ export async function getCropOptions(): Promise<{ crop: string; count: number }[
   return rows.map((r) => ({ crop: r.crop, count: Number(r.n) }));
 }
 
-export interface MatrixRow {
-  storeId: number | null;
-  storeName: string;
-  counts: Record<string, number>;
-  total: number;
-}
-export interface SegmentMatrix {
-  rows: MatrixRow[];
-  totals: Record<string, number>;
-  grandTotal: number;
-}
-
-/** Store × campaign-segment count matrix (optionally scoped to a crop + its source). */
-export async function getSegmentMatrix(crop: CropFilter = "all", source: CropSource = "any"): Promise<SegmentMatrix> {
-  const grouped = await prisma.$queryRawUnsafe<{ storeId: number | null; seg: string; n: number }[]>(
-    `SELECT "storeId", "campaignSegment" AS seg, COUNT(*)::int AS n
-     FROM "Farmer"
-     WHERE "campaignSegment" IS NOT NULL AND "campaignSegment" <> 'OTHER' ${cropClause(crop, source)}
-     GROUP BY "storeId", "campaignSegment"`,
-  );
-  const stores = await prisma.store.findMany({ select: { id: true, name: true } });
-  const nameById = new Map(stores.map((s) => [s.id, shortStoreName(s.name)]));
-
-  const byStore = new Map<number | null, Record<string, number>>();
-  const totals: Record<string, number> = {};
-  for (const g of grouped) {
-    const m = byStore.get(g.storeId) ?? {};
-    m[g.seg] = Number(g.n);
-    byStore.set(g.storeId, m);
-    totals[g.seg] = (totals[g.seg] ?? 0) + Number(g.n);
-  }
-
-  const rows: MatrixRow[] = [...byStore.entries()].map(([storeId, counts]) => ({
-    storeId,
-    storeName: storeId == null ? "Unassigned" : nameById.get(storeId) ?? `Store #${storeId}`,
-    counts,
-    total: SEGMENT_COLUMNS.reduce((s, k) => s + (counts[k] ?? 0), 0),
-  }));
-  rows.sort((a, b) => b.total - a.total);
-
-  const grandTotal = SEGMENT_COLUMNS.reduce((s, k) => s + (totals[k] ?? 0), 0);
-  return { rows, totals, grandTotal };
-}
-
-export interface SegmentCustomer {
-  id: number;
-  name: string;
-  mobile: string | null;
-  village: string | null;
-  spend: string;
-  gap: string | null;
-  lastItem: string | null;
-  medium: string;
-  salesCrops: string[]; // labelled: from the sales upload
-  visitCrops: string[]; // labelled: from field visits
-}
-
-/** Drill-down: farmers in a store × segment cell (optionally crop + source scoped). */
-export async function getSegmentCustomers(
-  storeId: number | null,
-  segment: string,
-  crop: CropFilter = "all",
-  source: CropSource = "any",
-  limit = 500,
-): Promise<SegmentCustomer[]> {
-  const cropField = source === "sales" ? "salesCropTags" : source === "visit" ? "visitCropTags" : "cropTags";
-  const cropWhere: Prisma.FarmerWhereInput = crop && crop !== "all" ? { [cropField]: { has: crop } } : {};
-  const farmers = await prisma.farmer.findMany({
-    where: {
-      campaignSegment: segment,
-      ...(storeId == null ? { storeId: null } : { storeId }),
-      ...cropWhere,
-    },
-    orderBy: { p12mSpend: "desc" },
-    take: limit,
-    select: {
-      id: true, name: true, mobile: true, village: true, p12mSpend: true, hniGap: true,
-      lastMaizeItem: true, lastPotatoItem: true, salesCropTags: true, visitCropTags: true,
-    },
-  });
-  const med = segMeta(segment).medium;
-  return farmers.map((f) => ({
-    id: f.id,
-    name: f.name,
-    mobile: f.mobile,
-    village: f.village,
-    spend: f.p12mSpend != null ? inr(f.p12mSpend) : "—",
-    gap: f.hniGap != null && f.hniGap > 0 ? inr(f.hniGap) : null,
-    lastItem: f.lastMaizeItem ?? f.lastPotatoItem ?? null,
-    medium: med,
-    salesCrops: f.salesCropTags,
-    visitCrops: f.visitCropTags,
-  }));
-}
+/* The old unscoped store×segment matrix + its drill-down (`getSegmentMatrix`,
+   `getSegmentCustomers`) were removed with the officer/RM RBAC work: the analytics
+   workbench replaced them, and as "use server" exports they stayed callable by any
+   signed-in user — returning farmers (with phone numbers) from ANY store. The scoped
+   equivalents live in app/actions/analytics-segments.ts (getWorkbench*). */
 
 /* ─────────────────────────── Clusters (Step 1) ─────────────────────────── */
 
@@ -148,15 +59,26 @@ export interface ClusterVM {
 
 /** All saved clusters with LIVE counts (dynamic clusters re-resolve their rule). */
 export async function listClustersWithCounts(): Promise<ClusterVM[]> {
+  // RBAC: regional managers see clusters through their region only — the count is the
+  // in-region membership, and clusters with nobody in their region are hidden entirely.
+  const scope = await getScope();
+  const fScope = farmerScopeWhere(scope);
+  if (fScope === "none") return [];
+
   const clusters = await prisma.cluster.findMany({
     where: { source: "REAL" }, // demo clusters must not be bundleable into real projects/campaigns
     orderBy: { createdAt: "desc" },
     take: 100,
     select: { id: true, name: true, description: true, criteria: true, mode: true, origin: true, farmerIds: true, createdBy: true },
   });
-  return mapLimit(clusters, 8, async (c) => {
+  const rows = await mapLimit(clusters, 8, async (c) => {
     const crit = c.mode === "dynamic" ? parseCriteria(c.criteria) : null;
-    const count = crit ? await resolveClusterCount(crit) : c.farmerIds.length;
+    const base: Prisma.FarmerWhereInput = crit ? scopedCriteriaWhere(crit) : { source: "REAL", id: { in: c.farmerIds } };
+    const count = fScope
+      ? await prisma.farmer.count({ where: { AND: [base, fScope] } })
+      : crit
+        ? await resolveClusterCount(crit)
+        : c.farmerIds.length;
     return {
       id: c.id,
       name: c.name,
@@ -167,6 +89,7 @@ export async function listClustersWithCounts(): Promise<ClusterVM[]> {
       createdBy: c.createdBy ?? "",
     };
   });
+  return fScope ? rows.filter((r) => r.count > 0) : rows;
 }
 
 /** Live count preview for the cluster rule builder (0 for an empty rule). */
@@ -176,6 +99,7 @@ export async function previewClusterCount(criteria: ClusterCriteria): Promise<nu
 }
 
 export async function deleteCluster(id: number): Promise<{ ok: boolean; error?: string }> {
+  const perm = await requireManager(); if (!perm.ok) return perm; // RMs/officers may view clusters, not delete them
   try {
     await prisma.cluster.delete({ where: { id } });
     revalidatePath("/campaigns");

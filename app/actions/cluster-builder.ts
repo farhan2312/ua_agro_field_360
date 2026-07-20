@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { getPersona } from "@/lib/session";
+import { getPersona, getRole } from "@/lib/session";
+import { canManage } from "@/lib/scope";
 import { SPEND_TIERS } from "@/lib/spend-tiers";
 import {
   PAGE_SIZE,
@@ -21,6 +22,11 @@ import {
   resolveClusterIds,
   type ClusterCriteria,
 } from "@/lib/cluster-rules";
+
+/** Only the central team / sysadmin may CREATE clusters; RMs get a read-only, region-scoped view. */
+async function requireClusterAuthor(): Promise<{ ok: true } | { ok: false; error: string }> {
+  return canManage(await getRole()) ? { ok: true } : { ok: false, error: "Only the central team can create clusters." };
+}
 
 /** Build the Prisma `where` for the selected stores' farmers from the active filters. */
 function buildWhere(storeIds: number[], f: FarmerFilters): Prisma.FarmerWhereInput {
@@ -137,6 +143,7 @@ export async function createClusterFromCriteria(input: {
   origin: "map" | "segment" | "analytics";
   mode?: "dynamic" | "static";
 }): Promise<CreateClusterResult & { id?: number }> {
+  const perm = await requireClusterAuthor(); if (!perm.ok) return perm;
   const name = input.name.trim();
   if (!name) return { ok: false, error: "Give the cluster a name." };
   const mode = input.mode ?? "dynamic";
@@ -186,6 +193,7 @@ export async function createClusterFromCriteria(input: {
 export async function createClusterFromSelection(
   input: CreateClusterInput,
 ): Promise<CreateClusterResult> {
+  const perm = await requireClusterAuthor(); if (!perm.ok) return perm;
   // Hand-pick mode with nothing checked must NOT fall through to an all-matching cluster.
   if (!input.allMatching && !input.explicitIds?.length)
     return { ok: false, error: "Select farmers, or turn on “select all matching”." };

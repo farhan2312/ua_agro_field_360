@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { getScope, farmerScopeWhere, storeScopeWhere } from "@/lib/scope";
 import { SEGMENT_COLUMNS, segMeta } from "@/lib/campaign-segments";
 import { SPEND_TIERS } from "@/lib/spend-tiers";
 import { statusColor } from "@/lib/status";
@@ -49,6 +50,19 @@ export default async function FarmersPage({
   let total = 0;
   let facets: FarmerFacetsVM = { stores: [], zones: [], crops: [], spendTiers: SPEND_TIERS.map((t) => t.label) };
 
+  // RBAC: officers see only their store's farmers, RMs only their region's.
+  const scope = await getScope();
+  const scopeWhere = farmerScopeWhere(scope);
+  const storeWhere = storeScopeWhere(scope);
+  if (scopeWhere === "none") {
+    // Scoped user with no store/region assigned — fail closed.
+    return (
+      <div className="animate-[fadeUp_0.4s_ease-out] rounded-[14px] border border-[#FFE0B2] bg-[#FFF8E1] px-4 py-10 text-center text-[13px] text-[#8D6E00]">
+        No store or region is assigned to your account yet, so there are no farmers to show. Ask an admin to map you to a store.
+      </div>
+    );
+  }
+
   try {
     // ── Paginated, filtered farmer table (campaign segments + crop tags)
     const where: Prisma.FarmerWhereInput = {};
@@ -69,19 +83,35 @@ export default async function FarmersPage({
         { mobile: { contains: q } },
       ];
     }
+    // Scope goes on LAST and as a sibling AND, so no query-string filter can widen it.
+    const scopedWhere: Prisma.FarmerWhereInput = scopeWhere ? { AND: [where, scopeWhere] } : where;
 
-    // Dropdown option lists (stores · regions · top crops) — independent of the active filters.
+    // Dropdown option lists (stores · regions · top crops) — independent of the active
+    // filters, but never wider than the caller's scope.
     const [storeOpts, zoneRows, cropRows] = await Promise.all([
-      prisma.store.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
       prisma.store.findMany({
-        where: { zone: { not: null } },
+        where: storeWhere && storeWhere !== "none" ? storeWhere : undefined,
+        orderBy: { name: "asc" },
+        select: { id: true, name: true },
+      }),
+      prisma.store.findMany({
+        where: { zone: { not: null }, ...(storeWhere && storeWhere !== "none" ? storeWhere : {}) },
         distinct: ["zone"],
         select: { zone: true },
         orderBy: { zone: "asc" },
       }),
-      // Canonical crop tags (sales ∪ visit) across all farmers, most common first.
-      prisma.$queryRaw<{ crop: string; n: number }[]>(Prisma.sql`
-        SELECT unnest("cropTags") crop, COUNT(*)::int n FROM "Farmer" GROUP BY 1 ORDER BY 2 DESC LIMIT 40`),
+      // Canonical crop tags (sales ∪ visit) for the farmers in scope, most common first.
+      scope.role === "officer" && scope.storeId != null
+        ? prisma.$queryRaw<{ crop: string; n: number }[]>(Prisma.sql`
+            SELECT unnest("cropTags") crop, COUNT(*)::int n FROM "Farmer"
+            WHERE "storeId" = ${scope.storeId} GROUP BY 1 ORDER BY 2 DESC LIMIT 40`)
+        : scope.role === "regional" && scope.zone
+          ? prisma.$queryRaw<{ crop: string; n: number }[]>(Prisma.sql`
+              SELECT unnest(f."cropTags") crop, COUNT(*)::int n FROM "Farmer" f
+              JOIN "Store" s ON s.id = f."storeId"
+              WHERE s."zone" = ${scope.zone} GROUP BY 1 ORDER BY 2 DESC LIMIT 40`)
+          : prisma.$queryRaw<{ crop: string; n: number }[]>(Prisma.sql`
+              SELECT unnest("cropTags") crop, COUNT(*)::int n FROM "Farmer" GROUP BY 1 ORDER BY 2 DESC LIMIT 40`),
     ]);
     facets = {
       stores: storeOpts.map((s) => ({ id: s.id, name: shortStoreName(s.name) || s.name })),
@@ -91,9 +121,9 @@ export default async function FarmersPage({
     };
 
     const [count, farmers] = await Promise.all([
-      prisma.farmer.count({ where }),
+      prisma.farmer.count({ where: scopedWhere }),
       prisma.farmer.findMany({
-        where,
+        where: scopedWhere,
         orderBy: { id: "asc" },
         skip: (page - 1) * PAGE_SIZE,
         take: PAGE_SIZE,

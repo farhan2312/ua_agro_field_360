@@ -27,7 +27,13 @@ const ORIGIN_LABEL: Record<string, string> = { map: "Map", segment: "Builder", a
 
 export interface StoreOption { id: number; name: string; zone: string | null }
 
-export function ClustersTab({ initial, zones, crops, stores, canChain }: { initial: ClusterVM[]; zones: string[]; crops: CropOption[]; stores: StoreOption[]; canChain: boolean }) {
+export function ClustersTab({ initial, zones, crops, stores, canChain, canCreate = true, scopeLabel }: {
+  initial: ClusterVM[]; zones: string[]; crops: CropOption[]; stores: StoreOption[]; canChain: boolean;
+  /** Central/sysadmin only — RMs get a read-only, region-scoped view. */
+  canCreate?: boolean;
+  /** e.g. "SULTANPUR" — shown so a scoped viewer knows the counts are their region's. */
+  scopeLabel?: string | null;
+}) {
   const [list, setList] = useState(initial);
   const [building, setBuilding] = useState(false);
   const [viewing, setViewing] = useState<ClusterVM | null>(null);
@@ -41,9 +47,13 @@ export function ClustersTab({ initial, zones, crops, stores, canChain }: { initi
     <div>
       <div className="mb-3 flex items-center justify-between">
         <div className="text-[13px] text-[#757575]">
-          Clusters are dynamic — membership re-resolves live as farmers are added or updated. Build one here, or save one from the Map or Analytics views.
+          {canCreate
+            ? "Clusters are dynamic — membership re-resolves live as farmers are added or updated. Build one here, or save one from the Map or Analytics views."
+            : `Clusters are dynamic and built by the central team. Counts below are ${scopeLabel ? `your region (${scopeLabel})` : "your"} members only.`}
         </div>
-        <button type="button" onClick={() => setBuilding(true)} className="rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white">+ New cluster</button>
+        {canCreate && (
+          <button type="button" onClick={() => setBuilding(true)} className="rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white">+ New cluster</button>
+        )}
       </div>
 
       <div className={`${CARD} overflow-hidden`}>
@@ -62,7 +72,9 @@ export function ClustersTab({ initial, zones, crops, stores, canChain }: { initi
             <div className="text-[13px] font-bold text-[#2E7D32]">{n(c.count)}</div>
             <div className="text-[11px] text-[#9E9E9E]">farmers</div>
             <button type="button" onClick={() => setViewing(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9]">View</button>
-            <button type="button" onClick={() => remove(c.id)} disabled={pending} className="rounded-[8px] bg-[#FDECEA] px-3 py-1.5 text-[12px] font-semibold text-[#C62828] hover:bg-[#F9DCD8] disabled:opacity-50">Delete</button>
+            {canCreate && (
+              <button type="button" onClick={() => remove(c.id)} disabled={pending} className="rounded-[8px] bg-[#FDECEA] px-3 py-1.5 text-[12px] font-semibold text-[#C62828] hover:bg-[#F9DCD8] disabled:opacity-50">Delete</button>
+            )}
           </div>
         ))}
       </div>

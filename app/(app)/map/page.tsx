@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { avatarColor } from "@/lib/format";
 import { shortStoreName, storeColor } from "@/lib/store-utils";
@@ -5,7 +6,8 @@ import { SEGMENT_ENUM_TO_LABEL, LEAD_ENUM_TO_LABEL } from "@/lib/segments";
 import { MapView } from "@/components/map/MapView";
 import type { MapFarmer, MapStore, StoreListItem } from "@/components/map/types";
 import { getRole } from "@/lib/session";
-import { canManage } from "@/lib/scope";
+import { canAccess } from "@/lib/roles";
+import { canManage, getScope, farmerScopeWhere, storeScopeWhere } from "@/lib/scope";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +20,17 @@ function daysAgo(d: Date | null | undefined): number | null {
 }
 
 export default async function MapViewPage() {
+  const role = await getRole();
+  if (!canAccess("mapView", role)) notFound(); // agri officers have no map view
+
+  // RMs see only their own region's stores + farmers; central/sysadmin see everything.
+  const scope = await getScope();
+  const farmerScope = farmerScopeWhere(scope);
+  const storeScope = storeScopeWhere(scope);
+  if (farmerScope === "none" || storeScope === "none") notFound();
+  const farmerAnd = (w: object) => (farmerScope ? { AND: [w, farmerScope] } : w);
+  const storeAnd = (w: object) => (storeScope ? { AND: [w, storeScope] } : w);
+
   let farmers: MapFarmer[] = [];
   let stores: MapStore[] = [];
   let allStores: StoreListItem[] = [];
@@ -26,7 +39,7 @@ export default async function MapViewPage() {
     // Only farmers with real coordinates are plottable (the 12 enriched demo set).
     const [farmerRows, storeRows] = await Promise.all([
       prisma.farmer.findMany({
-        where: { lat: { not: null }, lng: { not: null } },
+        where: farmerAnd({ lat: { not: null }, lng: { not: null } }),
         select: {
           id: true,
           name: true,
@@ -51,7 +64,7 @@ export default async function MapViewPage() {
         orderBy: { id: "asc" },
       }),
       prisma.store.findMany({
-        where: { lat: { not: null }, lng: { not: null } },
+        where: storeAnd({ lat: { not: null }, lng: { not: null } }),
         select: {
           id: true,
           code: true,
@@ -104,8 +117,9 @@ export default async function MapViewPage() {
       farmerCount: s._count.farmers,
     }));
 
-    // Every store (alphabetical) for the picker list.
+    // Every store in scope (alphabetical) for the picker list.
     const allStoreRows = await prisma.store.findMany({
+      where: storeScope ?? undefined,
       orderBy: { name: "asc" },
       select: {
         id: true,
@@ -133,5 +147,5 @@ export default async function MapViewPage() {
     allStores = [];
   }
 
-  return <MapView farmers={farmers} stores={stores} allStores={allStores} canChain={canManage(await getRole())} />;
+  return <MapView farmers={farmers} stores={stores} allStores={allStores} canChain={canManage(role)} />;
 }

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { getScope, visitScopeWhere, storeScopeWhere } from "@/lib/scope";
 import { EmptyState } from "@/components/ui";
 import { followupNeeded } from "@/lib/visit-types";
 import { shortStoreName } from "@/lib/store-utils";
@@ -51,24 +52,38 @@ export default async function VisitRepoPage({
   let storeOptions: string[] = [];
   let typeOptions: string[] = [];
 
+  // RBAC: officers see only their store's visits, RMs only their region's.
+  const scope = await getScope();
+  const scopeWhere = visitScopeWhere(scope);
+  const storeWhere = storeScopeWhere(scope);
+  if (scopeWhere === "none") {
+    return (
+      <div className="animate-[fadeUp_0.4s_ease-out] rounded-[14px] border border-[#FFE0B2] bg-[#FFF8E1] px-4 py-10 text-center text-[13px] text-[#8D6E00]">
+        No store or region is assigned to your account yet, so there are no visits to show. Ask an admin to map you to a store.
+      </div>
+    );
+  }
+
   try {
-    // Filter option lists (independent of active filters). Use DISTINCT queries
-    // so these read only the unique officer/purpose values (index-backed) rather
-    // than scanning the entire visit table on every load.
+    // Filter option lists (independent of active filters, but never wider than scope).
+    // DISTINCT queries so these read only the unique officer/purpose values.
     const [officerRows, typeRows, allStores] = await Promise.all([
       prisma.visit.findMany({
-        where: { officerName: { not: null } },
+        where: scopeWhere ? { AND: [{ officerName: { not: null } }, scopeWhere] } : { officerName: { not: null } },
         select: { officerName: true },
         distinct: ["officerName"],
         orderBy: { officerName: "asc" },
       }),
       prisma.visit.findMany({
-        where: { purpose: { not: null } },
+        where: scopeWhere ? { AND: [{ purpose: { not: null } }, scopeWhere] } : { purpose: { not: null } },
         select: { purpose: true },
         distinct: ["purpose"],
         orderBy: { purpose: "asc" },
       }),
-      prisma.store.findMany({ select: { name: true } }),
+      prisma.store.findMany({
+        where: storeWhere && storeWhere !== "none" ? storeWhere : undefined,
+        select: { name: true },
+      }),
     ]);
 
     officerOptions = officerRows
@@ -87,9 +102,11 @@ export default async function VisitRepoPage({
     if (type !== "all") where.purpose = type;
     const cutoff = periodCutoff(period);
     if (cutoff) where.visitedAt = { gte: cutoff };
+    // Scope goes on LAST so no query-string filter can widen it.
+    const scopedWhere: Prisma.VisitWhereInput = scopeWhere ? { AND: [where, scopeWhere] } : where;
 
     const visits = await prisma.visit.findMany({
-      where,
+      where: scopedWhere,
       orderBy: [{ visitedAt: "desc" }, { id: "desc" }],
       include: {
         farmer: {

@@ -3,6 +3,7 @@ import { getRole } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { canAccess } from "@/lib/roles";
 import { canManage } from "@/lib/scope";
+import { getScope, storeScopeWhere } from "@/lib/scope";
 import { listClustersWithCounts, getCropOptions, type ClusterVM } from "@/app/actions/campaigns";
 import { ClustersTab, type StoreOption } from "@/components/campaigns/ClustersTab";
 import type { CropOption } from "@/components/campaigns/CampaignsScreen";
@@ -11,7 +12,13 @@ export const dynamic = "force-dynamic";
 
 export default async function FarmerClustersPage() {
   const role = await getRole();
-  if (!canAccess("farmerCluster", role)) notFound();
+  if (!canAccess("farmerCluster", role)) notFound(); // agri officers have no cluster view
+
+  // RMs see their region only, and cannot build clusters — the builder inputs are
+  // therefore limited to their region too (belt and braces with the action guard).
+  const scope = await getScope();
+  const storeWhere = storeScopeWhere(scope);
+  const canCreate = canManage(role);
 
   let clusters: ClusterVM[] = [];
   let zones: string[] = [];
@@ -20,9 +27,15 @@ export default async function FarmerClustersPage() {
   try {
     const [cls, zoneRows, cropOpts, storeRows] = await Promise.all([
       listClustersWithCounts(),
-      prisma.farmer.findMany({ where: { zone: { not: null }, source: "REAL" }, distinct: ["zone"], select: { zone: true }, orderBy: { zone: "asc" } }),
+      scope.role === "regional"
+        ? Promise.resolve(scope.zone ? [{ zone: scope.zone }] : [])
+        : prisma.farmer.findMany({ where: { zone: { not: null }, source: "REAL" }, distinct: ["zone"], select: { zone: true }, orderBy: { zone: "asc" } }),
       getCropOptions(),
-      prisma.store.findMany({ where: { source: "REAL" }, select: { id: true, name: true, zone: true }, orderBy: { name: "asc" } }),
+      prisma.store.findMany({
+        where: { source: "REAL", ...(storeWhere && storeWhere !== "none" ? storeWhere : {}) },
+        select: { id: true, name: true, zone: true },
+        orderBy: { name: "asc" },
+      }),
     ]);
     clusters = cls;
     zones = zoneRows.map((z) => z.zone!).filter(Boolean);
@@ -34,7 +47,15 @@ export default async function FarmerClustersPage() {
 
   return (
     <div className="animate-[fadeUp_0.4s_ease-out]">
-      <ClustersTab initial={clusters} zones={zones} crops={crops} stores={stores} canChain={canManage(role)} />
+      <ClustersTab
+        initial={clusters}
+        zones={zones}
+        crops={crops}
+        stores={stores}
+        canChain={canCreate}
+        canCreate={canCreate}
+        scopeLabel={scope.role === "regional" ? scope.zone : null}
+      />
     </div>
   );
 }

@@ -98,9 +98,9 @@ export const NAV_VISIBILITY: Record<string, (r: RoleKey) => boolean> = {
   dashboard: () => true,
   newVisit: (r) => r === "regional" || r === "officer" || r === "sysadmin",
   visitRepo: () => true,
-  farmers: () => true, // Farmer 360
-  mapView: () => true,
-  farmerCluster: () => true,
+  farmers: () => true, // Farmer 360 — scoped per role (officer→store, RM→region)
+  mapView: (r) => r !== "officer", // officers work a single store; RMs see their region only
+  farmerCluster: (r) => r !== "officer", // RMs may view (region-scoped) clusters but not create them
   masterData: (r) => r === "central" || r === "sysadmin",
   analytics: () => true,
   actions: (r) =>

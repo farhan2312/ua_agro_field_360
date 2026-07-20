@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Modal, ModalHeader } from "@/components/interactive";
 import { segMeta, fillTemplate, SEGMENT_COLUMNS } from "@/lib/campaign-segments";
 import { inr } from "@/lib/format";
@@ -192,7 +193,9 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
   // Chain: arriving via /campaigns?forProject=<id> opens the create form with that project preselected.
   const initialProject = initialProjectId != null ? projects.find((p) => p.id === initialProjectId) ?? null : null;
   const defaultProject = initialProject ?? projects[0] ?? null;
-  const [list] = useState(campaigns);
+  const router = useRouter();
+  // Render the server prop directly (no snapshot state) so router.refresh() shows the new campaign.
+  const list = campaigns;
   const [creating, setCreating] = useState(canManage && initialProject != null);
   const [name, setName] = useState("");
   const [projectId, setProjectId] = useState<number | null>(defaultProject?.id ?? null);
@@ -229,8 +232,15 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
     setMsg(null);
     start(async () => {
       const res = await createCampaign({ name, startDate, endDate, projectId, clusterId, commPlans });
-      if (res.ok) { setMsg(`Created "${name}" · ${n(res.members ?? 0)} enrolled${res.skipped ? ` · ${n(res.skipped)} skipped (already in another campaign of this project)` : ""}.`); setCreating(false); location.reload(); }
-      else setMsg(res.error ?? "Failed");
+      if (res.ok) {
+        setMsg(`Created "${name}" · ${n(res.members ?? 0)} enrolled${res.skipped ? ` · ${n(res.skipped)} skipped (already in another campaign of this project)` : ""}.`);
+        // Close + reset the form, then soft-refresh so the new campaign appears in the list.
+        setCreating(false);
+        setName(""); setClusterId(null); setCommPlans([]);
+        // Drop ?forProject= — otherwise the chain deep link re-opens the form on refresh.
+        if (initialProjectId != null) router.replace("/campaigns");
+        router.refresh();
+      } else setMsg(res.error ?? "Failed");
     });
   };
   const openTracker = (c: CampaignListItem) => { setTrackerOf(c); setTracker(null); getCampaignTracker(c.id).then(setTracker); };

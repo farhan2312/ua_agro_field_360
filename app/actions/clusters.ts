@@ -1,11 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { LAYER_LABELS, type MapLayerKey } from "@/lib/map-layers";
 import { SEGMENT_ENUM_TO_LABEL, LEAD_ENUM_TO_LABEL } from "@/lib/segments";
 import { inr } from "@/lib/format";
 import { shortStoreName } from "@/lib/store-utils";
+import { getScope, farmerScopeWhere } from "@/lib/scope";
 import { CLUSTER_PAGE_SIZE, type ClusterMembersResult } from "@/components/clusters/types";
 import { parseCriteria, scopedCriteriaWhere } from "@/lib/cluster-rules";
 
@@ -152,12 +154,20 @@ export async function getClusterFarmers(
     });
     if (!cluster) return { rows: [], total: 0, page, pageSize: CLUSTER_PAGE_SIZE };
 
+    // RBAC: a scoped viewer (officer→store, RM→region) only ever pages through the
+    // members inside their own scope, even for a cluster that spans the country.
+    const fScope = farmerScopeWhere(await getScope());
+    if (fScope === "none") return { rows: [], total: 0, page, pageSize: CLUSTER_PAGE_SIZE };
+
     // Dynamic clusters resolve their rule live; static/legacy use the frozen id snapshot.
     const crit = cluster.mode === "dynamic" ? parseCriteria(cluster.criteria) : null;
+    const base: Prisma.FarmerWhereInput = crit
+      ? scopedCriteriaWhere(crit)
+      : { source: "REAL", id: { in: cluster.farmerIds } };
     let total: number;
     let pageIds: number[];
-    if (crit) {
-      const where = scopedCriteriaWhere(crit);
+    if (crit || fScope) {
+      const where: Prisma.FarmerWhereInput = fScope ? { AND: [base, fScope] } : base;
       const [t, idRows] = await Promise.all([
         prisma.farmer.count({ where }),
         prisma.farmer.findMany({

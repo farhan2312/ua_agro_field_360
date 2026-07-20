@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getRole } from "@/lib/session";
+import { getScope, farmerScopeWhere } from "@/lib/scope";
 import {
   SEGMENT_ENUM_TO_LABEL,
   LEAD_ENUM_TO_LABEL,
@@ -93,9 +95,11 @@ function buildDetail(
   };
 }
 
-async function loadFarmer(id: number) {
-  return prisma.farmer.findUnique({
-    where: { id },
+/** RBAC: the id lookup is AND-ed with the caller's scope, so an out-of-store /
+ *  out-of-region farmer 404s instead of opening by direct URL. */
+async function loadFarmer(id: number, scopeWhere: Prisma.FarmerWhereInput | null) {
+  return prisma.farmer.findFirst({
+    where: scopeWhere ? { AND: [{ id }, scopeWhere] } : { id },
     include: {
       store: { include: { employees: { take: 2, orderBy: { id: "asc" } } } },
       sales: { orderBy: [{ soldAt: "desc" }, { id: "desc" }], take: 60 },
@@ -113,10 +117,12 @@ export default async function FarmerDetailPage({
   if (!Number.isFinite(id)) notFound();
 
   const isAdmin = (await getRole()) === "sysadmin";
+  const scopeWhere = farmerScopeWhere(await getScope());
+  if (scopeWhere === "none") notFound(); // scoped user with no store/region — fail closed
 
   let farmer: Awaited<ReturnType<typeof loadFarmer>> = null;
   try {
-    farmer = await loadFarmer(id);
+    farmer = await loadFarmer(id, scopeWhere);
   } catch {
     farmer = null; // DB unavailable pre-seed — fall through to not-found shell.
   }
