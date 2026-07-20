@@ -53,6 +53,8 @@ export interface ClusterMemberRow {
   segment: string; // display label or "—"
   lastVisit: string;
   ltv: string; // formatted ₹ or "—"
+  /** The farmer's mapped store (short name), or "—". */
+  store: string;
 }
 
 export interface ClusterMembersResult {

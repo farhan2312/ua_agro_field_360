@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { ROLE_META, USER_STATUS_META } from "@/lib/status";
 import { EmptyState } from "@/components/ui";
 import { Modal, ModalHeader } from "@/components/interactive";
@@ -10,7 +10,18 @@ import { UserFormModal } from "./UserFormModal";
 import type { UserRow } from "./types";
 
 const GRID =
-  "grid grid-cols-[1.4fr_1fr_1fr_0.8fr_0.6fr_0.5fr_130px] px-[22px] items-center";
+  "grid grid-cols-[1.35fr_0.9fr_0.9fr_0.85fr_0.75fr_0.55fr_0.5fr_120px] gap-2 px-[22px] items-center";
+
+/** Sentinel for the "no store mapped" filter option (a real store can never be named this). */
+const NO_STORE = "__none__";
+
+/** Role filter chips — same order as the default sort (admins → officers). */
+const ROLE_FILTERS: { key: string; label: string }[] = [
+  { key: "sysadmin", label: "System Admin" },
+  { key: "central", label: "Central Admin" },
+  { key: "regional", label: "Regional Manager" },
+  { key: "officer", label: "Agri Officer" },
+];
 
 function TrashIcon() {
   return (
@@ -70,6 +81,29 @@ export function UsersTab({
   const [deleting, setDeleting] = useState<UserRow | null>(null);
   const [delErr, setDelErr] = useState<string | null>(null);
   const [delPending, startDelete] = useTransition();
+  // Filters — rows arrive pre-sorted by role then name; filtering preserves that order.
+  const [q, setQ] = useState("");
+  const [fRole, setFRole] = useState("");
+  const [fStore, setFStore] = useState("");
+  const [fStatus, setFStatus] = useState("");
+
+  const storeOptions = useMemo(
+    () => [...new Set(rows.map((r) => r.storeName).filter((s) => s && s !== "—"))].sort((a, b) => a.localeCompare(b)),
+    [rows],
+  );
+  const shown = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return rows.filter((r) =>
+      (!fRole || r.roleKey === fRole) &&
+      // NO_STORE is the audit case: "which officers aren't mapped to a store?"
+      (!fStore || (fStore === NO_STORE ? r.storeName === "—" : r.storeName === fStore)) &&
+      (!fStatus || r.status === fStatus) &&
+      (!needle ||
+        [r.name, r.employeeCode, r.storeName, r.territory, r.zone, r.mobile, r.roleLabel]
+          .some((v) => v?.toLowerCase().includes(needle))));
+  }, [rows, q, fRole, fStore, fStatus]);
+  const filtered = Boolean(q.trim() || fRole || fStore || fStatus);
+  const clearAll = () => { setQ(""); setFRole(""); setFStore(""); setFStatus(""); };
 
   const confirmDelete = () => {
     if (!deleting) return;
@@ -84,9 +118,9 @@ export function UsersTab({
   return (
     <div>
       {/* Header row */}
-      <div className="mb-5 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between">
         <div className="text-[13px] text-[#757575]">
-          Manage user accounts, roles, and territory assignments
+          Manage user accounts, roles, stores, and territory assignments
         </div>
         {canEdit && (
           <button
@@ -99,15 +133,84 @@ export function UsersTab({
         )}
       </div>
 
+      {/* Search + filters */}
+      <div className="mb-4 flex flex-col gap-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="text"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search name, employee code, store, region…"
+            className="w-full max-w-[380px] rounded-xl border-[1.5px] border-[#E0E0E0] bg-white px-[16px] py-[9px] text-[13px] outline-none focus:border-[#2E7D32] focus:shadow-[0_0_0_3px_rgba(46,125,50,0.1)]"
+          />
+          <button
+            type="button"
+            onClick={() => setFRole("")}
+            className="rounded-full border-[1.5px] px-3.5 py-[6px] text-[11.5px] font-semibold"
+            style={{ background: fRole === "" ? "#424242" : "#fff", color: fRole === "" ? "#fff" : "#616161", borderColor: fRole === "" ? "transparent" : "#E0E0E0" }}
+          >
+            All roles
+          </button>
+          {ROLE_FILTERS.map((r) => {
+            const meta = ROLE_META[r.label] ?? { bg: "#F5F5F5", c: "#616161" };
+            const on = fRole === r.key;
+            return (
+              <button
+                key={r.key}
+                type="button"
+                onClick={() => setFRole(on ? "" : r.key)}
+                className="rounded-full border-[1.5px] px-3.5 py-[6px] text-[11.5px] font-semibold"
+                style={{ background: on ? meta.c : "#fff", color: on ? "#fff" : meta.c, borderColor: on ? "transparent" : "#E0E0E0" }}
+              >
+                {r.label}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={fStore}
+            onChange={(e) => setFStore(e.target.value)}
+            className="rounded-xl border-[1.5px] border-[#E0E0E0] bg-white px-3 py-[7px] text-[12.5px] text-[#424242] outline-none focus:border-[#2E7D32]"
+          >
+            <option value="">All stores</option>
+            <option value={NO_STORE}>— No store mapped</option>
+            {storeOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <select
+            value={fStatus}
+            onChange={(e) => setFStatus(e.target.value)}
+            className="rounded-xl border-[1.5px] border-[#E0E0E0] bg-white px-3 py-[7px] text-[12.5px] text-[#424242] outline-none focus:border-[#2E7D32]"
+          >
+            <option value="">All statuses</option>
+            <option value="Active">Active</option>
+            <option value="Inactive">Inactive</option>
+          </select>
+          <span className="text-[12px] text-[#9E9E9E]">
+            {shown.length.toLocaleString("en-IN")} of {rows.length.toLocaleString("en-IN")} users
+          </span>
+          {filtered && (
+            <button
+              type="button"
+              onClick={clearAll}
+              className="rounded-full border-[1.5px] border-[#E0E0E0] bg-white px-3.5 py-[6px] text-[11.5px] font-semibold text-[#C62828]"
+            >
+              ✕ Clear filters
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Table card */}
       <div className="overflow-hidden rounded-[14px] border border-black/[0.03] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
         <div className="overflow-x-auto">
-        <div className="min-w-[840px] lg:min-w-0">
+        <div className="min-w-[1000px] xl:min-w-0">
         <div
           className={`${GRID} border-b border-[#F0F0F0] bg-[#FAFAFA] py-[14px] text-[10.5px] font-semibold uppercase tracking-[0.5px] text-[#9E9E9E]`}
         >
           <div>User</div>
           <div>Role</div>
+          <div>Store</div>
           <div>Territory</div>
           <div>Last Active</div>
           <div>Visits MTD</div>
@@ -117,8 +220,10 @@ export function UsersTab({
 
         {rows.length === 0 ? (
           <EmptyState title="No users yet" hint="Seed the database to see users." />
+        ) : shown.length === 0 ? (
+          <EmptyState title="No users match these filters" hint="Try a different role, store, or search term." />
         ) : (
-          rows.map((ur) => {
+          shown.map((ur) => {
             const role = ROLE_META[ur.roleLabel] ?? { bg: "#F5F5F5", c: "#757575" };
             const st = USER_STATUS_META[ur.status] ?? { bg: "#F5F5F5", c: "#757575" };
             const { opacity, visitsColor } = rowColors(ur.status);
@@ -152,8 +257,12 @@ export function UsersTab({
                     {ur.roleLabel}
                   </span>
                 </div>
+                {/* Store — the officer's mapped Kisan Sewa Kendra */}
+                <div className="truncate pr-2 text-[12px] font-semibold" style={{ color: ur.storeName === "—" ? "#BDBDBD" : "#1565C0" }} title={ur.storeName}>
+                  {ur.storeName}
+                </div>
                 {/* Territory */}
-                <div className="pr-2 text-[12px] text-[#616161]">{ur.territory}</div>
+                <div className="truncate pr-2 text-[12px] text-[#616161]" title={ur.territory || ur.zone}>{ur.territory || ur.zone}</div>
                 {/* Last Active */}
                 <div className="text-[12px]" style={{ color: lastActiveColor(ur.lastActive) }}>
                   {ur.lastActive}

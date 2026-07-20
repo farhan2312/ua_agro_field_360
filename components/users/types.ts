@@ -16,6 +16,10 @@ export interface UserRow {
   /** linear-gradient(...) string for the avatar. */
   grad: string;
   territory: string;
+  /** Mapped store (short name) — officers; "—" when unmapped or not a store role. */
+  storeName: string;
+  /** Region (User.zone) — mainly regional managers; "" when none. */
+  zone: string;
   lastActive: string;
   visitsMtd: string;
   /** "Active" | "Inactive" */

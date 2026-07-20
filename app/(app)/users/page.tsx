@@ -39,28 +39,40 @@ async function loadPending(): Promise<PendingUser[]> {
   }
 }
 
+/** Directory order: admins first, then RMs, then the (many) officers. */
+const ROLE_SORT: Record<string, number> = { sysadmin: 0, central: 1, regional: 2, officer: 3 };
+
 async function loadUsers(): Promise<UserRow[]> {
   try {
-    const dbUsers = await prisma.user.findMany({
-      where: { approvalStatus: "APPROVED" },
-      orderBy: { id: "asc" },
-    });
-    return dbUsers.map((u) => ({
-      id: u.id,
-      init: u.initials ?? initials(u.name),
-      name: u.name,
-      email: u.employeeCode ?? u.email ?? "",
-      employeeCode: u.employeeCode ?? "",
-      mobile: u.mobile ?? "",
-      workEmail: u.workEmail ?? "",
-      roleLabel: u.roleLabel ?? "",
-      roleKey: PRISMA_TO_KEY[u.role] ?? "officer",
-      grad: `linear-gradient(135deg, ${u.gradA ?? "#2E7D32"}, ${u.gradB ?? "#66BB6A"})`,
-      territory: u.territory ?? "",
-      lastActive: u.lastActive ?? "",
-      visitsMtd: u.visitsMtd ?? "—",
-      status: u.active ? "Active" : "Inactive",
-    }));
+    const [dbUsers, stores] = await Promise.all([
+      prisma.user.findMany({ where: { approvalStatus: "APPROVED" }, orderBy: { id: "asc" } }),
+      prisma.store.findMany({ select: { id: true, name: true } }),
+    ]);
+    const storeById = new Map(stores.map((s) => [s.id, shortStoreName(s.name) || s.name]));
+    return dbUsers
+      .map((u) => ({
+        id: u.id,
+        init: u.initials ?? initials(u.name),
+        name: u.name,
+        email: u.employeeCode ?? u.email ?? "",
+        employeeCode: u.employeeCode ?? "",
+        mobile: u.mobile ?? "",
+        workEmail: u.workEmail ?? "",
+        roleLabel: u.roleLabel ?? "",
+        roleKey: PRISMA_TO_KEY[u.role] ?? "officer",
+        grad: `linear-gradient(135deg, ${u.gradA ?? "#2E7D32"}, ${u.gradB ?? "#66BB6A"})`,
+        territory: u.territory ?? "",
+        // storeId is a loose reference — a deleted store leaves a dangling id, so fall back to "—".
+        storeName: u.storeId != null ? storeById.get(u.storeId) ?? "—" : "—",
+        zone: u.zone ?? "",
+        lastActive: u.lastActive ?? "",
+        visitsMtd: u.visitsMtd ?? "—",
+        status: u.active ? "Active" : "Inactive",
+      }))
+      // Default order: by role (admins → officers), then alphabetically by name.
+      .sort((a, b) =>
+        (ROLE_SORT[a.roleKey] ?? 9) - (ROLE_SORT[b.roleKey] ?? 9) ||
+        a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
   } catch {
     return [];
   }

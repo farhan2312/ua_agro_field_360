@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { LAYER_LABELS, type MapLayerKey } from "@/lib/map-layers";
 import { SEGMENT_ENUM_TO_LABEL, LEAD_ENUM_TO_LABEL } from "@/lib/segments";
 import { inr } from "@/lib/format";
+import { shortStoreName } from "@/lib/store-utils";
 import { CLUSTER_PAGE_SIZE, type ClusterMembersResult } from "@/components/clusters/types";
 import { parseCriteria, scopedCriteriaWhere } from "@/lib/cluster-rules";
 
@@ -186,6 +187,7 @@ export async function getClusterFarmers(
           crop: true,
           land: true,
           segment: true,
+          store: { select: { name: true } },
           visits: { orderBy: { id: "desc" }, take: 1, select: { date: true } },
         },
       }),
@@ -212,6 +214,7 @@ export async function getClusterFarmers(
         segment: f.segment ? SEGMENT_ENUM_TO_LABEL[f.segment] ?? "—" : "—",
         lastVisit: f.visits[0]?.date ?? "—",
         ltv: ltvById.get(f.id) ? inr(ltvById.get(f.id)!) : "—",
+        store: shortStoreName(f.store?.name) || "—",
       }));
 
     return { rows, total, page, pageSize: CLUSTER_PAGE_SIZE };
