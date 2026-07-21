@@ -6,6 +6,7 @@ import { segMeta } from "@/lib/campaign-segments";
 import { markCampaignMember, type CampaignListItem, type CampaignMemberVM } from "@/app/actions/campaigns";
 import {
   APPROACH_TILES, UNREACHABLE_TILE, isApproach, statusOf, rank, digits10, OutreachProgress, toggleMedium, medKey,
+  ScriptPanel, type CommTemplateVM,
 } from "@/components/campaigns/CampaignsScreen";
 
 const CARD = "rounded-[14px] border border-black/[0.04] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]";
@@ -19,7 +20,7 @@ const GRID = "grid grid-cols-[1.4fr_0.9fr_auto_1.5fr_auto] items-center gap-3";
  * Full-page outreach matrix: every farmer on ONE line — outcome tiles, note and save together.
  * Reached/unreachable rows sink to the bottom; un-contacted stay on top.
  */
-export function OutreachMatrix({ campaign, initial }: { campaign: CampaignListItem; initial: CampaignMemberVM[] }) {
+export function OutreachMatrix({ campaign, initial, scripts = [] }: { campaign: CampaignListItem; initial: CampaignMemberVM[]; scripts?: CommTemplateVM[] }) {
   const [members, setMembers] = useState(initial);
   const [page, setPage] = useState(0);
   const patch = (u: CampaignMemberVM) => setMembers((list) => list.map((x) => (x.id === u.id ? u : x)));
@@ -40,37 +41,48 @@ export function OutreachMatrix({ campaign, initial }: { campaign: CampaignListIt
         </div>
       </div>
 
-      <div className={`${CARD} p-4`}>
-        <OutreachProgress members={members} />
-      </div>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
+        {/* Left: the campaign's tagged call scripts (sticky so they stay visible while the matrix scrolls) */}
+        {scripts.length > 0 && (
+          <div className={`${CARD} shrink-0 p-3.5 lg:sticky lg:top-4 lg:w-[330px] lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto`}>
+            <ScriptPanel scripts={scripts} />
+          </div>
+        )}
 
-      {/* The matrix */}
-      <div className={`${CARD} mt-3 overflow-hidden`}>
-        <div className="overflow-x-auto">
-          <div className="min-w-[1080px]">
-            <div className={`${GRID} border-b border-[#F0F0F0] bg-[#FAFAFA] px-4 py-2.5 text-[10.5px] font-semibold uppercase tracking-[0.4px] text-[#9E9E9E]`}>
-              <div>Farmer</div>
-              <div>Phone</div>
-              <div>Outcome</div>
-              <div>Note</div>
-              <div className="text-right">Save</div>
+        {/* Right: progress + matrix */}
+        <div className="min-w-0 flex-1">
+          <div className={`${CARD} p-4`}>
+            <OutreachProgress members={members} />
+          </div>
+
+          <div className={`${CARD} mt-3 overflow-hidden`}>
+            <div className="overflow-x-auto">
+              <div className="min-w-[1080px]">
+                <div className={`${GRID} border-b border-[#F0F0F0] bg-[#FAFAFA] px-4 py-2.5 text-[10.5px] font-semibold uppercase tracking-[0.4px] text-[#9E9E9E]`}>
+                  <div>Farmer</div>
+                  <div>Phone</div>
+                  <div>Outcome</div>
+                  <div>Note</div>
+                  <div className="text-right">Save</div>
+                </div>
+                {slice.length === 0 ? (
+                  <div className="px-4 py-10 text-center text-[13px] text-[#9E9E9E]">No farmers to contact here.</div>
+                ) : (
+                  slice.map((m) => <MatrixRow key={m.id} member={m} onChange={patch} />)
+                )}
+              </div>
             </div>
-            {slice.length === 0 ? (
-              <div className="px-4 py-10 text-center text-[13px] text-[#9E9E9E]">No farmers to contact here.</div>
-            ) : (
-              slice.map((m) => <MatrixRow key={m.id} member={m} onChange={patch} />)
+            {pages > 1 && (
+              <div className="flex items-center justify-center gap-3 border-t border-[#F5F5F5] px-4 py-3">
+                <button type="button" onClick={() => setPage(Math.max(0, p - 1))} disabled={p === 0}
+                  className="rounded-[8px] border border-[#E0E0E0] px-3 py-1.5 text-[12px] font-semibold text-[#616161] disabled:opacity-40">← Prev</button>
+                <span className="text-[12px] text-[#757575]">{p * PAGE + 1}–{Math.min((p + 1) * PAGE, sorted.length)} of {n(sorted.length)}</span>
+                <button type="button" onClick={() => setPage(Math.min(pages - 1, p + 1))} disabled={p >= pages - 1}
+                  className="rounded-[8px] border border-[#E0E0E0] px-3 py-1.5 text-[12px] font-semibold text-[#616161] disabled:opacity-40">Next →</button>
+              </div>
             )}
           </div>
         </div>
-        {pages > 1 && (
-          <div className="flex items-center justify-center gap-3 border-t border-[#F5F5F5] px-4 py-3">
-            <button type="button" onClick={() => setPage(Math.max(0, p - 1))} disabled={p === 0}
-              className="rounded-[8px] border border-[#E0E0E0] px-3 py-1.5 text-[12px] font-semibold text-[#616161] disabled:opacity-40">← Prev</button>
-            <span className="text-[12px] text-[#757575]">{p * PAGE + 1}–{Math.min((p + 1) * PAGE, sorted.length)} of {n(sorted.length)}</span>
-            <button type="button" onClick={() => setPage(Math.min(pages - 1, p + 1))} disabled={p >= pages - 1}
-              className="rounded-[8px] border border-[#E0E0E0] px-3 py-1.5 text-[12px] font-semibold text-[#616161] disabled:opacity-40">Next →</button>
-          </div>
-        )}
       </div>
     </div>
   );

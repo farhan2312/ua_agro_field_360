@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Modal, ModalHeader } from "@/components/interactive";
@@ -189,7 +189,7 @@ function CommPlanTab({ templates }: { templates: CommTemplateVM[] }) {
 }
 
 /* ══════════════════ Campaigns + tracking (WF4) ══════════════════ */
-function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPlanNames }: { campaigns: CampaignListItem[]; projects: ProjectVM[]; canManage: boolean; initialProjectId?: number; commPlanNames: string[] }) {
+function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPlanNames, templates }: { campaigns: CampaignListItem[]; projects: ProjectVM[]; canManage: boolean; initialProjectId?: number; commPlanNames: string[]; templates: CommTemplateVM[] }) {
   // Chain: arriving via /campaigns?forProject=<id> opens the create form with that project preselected.
   const initialProject = initialProjectId != null ? projects.find((p) => p.id === initialProjectId) ?? null : null;
   const defaultProject = initialProject ?? projects[0] ?? null;
@@ -211,7 +211,11 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
   const [members, setMembers] = useState<CampaignMemberVM[] | null>(null);
   const [memberPage, setMemberPage] = useState(0);
   const [focusMode, setFocusMode] = useState(false);
+  const [focusCurrent, setFocusCurrent] = useState<CampaignMemberVM | null>(null); // Focus view's current farmer → drives the script panel
   const [extendOf, setExtendOf] = useState<CampaignListItem | null>(null);
+
+  // The comm-plan scripts tagged to the open campaign (by name) — shown as the outreach left panel.
+  const scripts = membersOf ? templates.filter((t) => membersOf.commPlans.includes(t.name)) : [];
 
   const project = projects.find((p) => p.id === projectId) ?? null;
   const audience = clusterId ? project?.clusters.find((c) => c.id === clusterId)?.count ?? 0 : project?.audienceCount ?? 0;
@@ -342,16 +346,21 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
       </div>
 
       {/* Scoped contact list — outreach (TEST group): list view + one-at-a-time Focus mode */}
-      <Modal open={membersOf != null} onClose={() => setMembersOf(null)} className="max-w-[1040px]">
+      <Modal open={membersOf != null} onClose={() => { setMembersOf(null); setFocusMode(false); setFocusCurrent(null); }} className="max-w-[1180px]">
         {membersOf && (
           <>
             <ModalHeader eyebrow="Campaign · outreach" eyebrowColor="#1565C0" title={membersOf.name}
-              subtitle={canManage ? "Contact list (test group)" : "Your farmers — call, then log how you reached them"} onClose={() => setMembersOf(null)} />
-            <div className="max-h-[74vh] overflow-y-auto px-5 py-4">
+              subtitle={canManage ? "Contact list (test group)" : "Your farmers — call, then log how you reached them"} onClose={() => { setMembersOf(null); setFocusMode(false); setFocusCurrent(null); }} />
+            <div className="px-5 py-4">
               {members == null ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">Loading…</div>
                 : members.length === 0 ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">No farmers to contact here.</div>
                 : (
-                  <>
+                  <div className="flex flex-col gap-4 lg:max-h-[74vh] lg:flex-row">
+                    {scripts.length > 0 && (
+                      <ScriptPanel scripts={scripts} member={focusMode ? focusCurrent : null}
+                        className="lg:w-[330px] lg:shrink-0 lg:overflow-y-auto lg:border-r lg:border-[#F0F0F0] lg:pr-4" />
+                    )}
+                    <div className="min-w-0 flex-1 lg:overflow-y-auto">
                     <OutreachProgress members={members} />
                     <div className="mb-3 mt-3 flex flex-wrap items-center justify-between gap-2">
                       <div className="text-[12px] text-[#757575]">{focusMode ? "Focus mode — one farmer at a time" : "Work the list, switch to Focus mode, or open the full-page matrix."}</div>
@@ -365,7 +374,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
                       </div>
                     </div>
                     {focusMode
-                      ? <FocusMode members={members} onChange={patchMember} onExit={() => setFocusMode(false)} />
+                      ? <FocusMode members={members} onChange={patchMember} onExit={() => setFocusMode(false)} onCurrent={setFocusCurrent} />
                       : (() => {
                           // List view: un-contacted first, reached/unreachable sink to the bottom.
                           const sorted = [...members].sort((a, b) => rank(a) - rank(b));
@@ -390,7 +399,8 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
                             </>
                           );
                         })()}
-                  </>
+                    </div>
+                  </div>
                 )}
             </div>
           </>
@@ -551,6 +561,103 @@ export function OutreachProgress({ members }: { members: CampaignMemberVM[] }) {
   );
 }
 
+/* ── Call scripts (comm plans tagged to the campaign) — the left-side panel across all outreach views ── */
+
+/** The slots the officer's live context can fill; others stay as amber placeholders to read/fill on the call. */
+const SCRIPT_SLOT = /(\[Naam\]|\[Store name\]|\[Store\]|\[number\]|\[gap\]|\[last item\]|\[date\])/gi;
+
+/** Renders a script with its placeholders highlighted. When a member is given, [Naam]/[Store]/[number]
+ *  are filled (green); everything else the officer supplies verbally stays amber. */
+export function ScriptText({ template, member }: { template: string; member?: CampaignMemberVM | null }) {
+  const fill: Record<string, string | null | undefined> = {
+    "[naam]": member?.name ? member.name.trim().split(/\s+/)[0] : null,
+    "[store name]": member?.store,
+    "[store]": member?.store,
+    "[number]": member?.mobile,
+  };
+  return (
+    <span className="whitespace-pre-wrap">
+      {template.split(SCRIPT_SLOT).map((part, i) => {
+        if (!/^\[.+\]$/.test(part)) return <span key={i}>{part}</span>;
+        const val = fill[part.toLowerCase()];
+        return val
+          ? <span key={i} className="rounded bg-[#E8F5E9] px-1 font-semibold text-[#1B5E20]">{val}</span>
+          : <span key={i} className="rounded bg-[#FFF3E0] px-1 font-semibold text-[#E65100]">{part}</span>;
+      })}
+    </span>
+  );
+}
+
+/** Plain-text version (for copy) — fills known slots, leaves the rest as their label. */
+function filledPlain(template: string, member?: CampaignMemberVM | null): string {
+  const first = member?.name ? member.name.trim().split(/\s+/)[0] : null;
+  return template
+    .replace(/\[Naam\]/gi, first ?? "[Naam]")
+    .replace(/\[Store name\]/gi, member?.store ?? "[Store name]")
+    .replace(/\[Store\]/gi, member?.store ?? "[Store]")
+    .replace(/\[number\]/gi, member?.mobile ?? "[number]");
+}
+
+function CopyScript({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button type="button"
+      onClick={() => navigator.clipboard?.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 1500); }).catch(() => {})}
+      className="mt-1.5 text-[10.5px] font-semibold text-[#6A1B9A] hover:underline">
+      {done ? "✓ Copied" : "⧉ Copy"}
+    </button>
+  );
+}
+
+/**
+ * Left-side call-script panel: the one-or-many comm plans tagged to this campaign.
+ * Pass `member` (Focus view / a specific farmer) to float their segment's script to the top,
+ * fill the live slots, and flag the matching script "★ this farmer".
+ */
+export function ScriptPanel({ scripts, member, className = "" }: { scripts: CommTemplateVM[]; member?: CampaignMemberVM | null; className?: string }) {
+  if (scripts.length === 0) return null;
+  // Farmer's-segment script(s) first when a farmer is in focus; otherwise keep priority order.
+  const ordered = member
+    ? [...scripts].sort((a, b) => Number(b.segment === member.segment) - Number(a.segment === member.segment))
+    : scripts;
+  return (
+    <div className={className}>
+      <div className="mb-2 flex items-center justify-between">
+        <div className="text-[11px] font-bold uppercase tracking-[0.5px] text-[#6A1B9A]">📋 Call script{scripts.length > 1 ? "s" : ""}</div>
+        <span className="rounded-full bg-[#F3E5F5] px-2 py-0.5 text-[10px] font-semibold text-[#6A1B9A]">{scripts.length}</span>
+      </div>
+      {member && <div className="mb-2 text-[11px] text-[#757575]">Reading to <b className="text-[#1A1C1A]">{member.name.split(/\s+/)[0]}</b> · {segMeta(member.segment).label}</div>}
+      <div className="flex flex-col gap-2.5">
+        {ordered.map((s) => {
+          const m = segMeta(s.segment);
+          const mine = member != null && s.segment === member.segment;
+          return (
+            <div key={s.id} className="rounded-[12px] border bg-white p-3"
+              style={{ borderColor: mine ? m.color : "#ECECEC", borderLeftWidth: 4, borderLeftColor: m.color }}>
+              <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                <span className="text-[12.5px] font-bold text-[#1A1C1A]">{s.name || "(script)"}</span>
+                {mine && <span className="rounded-full bg-[#E8F5E9] px-1.5 py-0.5 text-[9px] font-bold text-[#2E7D32]">★ THIS FARMER</span>}
+              </div>
+              <div className="mb-1.5 flex flex-wrap items-center gap-1">
+                <span className="rounded-full px-1.5 py-0.5 text-[9px] font-semibold" style={{ background: m.bg, color: m.color }}>{m.label}</span>
+                <span className="rounded-full bg-[#E3F2FD] px-1.5 py-0.5 text-[9px] font-semibold text-[#1565C0]">{LANG_LABEL[s.language] ?? s.language}</span>
+                <span className="rounded-full bg-[#F3E5F5] px-1.5 py-0.5 text-[9px] font-semibold text-[#6A1B9A]">{s.promoType}</span>
+                {s.medium && <span className="text-[10px] text-[#9E9E9E]">{s.medium}</span>}
+              </div>
+              {s.offer && <div className="mb-1 text-[11px] text-[#616161]"><span className="font-semibold text-[#9E9E9E]">Offer:</span> {s.offer}</div>}
+              <div className="rounded-[8px] bg-[#FAFAFA] p-2.5 text-[12.5px] leading-[1.65] text-[#33322E]">
+                <ScriptText template={s.template} member={member} />
+              </div>
+              <CopyScript text={filledPlain(s.template, member)} />
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-2 text-[10px] leading-[1.5] text-[#BDBDBD]">Green = filled from this farmer · amber = fill on the call.</div>
+    </div>
+  );
+}
+
 function MemberRow({ member, onChange }: { member: CampaignMemberVM; onChange: (m: CampaignMemberVM) => void }) {
   const [mediums, setMediums] = useState<string[]>(member.mediums);
   const [comment, setComment] = useState(member.comment ?? "");
@@ -596,11 +703,14 @@ function MemberRow({ member, onChange }: { member: CampaignMemberVM; onChange: (
 }
 
 /* ── Focus mode: one farmer at a time (queue: head = current; skip requeues; back re-opens last) ── */
-function FocusMode({ members, onChange, onExit }: { members: CampaignMemberVM[]; onChange: (m: CampaignMemberVM) => void; onExit: () => void }) {
+function FocusMode({ members, onChange, onExit, onCurrent }: { members: CampaignMemberVM[]; onChange: (m: CampaignMemberVM) => void; onExit: () => void; onCurrent?: (m: CampaignMemberVM | null) => void }) {
   const [queue, setQueue] = useState<number[]>(() => members.filter((m) => statusOf(m) === "pending").map((m) => m.id));
   const [history, setHistory] = useState<number[]>([]);
   const currentId = queue[0];
   const member = members.find((m) => m.id === currentId) ?? null;
+
+  // Surface the current farmer to the parent so the left script panel can fill/highlight for them.
+  useEffect(() => { onCurrent?.(member); return () => onCurrent?.(null); }, [member, onCurrent]);
 
   const handled = () => { setHistory((h) => [...h, currentId]); setQueue((q) => q.slice(1)); };
   const skip = () => setQueue((q) => (q.length > 1 ? [...q.slice(1), q[0]] : q));
@@ -757,7 +867,7 @@ export function CampaignsScreen({ templates, campaigns, stores: _stores, project
         </div>
       )}
       {tab === "comms" && canManage && <CommPlanTab templates={templates} />}
-      {tab === "campaigns" && <CampaignsTab campaigns={campaigns} projects={projects} canManage={canManage} initialProjectId={initialProjectId} commPlanNames={[...new Set(templates.map((t) => t.name).filter(Boolean))]} />}
+      {tab === "campaigns" && <CampaignsTab campaigns={campaigns} projects={projects} canManage={canManage} initialProjectId={initialProjectId} commPlanNames={[...new Set(templates.map((t) => t.name).filter(Boolean))]} templates={templates} />}
     </div>
   );
 }
