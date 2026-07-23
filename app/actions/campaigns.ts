@@ -12,6 +12,7 @@ import {
 } from "@/lib/cluster-rules";
 import { getScope, canManage, getActor, farmerScopeWhere } from "@/lib/scope";
 import { cropLabel } from "@/lib/crops";
+import { buildWorkbookB64 } from "@/lib/xlsx-export";
 
 const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
 async function requireManager(): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -455,6 +456,140 @@ export async function getCampaignMembers(campaignId: number, limit = 1000): Prom
       reachedBy: m.reachedBy, reachedByCode: m.reachedByCode,
     };
   });
+}
+
+/* ── Campaign audience analytics: composition breakdowns + Segment × Store matrix ── */
+export interface CampaignAnalytics {
+  total: number;
+  bySegment: { key: string; label: string; color: string; bg: string; count: number }[];
+  byStore: { label: string; count: number }[];
+  byVillage: { label: string; count: number }[];
+  byCrop: { label: string; count: number }[];
+  /** Segment columns for the matrix (present segments in canonical order). */
+  segCols: { key: string; label: string; color: string; bg: string }[];
+  /** Rows of the Segment × Store matrix: per-store counts keyed by segment key + row total. */
+  matrix: { store: string; counts: Record<string, number>; total: number }[];
+}
+
+const EMPTY_ANALYTICS: CampaignAnalytics = { total: 0, bySegment: [], byStore: [], byVillage: [], byCrop: [], segCols: [], matrix: [] };
+
+/**
+ * Composition of a campaign's enrolled farmers — for the "Analytics" button on each campaign row.
+ * Scoped like the other member views (officer→store, RM→zone, central→all). Counts every enrolled
+ * member (TEST + CONTROL). Returns single-dimension breakdowns + a Segment × Store cross-tab.
+ */
+export async function getCampaignAnalytics(campaignId: number): Promise<CampaignAnalytics> {
+  const scope = await memberScopeWhere();
+  if (scope === "none") return EMPTY_ANALYTICS;
+  const members = await prisma.campaignMember.findMany({
+    where: { campaignId, ...(scope ?? {}) },
+    select: { farmerId: true, segment: true, storeId: true },
+    take: 40000, // realistic campaigns are far below this; guards a pathological audience
+  });
+  if (!members.length) return EMPTY_ANALYTICS;
+
+  const farmerIds = [...new Set(members.map((m) => m.farmerId))];
+  const [farmers, stores] = await Promise.all([
+    prisma.farmer.findMany({ where: { id: { in: farmerIds } }, select: { id: true, village: true, cropTags: true } }),
+    prisma.store.findMany({ select: { id: true, name: true } }),
+  ]);
+  const fMap = new Map(farmers.map((f) => [f.id, f]));
+  const sMap = new Map(stores.map((s) => [s.id, shortStoreName(s.name)]));
+
+  const seg: Record<string, number> = {};
+  const store: Record<string, number> = {};
+  const village: Record<string, number> = {};
+  const crop: Record<string, number> = {};
+  // Segment × Store cross-tab: storeName → { segKey → count }.
+  const cross = new Map<string, Record<string, number>>();
+  for (const m of members) {
+    const f = fMap.get(m.farmerId);
+    const storeName = m.storeId != null ? sMap.get(m.storeId) ?? "—" : "—";
+    const villageName = f?.village || "—";
+    const crops = f?.cropTags ?? [];
+    seg[m.segment] = (seg[m.segment] ?? 0) + 1;
+    store[storeName] = (store[storeName] ?? 0) + 1;
+    if (villageName !== "—") village[villageName] = (village[villageName] ?? 0) + 1;
+    for (const c of crops) crop[c] = (crop[c] ?? 0) + 1;
+    const row = cross.get(storeName) ?? cross.set(storeName, {}).get(storeName)!;
+    row[m.segment] = (row[m.segment] ?? 0) + 1;
+  }
+  const top = (o: Record<string, number>, k = 12) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, k).map(([label, count]) => ({ label, count }));
+  const segCols = SEGMENT_COLUMNS.filter((k) => seg[k]).map((k) => { const m = segMeta(k); return { key: k, label: m.label, color: m.color, bg: m.bg }; });
+  const matrix = [...cross.entries()]
+    .map(([storeName, counts]) => ({ store: storeName, counts, total: Object.values(counts).reduce((a, b) => a + b, 0) }))
+    .sort((a, b) => b.total - a.total);
+  return {
+    total: members.length,
+    bySegment: segCols.map((c) => ({ ...c, count: seg[c.key] })),
+    byStore: top(store),
+    byVillage: top(village),
+    byCrop: top(crop).map((x) => ({ label: cropLabel(x.label), count: x.count })),
+    segCols,
+    matrix,
+  };
+}
+
+/**
+ * Export a campaign's audience to Excel — same two-sheet format as the analytics-page export, scoped
+ * to this campaign's enrolled farmers: sheet 1 = the Segment × Store matrix, sheet 2 = the farmer list.
+ */
+export async function exportCampaignAudienceXlsx(campaignId: number, campaignName: string): Promise<{ ok: boolean; filename?: string; b64?: string; error?: string }> {
+  const scope = await memberScopeWhere();
+  if (scope === "none") return { ok: false, error: "No store or region is assigned to your account." };
+  const members = await prisma.campaignMember.findMany({
+    where: { campaignId, ...(scope ?? {}) },
+    select: { farmerId: true, segment: true, storeId: true, group: true },
+    take: 100000,
+  });
+  if (!members.length) return { ok: false, error: "No enrolled farmers in your scope for this campaign." };
+
+  const farmerIds = [...new Set(members.map((m) => m.farmerId))];
+  const [farmers, stores] = await Promise.all([
+    prisma.farmer.findMany({ where: { id: { in: farmerIds } }, select: { id: true, name: true, mobile: true, village: true, cropTags: true } }),
+    prisma.store.findMany({ select: { id: true, name: true } }),
+  ]);
+  const fMap = new Map(farmers.map((f) => [f.id, f]));
+  const sMap = new Map(stores.map((s) => [s.id, shortStoreName(s.name)]));
+
+  // Segment × Store cross-tab (mirrors getCampaignAnalytics: every enrolled member, TEST + CONTROL).
+  const cross = new Map<string, Record<string, number>>();
+  const totals: Record<string, number> = {};
+  for (const m of members) {
+    const storeName = m.storeId != null ? sMap.get(m.storeId) ?? "—" : "—";
+    const row = cross.get(storeName) ?? cross.set(storeName, {}).get(storeName)!;
+    row[m.segment] = (row[m.segment] ?? 0) + 1;
+    totals[m.segment] = (totals[m.segment] ?? 0) + 1;
+  }
+  const segKeys = SEGMENT_COLUMNS.filter((k) => totals[k]);
+  const segLabels = segKeys.map((k) => segMeta(k).label);
+  const mrows = [...cross.entries()]
+    .map(([store, counts]) => ({ store, counts, total: Object.values(counts).reduce((a, b) => a + b, 0) }))
+    .sort((a, b) => b.total - a.total);
+
+  const matrixSheet: (string | number)[][] = [
+    ["Store", ...segLabels, "Total"],
+    ["All stores", ...segKeys.map((k) => totals[k] ?? 0), members.length],
+    ...mrows.map((r) => [r.store, ...segKeys.map((k) => r.counts[k] ?? 0), r.total]),
+  ];
+  const farmerSheet: (string | number)[][] = [
+    ["Farmer", "Mobile", "Store", "Village", "Segment", "Group", "Crops"],
+    ...members.map((m) => {
+      const f = fMap.get(m.farmerId);
+      return [
+        f?.name ?? `Farmer #${m.farmerId}`, f?.mobile ?? "",
+        m.storeId != null ? sMap.get(m.storeId) ?? "" : "", f?.village ?? "",
+        segMeta(m.segment).label, m.group, (f?.cropTags ?? []).map(cropLabel).join(", "),
+      ];
+    }),
+  ];
+
+  const safe = (campaignName || "campaign").replace(/[\\/?*[\]:]/g, " ").trim().slice(0, 60) || "campaign";
+  const b64 = buildWorkbookB64([
+    { name: "Segment x Store", rows: matrixSheet },
+    { name: "Farmers", rows: farmerSheet },
+  ]);
+  return { ok: true, filename: `${safe} - audience.xlsx`, b64 };
 }
 
 const CONTACT_MEDIA = new Set(["CALL", "WHATSAPP", "SMS", "IN_PERSON"]); // an approach ⇒ reached

@@ -4,6 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { SEGMENT_COLUMNS, segMeta } from "@/lib/campaign-segments";
 import { inr } from "@/lib/format";
+import { cropLabel } from "@/lib/crops";
+import { tagLabel } from "@/lib/crop-pest";
+import { buildWorkbookB64 } from "@/lib/xlsx-export";
 import { createClusterFromCriteria } from "@/app/actions/cluster-builder";
 import type { ClusterCriteria } from "@/lib/cluster-rules";
 import { getScope } from "@/lib/scope";
@@ -16,6 +19,7 @@ export interface WbFilters {
   storeId?: number | null;
   zone?: string;
   crop?: string; // matched against sales or visit crops depending on lens
+  pest?: string; // Target Pest/Disease/Weed (item-code derived) — farmer attribute, both lenses
   segment?: string; // campaignSegment
   spendTier?: number | null; // index into SPEND_TIERS (sales lens)
   problem?: string; // visit lens
@@ -36,6 +40,8 @@ function farmerConds(f: WbFilters, alias = ""): Prisma.Sql[] {
     // Array-contains (@>) so the GIN index on the crop column is actually used.
     c.push(Prisma.sql`${col(alias, cc)} @> ARRAY[${f.crop}]::text[]`);
   }
+  // Pests are a farmer attribute (item-code derived) — applies to both lenses. @> uses the GIN index.
+  if (f.pest) c.push(Prisma.sql`${col(alias, "pestTags")} @> ARRAY[${f.pest}]::text[]`);
   if (f.lens === "sales" && f.spendTier != null && SPEND_TIERS[f.spendTier]) {
     const t = SPEND_TIERS[f.spendTier];
     // No COALESCE: null-spend farmers are excluded from every tier, matching the saved
@@ -71,6 +77,7 @@ export interface WbFacets {
   zones: string[];
   salesCrops: { crop: string; count: number }[];
   visitCrops: { crop: string; count: number }[];
+  pests: { pest: string; count: number }[]; // item-code derived, both lenses
   problems: { problem: string; count: number }[];
   spendTiers: string[];
 }
@@ -93,13 +100,14 @@ export async function getWorkbenchFacets(): Promise<WbFacets> {
     : isRM ? (zone != null ? Prisma.sql`f."zone" = ${zone}` : Prisma.sql`false`)
     : Prisma.sql`true`;
 
-  const [stores, zoneRows, sc, vc, pr] = await Promise.all([
+  const [stores, zoneRows, sc, vc, pt, pr] = await Promise.all([
     prisma.store.findMany({ where: storeWhere, orderBy: { name: "asc" }, select: { id: true, name: true } }),
     isOfficer || isRM
       ? Promise.resolve([] as { zone: string | null }[])
       : prisma.farmer.findMany({ where: { zone: { not: null }, source: "REAL" }, distinct: ["zone"], select: { zone: true }, orderBy: { zone: "asc" } }),
     prisma.$queryRaw<{ crop: string; n: number }[]>(Prisma.sql`SELECT unnest("salesCropTags") crop, COUNT(*)::int n FROM "Farmer" WHERE source='REAL' AND ${fScope} GROUP BY 1 ORDER BY 2 DESC`),
     prisma.$queryRaw<{ crop: string; n: number }[]>(Prisma.sql`SELECT unnest("visitCropTags") crop, COUNT(*)::int n FROM "Farmer" WHERE source='REAL' AND ${fScope} GROUP BY 1 ORDER BY 2 DESC`),
+    prisma.$queryRaw<{ pest: string; n: number }[]>(Prisma.sql`SELECT unnest("pestTags") pest, COUNT(*)::int n FROM "Farmer" WHERE source='REAL' AND ${fScope} GROUP BY 1 ORDER BY 2 DESC LIMIT 200`),
     prisma.$queryRaw<{ problem: string; n: number }[]>(Prisma.sql`SELECT unnest(v."currentProblem") problem, COUNT(*)::int n FROM "Visit" v JOIN "Farmer" f ON f.id = v."farmerId" WHERE array_length(v."currentProblem",1) > 0 AND ${vScope} GROUP BY 1 ORDER BY 2 DESC LIMIT 40`),
   ]);
   const zones = isRM ? (zone != null ? [zone] : []) : isOfficer ? [] : zoneRows.map((z) => z.zone!).filter(Boolean);
@@ -108,6 +116,7 @@ export async function getWorkbenchFacets(): Promise<WbFacets> {
     zones,
     salesCrops: sc.map((r) => ({ crop: r.crop, count: num(r.n) })),
     visitCrops: vc.map((r) => ({ crop: r.crop, count: num(r.n) })),
+    pests: pt.map((r) => ({ pest: r.pest, count: num(r.n) })),
     problems: pr.map((r) => ({ problem: r.problem, count: num(r.n) })),
     spendTiers: SPEND_TIERS.map((t) => t.label),
   };
@@ -407,6 +416,68 @@ export async function getWorkbenchCustomers(f: WbFilters, storeId: number | null
   }));
 }
 
+/* ── Export the workbench Segment × Store table + the full filtered farmer list to Excel ── */
+const FARMER_EXPORT_CAP = 200000; // covers the whole REAL farmer base; the note row fires only past it
+
+export async function exportWorkbookXlsx(f: WbFilters): Promise<{ ok: boolean; filename?: string; b64?: string; error?: string }> {
+  const scoped = await scopeFilters(f);
+  if (scoped === "none") return { ok: false, error: "No store or region is assigned to your account." };
+  const whereF = whereOf(scoped, "f");
+
+  const [matrixRows, stores, farmerRows] = await Promise.all([
+    prisma.$queryRaw<{ storeId: number | null; seg: string; n: number }[]>(Prisma.sql`
+      SELECT f."storeId" AS "storeId", f."campaignSegment" seg, COUNT(*)::int n FROM "Farmer" f ${whereF}
+      AND f."campaignSegment" IS NOT NULL AND f."campaignSegment" <> 'OTHER' GROUP BY 1, 2`),
+    prisma.store.findMany({ select: { id: true, name: true } }),
+    prisma.$queryRaw<{ name: string; mobile: string | null; village: string | null; zone: string | null; storeId: number | null; seg: string | null; spend: number | null; salesc: string[]; visitc: string[]; pests: string[] }[]>(Prisma.sql`
+      SELECT f.name, f.mobile, f.village, f."zone" AS zone, f."storeId" AS "storeId", f."campaignSegment" seg,
+        f."p12mSpend" spend, f."salesCropTags" salesc, f."visitCropTags" visitc, f."pestTags" pests
+      FROM "Farmer" f ${whereF} ORDER BY f."p12mSpend" DESC NULLS LAST LIMIT ${FARMER_EXPORT_CAP}`),
+  ]);
+
+  const nameById = new Map(stores.map((s) => [s.id, shortStore(s.name)]));
+
+  // Matrix — identical shape to the on-screen table (top 100 stores by total, All-stores summary row).
+  const byStore = new Map<number | null, Record<string, number>>();
+  const totals: Record<string, number> = {};
+  for (const g of matrixRows) {
+    const m = byStore.get(g.storeId) ?? {};
+    m[g.seg] = num(g.n); byStore.set(g.storeId, m);
+    totals[g.seg] = (totals[g.seg] ?? 0) + num(g.n);
+  }
+  const mrows = [...byStore.entries()].map(([storeId, counts]) => ({
+    storeName: storeId == null ? "Unassigned" : nameById.get(storeId) ?? `Store #${storeId}`,
+    counts, total: SEGMENT_COLUMNS.reduce((s, k) => s + (counts[k] ?? 0), 0),
+  })).sort((a, b) => b.total - a.total).slice(0, 100);
+  const grand = SEGMENT_COLUMNS.reduce((s, k) => s + (totals[k] ?? 0), 0);
+
+  const segLabels = SEGMENT_COLUMNS.map((s) => segMeta(s).label);
+  const matrixSheet: (string | number)[][] = [
+    ["Store", ...segLabels, "Total"],
+    ["All stores", ...SEGMENT_COLUMNS.map((s) => totals[s] ?? 0), grand],
+    ...mrows.map((r) => [r.storeName, ...SEGMENT_COLUMNS.map((s) => r.counts[s] ?? 0), r.total]),
+  ];
+
+  const farmerSheet: (string | number)[][] = [
+    ["Farmer", "Mobile", "Store", "Region", "Village", "Segment", "P12M Spend (₹)", "Sales crops", "Visit crops", "Target pests / diseases"],
+    ...farmerRows.map((r) => [
+      r.name, r.mobile ?? "", r.storeId != null ? nameById.get(r.storeId) ?? "" : "", r.zone ?? "", r.village ?? "",
+      r.seg ? segMeta(r.seg).label : "—", r.spend ?? 0,
+      (r.salesc ?? []).map(cropLabel).join(", "), (r.visitc ?? []).map(cropLabel).join(", "), (r.pests ?? []).map(tagLabel).join(", "),
+    ]),
+  ];
+  if (farmerRows.length >= FARMER_EXPORT_CAP) {
+    farmerSheet.push([`Note: list capped at ${FARMER_EXPORT_CAP.toLocaleString("en-IN")} farmers (by P12M spend). Narrow the filters for a complete set.`]);
+  }
+
+  const b64 = buildWorkbookB64([
+    { name: "Segment x Store", rows: matrixSheet },
+    { name: "Farmers", rows: farmerSheet },
+  ]);
+  const today = new Date().toISOString().slice(0, 10);
+  return { ok: true, filename: `analytics-segments-${today}.xlsx`, b64 };
+}
+
 /* ── Crop purchase trend: monthly ₹ for one crop (per-line crop from the master file) ── */
 export interface CropTrendPoint {
   ym: string; // "2025-06"
@@ -466,6 +537,7 @@ export async function saveWorkbenchSegment(f: WbFilters, name: string): Promise<
     campaignSegments: f.segment ? [f.segment] : undefined,
     salesCrops: f.lens === "sales" && f.crop ? [f.crop] : undefined,
     visitCrops: f.lens === "visit" && f.crop ? [f.crop] : undefined,
+    pestTags: f.pest ? [f.pest] : undefined,
     visitProblem: f.lens === "visit" ? f.problem || undefined : undefined,
     spendMin: tier?.min, spendMax: tier?.max,
   };

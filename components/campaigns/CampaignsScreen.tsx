@@ -7,9 +7,10 @@ import { Modal, ModalHeader } from "@/components/interactive";
 import { segMeta, fillTemplate, SEGMENT_COLUMNS } from "@/lib/campaign-segments";
 import { inr } from "@/lib/format";
 import {
-  saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, getCampaignTracker, extendCampaign, getCampaignMembers, markCampaignMember,
-  type CampaignListItem, type CampaignTracker, type ProjectVM, type CampaignMemberVM,
+  saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, getCampaignTracker, extendCampaign, getCampaignMembers, markCampaignMember, getCampaignAnalytics, exportCampaignAudienceXlsx,
+  type CampaignListItem, type CampaignTracker, type ProjectVM, type CampaignMemberVM, type CampaignAnalytics,
 } from "@/app/actions/campaigns";
+import { downloadB64 } from "@/lib/download";
 
 /** Distinct-crop option (kept here as it's imported by the Farmer Clusters + Projects screens). */
 export interface CropOption { crop: string; count: number }
@@ -209,6 +210,8 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
   const [msg, setMsg] = useState<string | null>(null);
   const [trackerOf, setTrackerOf] = useState<CampaignListItem | null>(null);
   const [tracker, setTracker] = useState<CampaignTracker | null>(null);
+  const [analyticsOf, setAnalyticsOf] = useState<CampaignListItem | null>(null);
+  const [analytics, setAnalytics] = useState<CampaignAnalytics | null>(null);
   const [membersOf, setMembersOf] = useState<CampaignListItem | null>(null);
   const [members, setMembers] = useState<CampaignMemberVM[] | null>(null);
   const [memberPage, setMemberPage] = useState(0);
@@ -250,6 +253,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
     });
   };
   const openTracker = (c: CampaignListItem) => { setTrackerOf(c); setTracker(null); getCampaignTracker(c.id).then(setTracker); };
+  const openAnalytics = (c: CampaignListItem) => { setAnalyticsOf(c); setAnalytics(null); getCampaignAnalytics(c.id).then(setAnalytics); };
   const openMembers = (c: CampaignListItem) => { setMembersOf(c); setMembers(null); setMemberPage(0); setFocusMode(false); getCampaignMembers(c.id).then(setMembers); };
   const patchMember = (u: CampaignMemberVM) => setMembers((list) => list?.map((x) => (x.id === u.id ? u : x)) ?? null);
 
@@ -341,6 +345,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
             </div>
             <div className="text-[12px] text-[#616161]">{n(c.members)} farmers</div>
             <button type="button" onClick={() => openMembers(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#1565C0] hover:bg-[#E3F2FD]">{canManage ? "Farmers" : "Contact"}</button>
+            <button type="button" onClick={() => openAnalytics(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#00838F] hover:bg-[#E0F7FA]">Analytics</button>
             {canManage && <button type="button" onClick={() => openTracker(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9]">Campaign Tracker</button>}
             {canManage && <button type="button" onClick={() => setExtendOf(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#6A1B9A] hover:bg-[#F3E5F5]">Extend</button>}
           </div>
@@ -416,6 +421,19 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
             <ModalHeader eyebrow="Campaign Tracker" eyebrowColor="#2E7D32" title={trackerOf.name} subtitle="Outreach reach · real attributed revenue · test vs control uplift" onClose={() => setTrackerOf(null)} />
             <div className="max-h-[72vh] overflow-y-auto px-5 py-4">
               {tracker == null ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">Loading…</div> : <TrackerBody t={tracker} />}
+            </div>
+          </>
+        )}
+      </Modal>
+
+      {/* Campaign audience Analytics — composition + unique farmer list */}
+      <Modal open={analyticsOf != null} onClose={() => setAnalyticsOf(null)} className="max-w-[980px]">
+        {analyticsOf && (
+          <>
+            <ModalHeader eyebrow="Campaign · audience analytics" eyebrowColor="#00838F" title={analyticsOf.name}
+              subtitle="Who's enrolled — composition by segment, store, village & crop" onClose={() => setAnalyticsOf(null)} />
+            <div className="max-h-[74vh] overflow-y-auto px-5 py-4">
+              {analytics == null ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">Loading…</div> : <AnalyticsBody a={analytics} campaign={analyticsOf} />}
             </div>
           </>
         )}
@@ -785,6 +803,251 @@ function FocusCard({ member, onChange, onHandled, onSkip, onBack, remaining }: {
 /* ── Campaign Tracker body: reach + real attributed revenue + uplift ── */
 function Kpi({ label, value, color }: { label: string; value: string; color?: string }) {
   return <div className="rounded-[10px] bg-[#F5F7F5] px-3 py-2.5"><div className="text-[17px] font-bold" style={{ color: color ?? "#1A1C1A" }}>{value}</div><div className="text-[10.5px] text-[#757575]">{label}</div></div>;
+}
+
+/* ── Campaign audience analytics: pie + treemap composition + Segment × Store matrix ── */
+
+const CHART_PALETTE = ["#1565C0", "#2E7D32", "#E65100", "#6A1B9A", "#00838F", "#C62828", "#F9A825", "#5D4037", "#0277BD", "#558B2F", "#AD1457", "#4527A0"];
+
+/** #RRGGBB → rgba() with the given alpha (for tinted matrix cells). */
+function hexToRgba(hex: string, a: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return `rgba(0,0,0,${a})`;
+  const v = parseInt(m[1], 16);
+  return `rgba(${(v >> 16) & 255},${(v >> 8) & 255},${v & 255},${a})`;
+}
+
+/** Donut pie with legend (label · count · %). Handles the single-slice (100%) case as a full ring. */
+function PieCard({ title, data, total }: { title: string; data: { label: string; count: number; color: string }[]; total: number }) {
+  const R = 52, r = 30, cx = 60, cy = 60;
+  const slices = data.filter((d) => d.count > 0);
+  let ang = -Math.PI / 2;
+  const arcs = slices.map((d) => {
+    const frac = total ? d.count / total : 0;
+    const a0 = ang, a1 = ang + frac * 2 * Math.PI;
+    ang = a1;
+    const large = a1 - a0 > Math.PI ? 1 : 0;
+    const pt = (rad: number, an: number) => `${(cx + rad * Math.cos(an)).toFixed(2)},${(cy + rad * Math.sin(an)).toFixed(2)}`;
+    const path = `M${pt(R, a0)} A${R},${R} 0 ${large} 1 ${pt(R, a1)} L${pt(r, a1)} A${r},${r} 0 ${large} 0 ${pt(r, a0)} Z`;
+    return { path, color: d.color, label: d.label, count: d.count, pct: Math.round(frac * 100) };
+  });
+  const single = slices.length === 1;
+  return (
+    <div className={`${CARD} p-3.5`}>
+      <div className="mb-2 text-[12px] font-bold text-[#1A1C1A]">{title}</div>
+      {slices.length === 0 ? <div className="py-3 text-center text-[11.5px] text-[#BDBDBD]">No data</div> : (
+        <div className="flex flex-wrap items-center gap-3">
+          <svg viewBox="0 0 120 120" className="h-[120px] w-[120px] shrink-0">
+            {single ? (
+              <><circle cx={cx} cy={cy} r={R} fill={slices[0].color} /><circle cx={cx} cy={cy} r={r} fill="#fff" /></>
+            ) : arcs.map((s) => <path key={s.label} d={s.path} fill={s.color} />)}
+          </svg>
+          <div className="flex min-w-[130px] flex-1 flex-col gap-1">
+            {arcs.map((s) => (
+              <div key={s.label} className="flex items-center gap-1.5 text-[11px]">
+                <span className="h-2.5 w-2.5 shrink-0 rounded-[3px]" style={{ background: s.color }} />
+                <span className="truncate text-[#424242]" title={s.label}>{s.label}</span>
+                <span className="ml-auto shrink-0 font-semibold text-[#616161]">{n(s.count)} · {s.pct}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Horizontal bar chart — for overlapping dimensions (e.g. crops: a farmer can grow several, so
+ *  shares don't partition a whole and a pie would mislead). % is share of enrolled farmers. */
+function HBarCard({ title, data, total, note }: { title: string; data: { label: string; count: number; color: string }[]; total: number; note?: string }) {
+  const shown = data.filter((d) => d.count > 0);
+  const max = Math.max(1, ...shown.map((d) => d.count));
+  return (
+    <div className={`${CARD} p-3.5`}>
+      <div className="mb-2 text-[12px] font-bold text-[#1A1C1A]">{title}</div>
+      {shown.length === 0 ? <div className="py-3 text-center text-[11.5px] text-[#BDBDBD]">No data</div> : (
+        <div className="flex flex-col gap-2">
+          {shown.map((d) => (
+            <div key={d.label}>
+              <div className="flex justify-between text-[11px]">
+                <span className="truncate text-[#424242]" title={d.label}>{d.label}</span>
+                <span className="ml-2 shrink-0 font-semibold text-[#616161]">{n(d.count)} · {total ? ((d.count / total) * 100).toFixed(1) : "0"}%</span>
+              </div>
+              <div className="mt-0.5 h-2 rounded-full bg-[#F0F0F0]"><div className="h-2 rounded-full" style={{ width: `${(d.count / max) * 100}%`, background: d.color }} /></div>
+            </div>
+          ))}
+          {note && <div className="mt-1 text-[10px] text-[#9E9E9E]">{note}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Squarified treemap layout (Bruls et al.) inside a [0..W]×[0..H] box. */
+function squarify(items: { label: string; count: number; color: string }[], W: number, H: number) {
+  const nodes = items.filter((i) => i.count > 0);
+  const total = nodes.reduce((s, i) => s + i.count, 0);
+  if (!nodes.length || total <= 0) return [] as { label: string; color: string; count: number; x: number; y: number; w: number; h: number }[];
+  const scale = (W * H) / total;
+  const scaled = nodes.map((i) => ({ ...i, area: i.count * scale }));
+  const out: { label: string; color: string; count: number; x: number; y: number; w: number; h: number }[] = [];
+  const worst = (areas: number[], side: number) => {
+    const s = areas.reduce((a, b) => a + b, 0);
+    const mx = Math.max(...areas), mn = Math.min(...areas);
+    return Math.max((side * side * mx) / (s * s), (s * s) / (side * side * mn));
+  };
+  let rect = { x: 0, y: 0, w: W, h: H };
+  let i = 0;
+  while (i < scaled.length) {
+    const side = Math.min(rect.w, rect.h);
+    let j = i + 1;
+    const row = [scaled[i]];
+    while (j < scaled.length && worst(row.map((r) => r.area), side) >= worst([...row.map((r) => r.area), scaled[j].area], side)) {
+      row.push(scaled[j]); j++;
+    }
+    const rowArea = row.reduce((a, b) => a + b.area, 0);
+    if (rect.w >= rect.h) {
+      const colW = rowArea / rect.h;
+      let yy = rect.y;
+      for (const rr of row) { const rh = rr.area / colW; out.push({ label: rr.label, color: rr.color, count: rr.count, x: rect.x, y: yy, w: colW, h: rh }); yy += rh; }
+      rect = { x: rect.x + colW, y: rect.y, w: rect.w - colW, h: rect.h };
+    } else {
+      const rowH = rowArea / rect.w;
+      let xx = rect.x;
+      for (const rr of row) { const rw = rr.area / rowH; out.push({ label: rr.label, color: rr.color, count: rr.count, x: xx, y: rect.y, w: rw, h: rowH }); xx += rw; }
+      rect = { x: rect.x, y: rect.y + rowH, w: rect.w, h: rect.h - rowH };
+    }
+    i = j;
+  }
+  return out;
+}
+
+/** Decomposition (treemap) card — rectangles area-proportional to the category's share. */
+function TreemapCard({ title, rows, total }: { title: string; rows: { label: string; count: number }[]; total: number }) {
+  const W = 100, H = 62;
+  const data = rows.map((r, i) => ({ ...r, color: CHART_PALETTE[i % CHART_PALETTE.length] }));
+  const cells = squarify(data, W, H);
+  const shown = cells.reduce((s, c) => s + c.count, 0);
+  return (
+    <div className={`${CARD} p-3.5`}>
+      <div className="mb-2 flex items-baseline justify-between">
+        <span className="text-[12px] font-bold text-[#1A1C1A]">{title}</span>
+        {shown < total && <span className="text-[10px] text-[#9E9E9E]">top {rows.length} · {Math.round((shown / total) * 100)}% of audience</span>}
+      </div>
+      {cells.length === 0 ? <div className="py-3 text-center text-[11.5px] text-[#BDBDBD]">No data</div> : (
+        <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" style={{ aspectRatio: `${W} / ${H}` }}>
+          {cells.map((c) => {
+            const pct = total ? Math.round((c.count / total) * 100) : 0;
+            const fits = c.w > 15 && c.h > 9;
+            return (
+              <g key={c.label}>
+                <rect x={c.x + 0.4} y={c.y + 0.4} width={Math.max(0, c.w - 0.8)} height={Math.max(0, c.h - 0.8)} rx={1.2} fill={c.color}>
+                  <title>{`${c.label}: ${n(c.count)} (${pct}%)`}</title>
+                </rect>
+                {fits && (
+                  <text x={c.x + 2} y={c.y + 4.6} fill="#fff" style={{ fontSize: 3.2, fontWeight: 700 }}>
+                    <tspan>{c.label.length > c.w / 2.4 ? c.label.slice(0, Math.max(2, Math.floor(c.w / 2.4))) + "…" : c.label}</tspan>
+                    <tspan x={c.x + 2} dy={4} style={{ fontSize: 2.8, fontWeight: 500 }}>{n(c.count)} · {pct}%</tspan>
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+      )}
+    </div>
+  );
+}
+
+/** Segment × Store cross-tab: rows = stores, columns = segments, cells tinted by count. */
+function SegStoreMatrix({ segCols, matrix, total }: { segCols: CampaignAnalytics["segCols"]; matrix: CampaignAnalytics["matrix"]; total: number }) {
+  const colTotals: Record<string, number> = {};
+  for (const c of segCols) colTotals[c.key] = matrix.reduce((s, r) => s + (r.counts[c.key] ?? 0), 0);
+  const maxCell = Math.max(1, ...matrix.flatMap((r) => segCols.map((c) => r.counts[c.key] ?? 0)));
+  return (
+    <div className={`${CARD} overflow-hidden`}>
+      <div className="border-b border-[#F0F0F0] px-4 py-2.5 text-[12px] font-bold text-[#1A1C1A]">Segment × Store matrix</div>
+      <div className="max-h-[46vh] overflow-auto">
+        <table className="w-full min-w-[560px] border-collapse text-[11.5px]">
+          <thead className="sticky top-0 z-10">
+            <tr className="bg-[#FAFAFA] text-[10px] font-bold uppercase tracking-[0.3px] text-[#9E9E9E]">
+              <th className="sticky left-0 z-10 bg-[#FAFAFA] px-4 py-2 text-left">Store</th>
+              {segCols.map((c) => <th key={c.key} className="px-2 py-2 text-right" style={{ color: c.color }}>{c.label}</th>)}
+              <th className="px-3 py-2 text-right text-[#1A1C1A]">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {matrix.map((r) => (
+              <tr key={r.store} className="border-b border-[#F5F5F5]">
+                <td className="sticky left-0 z-10 bg-white px-4 py-1.5 font-semibold text-[#1565C0]">{r.store}</td>
+                {segCols.map((c) => {
+                  const v = r.counts[c.key] ?? 0;
+                  return (
+                    <td key={c.key} className="px-2 py-1.5 text-right tabular-nums" style={{ background: v ? hexToRgba(c.color, 0.08 + 0.55 * (v / maxCell)) : undefined, color: v ? "#1A1C1A" : "#DADADA" }}>
+                      {v || "·"}
+                    </td>
+                  );
+                })}
+                <td className="px-3 py-1.5 text-right font-bold text-[#1A1C1A]">{n(r.total)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot className="sticky bottom-0">
+            <tr className="border-t border-[#EEE] bg-[#F8F8F8] font-bold text-[#1A1C1A]">
+              <td className="sticky left-0 z-10 bg-[#F8F8F8] px-4 py-2">Total</td>
+              {segCols.map((c) => <td key={c.key} className="px-2 py-2 text-right tabular-nums">{n(colTotals[c.key])}</td>)}
+              <td className="px-3 py-2 text-right">{n(total)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function AnalyticsBody({ a, campaign }: { a: CampaignAnalytics; campaign: CampaignListItem }) {
+  const [exporting, setExporting] = useState(false);
+  const doExport = () => {
+    setExporting(true);
+    exportCampaignAudienceXlsx(campaign.id, campaign.name)
+      .then((res) => {
+        if (res.ok && res.b64 && res.filename) downloadB64(res.b64, res.filename);
+        else alert(res.error ?? "Export failed.");
+      })
+      .catch(() => alert("Export failed."))
+      .finally(() => setExporting(false));
+  };
+  if (a.total === 0) return <div className="py-8 text-center text-[13px] text-[#9E9E9E]">No enrolled farmers in your scope for this campaign.</div>;
+  const cropData = a.byCrop.map((c, i) => ({ label: c.label, count: c.count, color: CHART_PALETTE[i % CHART_PALETTE.length] }));
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-baseline gap-2">
+          <span className="text-[22px] font-bold text-[#00838F]">{n(a.total)}</span>
+          <span className="text-[13px] text-[#757575]">enrolled farmers</span>
+        </div>
+        <button type="button" onClick={doExport} disabled={exporting}
+          className="rounded-[8px] border border-[#00838F] px-3 py-1.5 text-[12px] font-semibold text-[#00838F] hover:bg-[#E0F7FA] disabled:opacity-40">
+          {exporting ? "Exporting…" : "⬇ Export to Excel"}
+        </button>
+      </div>
+
+      {/* Segment pie + crop bars (crops overlap across farmers, so a bar reads clearer than a pie) */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <PieCard title="By segment" data={a.bySegment.map((s) => ({ label: s.label, count: s.count, color: s.color }))} total={a.total} />
+        <HBarCard title="By crop (top)" data={cropData} total={a.total} note="% = share of enrolled farmers; a farmer may grow several crops, so these overlap." />
+      </div>
+
+      {/* Decomposition treemaps: store + village */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <TreemapCard title="By store" rows={a.byStore} total={a.total} />
+        <TreemapCard title="By village (top)" rows={a.byVillage} total={a.total} />
+      </div>
+
+      {/* Segment × Store matrix (replaces the farmer list) */}
+      <SegStoreMatrix segCols={a.segCols} matrix={a.matrix} total={a.total} />
+    </div>
+  );
 }
 
 function TrackerBody({ t }: { t: CampaignTracker }) {

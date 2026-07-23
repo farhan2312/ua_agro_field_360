@@ -5,11 +5,13 @@ import { Modal, ModalHeader } from "@/components/interactive";
 import { ChainNext } from "@/components/ChainNext";
 import { SEGMENT_COLUMNS, segMeta } from "@/lib/campaign-segments";
 import { cropLabel } from "@/lib/crops";
+import { tagLabel } from "@/lib/crop-pest";
 import {
-  getWorkbench, getWorkbenchCustomers, saveWorkbenchSegment, getCropTrend, getVisitAnalytics,
+  getWorkbench, getWorkbenchCustomers, saveWorkbenchSegment, getCropTrend, getVisitAnalytics, exportWorkbookXlsx,
   type Lens, type WbFilters, type WbData, type WbFacets, type WbBar, type WbCustomer, type CropTrendPoint,
   type VisitAnalytics, type VisitMonth, type VisitAdoption, type VisitStoreRow,
 } from "@/app/actions/analytics-segments";
+import { downloadB64 } from "@/lib/download";
 
 const CARD = "rounded-[14px] border border-black/[0.04] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]";
 const n = (x: number) => Math.round(x).toLocaleString("en-IN");
@@ -23,6 +25,18 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
   const [cell, setCell] = useState<{ storeId: number | null; storeName: string; seg: string } | null>(null);
   const [rows, setRows] = useState<WbCustomer[] | null>(null);
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  const exportXlsx = () => {
+    setExporting(true);
+    exportWorkbookXlsx(filters)
+      .then((res) => {
+        if (res.ok && res.b64 && res.filename) downloadB64(res.b64, res.filename);
+        else alert(res.error ?? "Export failed.");
+      })
+      .catch(() => alert("Export failed."))
+      .finally(() => setExporting(false));
+  };
 
   const apply = (patch: Partial<WbFilters>) => {
     const f = { ...filters, ...patch };
@@ -37,7 +51,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
     });
   };
   const setLens = (lens: Lens) => apply({ lens, crop: undefined, segment: undefined, spendTier: undefined, problem: undefined });
-  const clearAll = () => apply({ storeId: undefined, zone: undefined, crop: undefined, segment: undefined, spendTier: undefined, problem: undefined });
+  const clearAll = () => apply({ storeId: undefined, zone: undefined, crop: undefined, pest: undefined, segment: undefined, spendTier: undefined, problem: undefined });
 
   const openCell = (storeId: number | null, storeName: string, seg: string) => {
     setCell({ storeId, storeName, seg }); setRows(null);
@@ -45,7 +59,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
   };
 
   const cropOpts = filters.lens === "sales" ? facets.salesCrops : facets.visitCrops;
-  const activeFilterCount = [filters.storeId, filters.zone, filters.crop, filters.segment, filters.spendTier, filters.problem].filter((x) => x != null && x !== "").length;
+  const activeFilterCount = [filters.storeId, filters.zone, filters.crop, filters.pest, filters.segment, filters.spendTier, filters.problem].filter((x) => x != null && x !== "").length;
   const k = data.kpis;
   const vk = visitData?.kpis;
   const vd = (x: number | undefined) => (visitData ? n(x ?? 0) : "…");
@@ -82,6 +96,8 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
         <Sel value={filters.zone ?? ""} onChange={(v) => apply({ zone: v || undefined })} ph="All zones" options={facets.zones} />
         <Sel value={filters.crop ?? ""} onChange={(v) => apply({ crop: v || undefined })} ph="All crops"
           options={cropOpts.map((c) => [c.crop, `${cropLabel(c.crop)} (${n(c.count)})`])} />
+        <Sel value={filters.pest ?? ""} onChange={(v) => apply({ pest: v || undefined })} ph="All pests / diseases"
+          options={facets.pests.map((p) => [p.pest, `${tagLabel(p.pest)} (${n(p.count)})`])} />
         {filters.lens === "sales" && (
           <Sel value={filters.segment ?? ""} onChange={(v) => apply({ segment: v || undefined })} ph="All segments"
             options={SEGMENT_COLUMNS.map((s) => [s, segMeta(s).label])} />
@@ -119,7 +135,13 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
         </div>
 
         <div className={`${CARD} overflow-hidden`}>
-          <div className="border-b border-[#F0F0F0] px-4 py-2.5 text-[13px] font-bold text-[#1A1C1A]">Store × Segment</div>
+          <div className="flex items-center justify-between gap-2 border-b border-[#F0F0F0] px-4 py-2.5">
+            <div className="text-[13px] font-bold text-[#1A1C1A]">Store × Segment</div>
+            <button type="button" onClick={exportXlsx} disabled={exporting || data.matrix.rows.length === 0}
+              className="rounded-[8px] border border-[#2E7D32] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9] disabled:opacity-40">
+              {exporting ? "Exporting…" : "⬇ Export to Excel"}
+            </button>
+          </div>
           <div className="overflow-x-auto">
             <div className="min-w-[820px]">
               <div className="grid grid-cols-[1.4fr_repeat(6,1fr)_0.8fr] border-b border-[#F0F0F0] bg-[#FAFAFA] px-4 py-2.5 text-[10.5px] font-semibold uppercase tracking-[0.4px] text-[#9E9E9E]">

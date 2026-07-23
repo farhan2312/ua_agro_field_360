@@ -27,7 +27,7 @@ export default async function AnalyticsPage() {
 
   let overview: ScopedDashboardData | null = null;
   let data = EMPTY;
-  let facets: WbFacets = { stores: [], zones: [], salesCrops: [], visitCrops: [], problems: [], spendTiers: [] };
+  let facets: WbFacets = { stores: [], zones: [], salesCrops: [], visitCrops: [], pests: [], problems: [], spendTiers: [] };
   try {
     [overview, data, facets] = await Promise.all([loadOverview(scope), getWorkbench({ lens: "sales" }), getWorkbenchFacets()]);
   } catch {
