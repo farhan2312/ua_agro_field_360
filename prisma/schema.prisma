@@ -159,8 +159,9 @@ model Farmer {
   segmentTags       String[]  @default([]) // regular, loyal, at_risk, lapsed, new, hni, potential_hni
   campaignSegment   String? // exclusive: HNI|POTENTIAL_HNI|REGULAR|AT_RISK|NEW|LAPSED|OTHER
   cropTags          String[]  @default([]) // union of sales + visit crops (used by crop filters)
-  salesCropTags     String[]  @default([]) // crops from the monthly sales upload (Crops column, cleaned)
+  salesCropTags     String[]  @default([]) // crops from the monthly sales upload (Crops column + item-code Target Crops)
   visitCropTags     String[]  @default([]) // crops recorded during field visits
+  pestTags          String[]  @default([]) // Target Pests/Diseases/Weeds — auto-mapped from purchased item codes
   p12mSpend         Int? // ₹ spend in past 12 months
   hniGap            Int? // ₹ to reach HNI (for Potential HNI)
   lastMaizeItem     String?
@@ -183,6 +184,7 @@ model Farmer {
   @@index([cropTags], type: Gin)
   @@index([salesCropTags], type: Gin)
   @@index([visitCropTags], type: Gin)
+  @@index([pestTags], type: Gin)
   @@index([segmentTags], type: Gin)
 }
 
@@ -195,6 +197,7 @@ model Sale {
   soldAt        DateTime? // real bill date for sorting
   items         String? // item summary (e.g. "Urea 45kg, DAP · +2 more")
   itemCount     Int? // number of line items on the bill
+  itemCodes     String[]  @default([]) // master Item Codes on this bill — source for crop/pest auto-mapping
   category      String? // dominant product category
   amount        String? // display string e.g. "₹11,200"
   amountNum     Int? // numeric total (rupees) for analytics/LTV
@@ -221,9 +224,27 @@ model Product {
   mainCategory String?
   subCategory  String?
   uom          String? // normalized canonical unit
-  taxRate      Float? // CGST+SGST total %, e.g. 5 / 12 / 18
+  taxRate      Float? // CGST+SGST total %, e.g. 5 / 12 / 18 (from the master's "GST %")
   cropTag      String? // derived crop for seeds (wheat/paddy/mustard/maize/potato…)
   isSeed       Boolean  @default(false)
+  // ── Inventory master (Inventory Master_with Crop Mapping) — keyed by itemCode ──
+  itemCode            String?  @unique // master Item Code — the code new sales uploads map on
+  brand               String? // Canonical Brand
+  packSize            String? // Pack Size
+  hsnCode             String? // HSN Code
+  technicalName       String? // Standardized Technical Name
+  activeIngredients   String? // Active Ingredient(s)
+  targetCrops         String[] @default([]) // Target Crops (cleaned, multi) — enriches farmer crop tags
+  targetPests         String[] @default([]) // Target Pests / Diseases / Weeds (cleaned, multi) — farmer pest tags
+  targetCropsRaw      String? // original semicolon string (display)
+  targetPestsRaw      String? // original semicolon string (display)
+  alternativeProducts String? // Alternative Products (same formulation)
+  mappingConfidence   String? // High / Medium / Low
+  qualityFlag         String? // Quality Flag
+  statusFlag          String? // master Status (Active/Inactive) — distinct from the `active` toggle below
+  originalItemName    String? // Original Item Name
+  originalBrand       String? // Original Brand
+  originalDescription String? // Original Description
   // Rollups (maintained by importer / recompute)
   lastPrice    Float? // latest unit price seen
   avgPrice     Float?
@@ -243,6 +264,8 @@ model Product {
   @@index([subCategory])
   @@index([cropTag])
   @@index([active])
+  @@index([targetCrops], type: Gin)
+  @@index([targetPests], type: Gin)
 }
 
 /// One product line on a sales bill (from the master file). Sales OUT to farmers.
@@ -384,6 +407,7 @@ model Visit {
   officerName String?
   date        String? // display string
   visitedAt   DateTime?
+  followUpDate String? // next-visit date the officer set on the form (ISO "YYYY-MM-DD")
   purpose     String?
   notes       String?
   type        String? // visit type / reason

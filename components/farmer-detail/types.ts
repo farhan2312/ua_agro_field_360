@@ -15,6 +15,8 @@ export interface FarmerVisitLog {
   date: string;
   notes: string;
   by: string;
+  /** Next-visit date the officer scheduled (display string), or "". */
+  followUp: string;
 }
 
 export interface StoreOfficer {

@@ -22,6 +22,24 @@ export interface ProductVM {
   firstSoldAt: string | null;
   lastSoldAt: string | null;
   active: boolean;
+  // ── Inventory master columns ──
+  itemCode: string | null;
+  brand: string | null;
+  packSize: string | null;
+  hsnCode: string | null;
+  technicalName: string | null;
+  activeIngredients: string | null;
+  targetCrops: string[];
+  targetPests: string[];
+  targetCropsRaw: string | null;
+  targetPestsRaw: string | null;
+  alternativeProducts: string | null;
+  mappingConfidence: string | null;
+  qualityFlag: string | null;
+  statusFlag: string | null;
+  originalItemName: string | null;
+  originalBrand: string | null;
+  originalDescription: string | null;
 }
 
 export interface ProductFacets {
@@ -29,6 +47,8 @@ export interface ProductFacets {
   subCategories: string[];
   cropTags: string[];
   uoms: string[];
+  targetCrops: string[]; // from the master's Target Crops
+  targetPests: string[]; // from the master's Target Pests / Diseases / Weeds
 }
 
 export interface ProductFilters {
@@ -36,6 +56,8 @@ export interface ProductFilters {
   mainCategory?: string;
   subCategory?: string;
   cropTag?: string;
+  targetCrop?: string; // Product.targetCrops has
+  targetPest?: string; // Product.targetPests has
   uom?: string;
   seedOnly?: boolean;
   includeInactive?: boolean;
@@ -45,18 +67,18 @@ export interface ProductFilters {
 }
 
 const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
-const toVM = (p: {
-  id: number; rawName: string; name: string; mainCategory: string | null; subCategory: string | null;
-  uom: string | null; taxRate: number | null; cropTag: string | null; isSeed: boolean;
-  lastPrice: number | null; avgPrice: number | null; totalQty: number; totalRevenue: number;
-  lineCount: number; firstSoldAt: Date | null; lastSoldAt: Date | null; active: boolean;
-}): ProductVM => ({ ...p, firstSoldAt: iso(p.firstSoldAt), lastSoldAt: iso(p.lastSoldAt) });
 
 const PRODUCT_SELECT = {
   id: true, rawName: true, name: true, mainCategory: true, subCategory: true, uom: true,
   taxRate: true, cropTag: true, isSeed: true, lastPrice: true, avgPrice: true,
   totalQty: true, totalRevenue: true, lineCount: true, firstSoldAt: true, lastSoldAt: true, active: true,
+  itemCode: true, brand: true, packSize: true, hsnCode: true, technicalName: true, activeIngredients: true,
+  targetCrops: true, targetPests: true, targetCropsRaw: true, targetPestsRaw: true, alternativeProducts: true,
+  mappingConfidence: true, qualityFlag: true, statusFlag: true, originalItemName: true, originalBrand: true, originalDescription: true,
 } satisfies Prisma.ProductSelect;
+
+const toVM = (p: Prisma.ProductGetPayload<{ select: typeof PRODUCT_SELECT }>): ProductVM =>
+  ({ ...p, firstSoldAt: iso(p.firstSoldAt), lastSoldAt: iso(p.lastSoldAt) });
 
 function buildWhere(f: ProductFilters): Prisma.ProductWhereInput {
   const w: Prisma.ProductWhereInput = {};
@@ -65,11 +87,19 @@ function buildWhere(f: ProductFilters): Prisma.ProductWhereInput {
   if (f.mainCategory) w.mainCategory = f.mainCategory;
   if (f.subCategory) w.subCategory = f.subCategory;
   if (f.cropTag) w.cropTag = f.cropTag;
+  if (f.targetCrop) w.targetCrops = { has: f.targetCrop };
+  if (f.targetPest) w.targetPests = { has: f.targetPest };
   if (f.uom) w.uom = f.uom;
   if (f.seedOnly) w.isSeed = true;
   if (f.q?.trim()) {
     const q = f.q.trim();
-    w.OR = [{ name: { contains: q, mode: "insensitive" } }, { rawName: { contains: q, mode: "insensitive" } }];
+    w.OR = [
+      { name: { contains: q, mode: "insensitive" } },
+      { rawName: { contains: q, mode: "insensitive" } },
+      { itemCode: { contains: q, mode: "insensitive" } },
+      { technicalName: { contains: q, mode: "insensitive" } },
+      { brand: { contains: q, mode: "insensitive" } },
+    ];
   }
   return w;
 }
@@ -91,17 +121,21 @@ export async function listProducts(f: ProductFilters = {}): Promise<{ rows: Prod
 }
 
 export async function getProductFacets(): Promise<ProductFacets> {
-  const [mains, subs, crops, uoms] = await Promise.all([
+  const [mains, subs, crops, uoms, tCrops, tPests] = await Promise.all([
     prisma.product.findMany({ where: { mainCategory: { not: null }, active: true }, distinct: ["mainCategory"], select: { mainCategory: true }, orderBy: { mainCategory: "asc" } }),
     prisma.product.findMany({ where: { subCategory: { not: null }, active: true }, distinct: ["subCategory"], select: { subCategory: true }, orderBy: { subCategory: "asc" } }),
     prisma.product.findMany({ where: { cropTag: { not: null }, active: true }, distinct: ["cropTag"], select: { cropTag: true }, orderBy: { cropTag: "asc" } }),
     prisma.product.findMany({ where: { uom: { not: null }, active: true }, distinct: ["uom"], select: { uom: true }, orderBy: { uom: "asc" } }),
+    prisma.$queryRaw<{ t: string }[]>`SELECT DISTINCT unnest("targetCrops") t FROM "Product" WHERE active = true ORDER BY 1`,
+    prisma.$queryRaw<{ t: string }[]>`SELECT DISTINCT unnest("targetPests") t FROM "Product" WHERE active = true ORDER BY 1`,
   ]);
   return {
     mainCategories: mains.map((m) => m.mainCategory!).filter(Boolean),
     subCategories: subs.map((s) => s.subCategory!).filter(Boolean),
     cropTags: crops.map((c) => c.cropTag!).filter(Boolean),
     uoms: uoms.map((u) => u.uom!).filter(Boolean),
+    targetCrops: tCrops.map((c) => c.t).filter(Boolean),
+    targetPests: tPests.map((p) => p.t).filter(Boolean),
   };
 }
 

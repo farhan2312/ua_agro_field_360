@@ -5,6 +5,7 @@ import { cn } from "@/lib/cn";
 import { inr, grouped, initials } from "@/lib/format";
 import { SEGMENT_COLUMNS, segMeta } from "@/lib/campaign-segments";
 import { cropLabel } from "@/lib/crops";
+import { tagLabel } from "@/lib/crop-pest";
 import { SPEND_TIERS } from "@/lib/spend-tiers";
 import { Badge } from "@/components/ui";
 import { Modal, ModalHeader } from "@/components/interactive";
@@ -89,6 +90,7 @@ export function StoreFarmersPanel({
     filters.q?.trim() ||
     filters.category ||
     filters.crop ||
+    filters.pest ||
     filters.campaignSegment ||
     filters.spendTier != null ||
     selectedVillages.length
@@ -128,6 +130,7 @@ export function StoreFarmersPanel({
       parts.push(`${selectedVillages.length} village${selectedVillages.length > 1 ? "s" : ""}`);
     if (filters.category) parts.push(filters.category);
     if (filters.crop) parts.push(cropLabel(filters.crop));
+    if (filters.pest) parts.push(tagLabel(filters.pest));
     if (filters.campaignSegment) parts.push(segMeta(filters.campaignSegment).label);
     if (filters.spendTier != null && SPEND_TIERS[filters.spendTier]) parts.push(SPEND_TIERS[filters.spendTier].label);
     if (filters.q?.trim()) parts.push(`"${filters.q.trim()}"`);
@@ -215,6 +218,12 @@ export function StoreFarmersPanel({
           <option value="">Any crop</option>
           {(data?.crops ?? []).map((c) => (
             <option key={c.crop} value={c.crop}>{cropLabel(c.crop)} ({grouped(c.count)})</option>
+          ))}
+        </select>
+        <select value={filters.pest ?? ""} onChange={(e) => setFilter("pest", e.target.value)} className={selectClass}>
+          <option value="">Any pest / disease</option>
+          {(data?.pests ?? []).map((p) => (
+            <option key={p.pest} value={p.pest}>{tagLabel(p.pest)} ({grouped(p.count)})</option>
           ))}
         </select>
         <select value={filters.campaignSegment ?? ""} onChange={(e) => setFilter("campaignSegment", e.target.value)} className={selectClass}>

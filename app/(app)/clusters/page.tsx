@@ -4,9 +4,10 @@ import { prisma } from "@/lib/prisma";
 import { canAccess } from "@/lib/roles";
 import { canManage } from "@/lib/scope";
 import { getScope, storeScopeWhere } from "@/lib/scope";
-import { listClustersWithCounts, getCropOptions, type ClusterVM } from "@/app/actions/campaigns";
+import { listClustersWithCounts, type ClusterVM } from "@/app/actions/campaigns";
+import { getGlobalCropFacet, getGlobalPestFacet } from "@/lib/stats";
 import { ClustersTab, type StoreOption } from "@/components/campaigns/ClustersTab";
-import type { CropOption } from "@/components/campaigns/CampaignsScreen";
+import type { CropOption, PestOption } from "@/components/campaigns/CampaignsScreen";
 
 export const dynamic = "force-dynamic";
 
@@ -23,14 +24,16 @@ export default async function FarmerClustersPage() {
   let clusters: ClusterVM[] = [];
   let zones: string[] = [];
   let crops: CropOption[] = [];
+  let pests: PestOption[] = [];
   let stores: StoreOption[] = [];
   try {
-    const [cls, zoneRows, cropOpts, storeRows] = await Promise.all([
+    const [cls, zoneRows, cropOpts, pestOpts, storeRows] = await Promise.all([
       listClustersWithCounts(),
       scope.role === "regional"
         ? Promise.resolve(scope.zone ? [{ zone: scope.zone }] : [])
         : prisma.farmer.findMany({ where: { zone: { not: null }, source: "REAL" }, distinct: ["zone"], select: { zone: true }, orderBy: { zone: "asc" } }),
-      getCropOptions(),
+      getGlobalCropFacet(),
+      getGlobalPestFacet(),
       prisma.store.findMany({
         where: { source: "REAL", ...(storeWhere && storeWhere !== "none" ? storeWhere : {}) },
         select: { id: true, name: true, zone: true },
@@ -40,6 +43,7 @@ export default async function FarmerClustersPage() {
     clusters = cls;
     zones = zoneRows.map((z) => z.zone!).filter(Boolean);
     crops = cropOpts;
+    pests = pestOpts;
     stores = storeRows.map((s) => ({ id: s.id, name: s.name, zone: s.zone }));
   } catch {
     // DB unavailable — render an empty shell.
@@ -51,6 +55,7 @@ export default async function FarmerClustersPage() {
         initial={clusters}
         zones={zones}
         crops={crops}
+        pests={pests}
         stores={stores}
         canChain={canCreate}
         canCreate={canCreate}

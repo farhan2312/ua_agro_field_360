@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getScope, farmerScopeWhere, storeScopeWhere } from "@/lib/scope";
+import { getGlobalCropFacet, getGlobalPestFacet } from "@/lib/stats";
 import { SEGMENT_COLUMNS, segMeta } from "@/lib/campaign-segments";
 import { SPEND_TIERS } from "@/lib/spend-tiers";
 import { statusColor } from "@/lib/status";
@@ -21,6 +22,7 @@ type SearchParams = {
   store?: string;
   zone?: string;
   crop?: string;
+  pest?: string;
   spend?: string;
   page?: string;
 };
@@ -42,13 +44,14 @@ export default async function FarmersPage({
   const storeId = Number.parseInt(sp.store ?? "", 10) || null;
   const zone = (sp.zone ?? "").trim() || null;
   const crop = (sp.crop ?? "").trim() || null;
+  const pest = (sp.pest ?? "").trim() || null;
   const spendIdx = /^\d+$/.test(sp.spend ?? "") ? Number(sp.spend) : null;
   const spendTier = spendIdx != null ? SPEND_TIERS[spendIdx] ?? null : null;
   const page = Math.max(1, Number.parseInt(sp.page ?? "1", 10) || 1);
 
   let rows: FarmerRowVM[] = [];
   let total = 0;
-  let facets: FarmerFacetsVM = { stores: [], zones: [], crops: [], spendTiers: SPEND_TIERS.map((t) => t.label) };
+  let facets: FarmerFacetsVM = { stores: [], zones: [], crops: [], pests: [], spendTiers: SPEND_TIERS.map((t) => t.label) };
 
   // RBAC: officers see only their store's farmers, RMs only their region's.
   const scope = await getScope();
@@ -70,6 +73,7 @@ export default async function FarmersPage({
     if (storeId) where.storeId = storeId;
     if (zone) where.store = { zone };
     if (crop) where.cropTags = { has: crop };
+    if (pest) where.pestTags = { has: pest };
     if (spendTier) {
       where.p12mSpend = {
         ...(spendTier.min != null ? { gte: spendTier.min } : {}),
@@ -88,7 +92,7 @@ export default async function FarmersPage({
 
     // Dropdown option lists (stores · regions · top crops) — independent of the active
     // filters, but never wider than the caller's scope.
-    const [storeOpts, zoneRows, cropRows] = await Promise.all([
+    const [storeOpts, zoneRows, cropRows, pestRows] = await Promise.all([
       prisma.store.findMany({
         where: storeWhere && storeWhere !== "none" ? storeWhere : undefined,
         orderBy: { name: "asc" },
@@ -100,23 +104,36 @@ export default async function FarmersPage({
         select: { zone: true },
         orderBy: { zone: "asc" },
       }),
-      // Canonical crop tags (sales ∪ visit) for the farmers in scope, most common first.
+      // Crop tags for the farmers in scope. Officer/RM run a small live scoped query; the
+      // unscoped (central/sysadmin) case reuses the cached global facet — the ~130k-row unnest
+      // aggregate that was the heaviest repeat query on this page.
       scope.role === "officer" && scope.storeId != null
         ? prisma.$queryRaw<{ crop: string; n: number }[]>(Prisma.sql`
             SELECT unnest("cropTags") crop, COUNT(*)::int n FROM "Farmer"
-            WHERE "storeId" = ${scope.storeId} GROUP BY 1 ORDER BY 2 DESC LIMIT 40`)
+            WHERE "storeId" = ${scope.storeId} GROUP BY 1 ORDER BY 2 DESC LIMIT 40`).then((r) => r.map((x) => ({ crop: x.crop, count: Number(x.n) })))
         : scope.role === "regional" && scope.zone
           ? prisma.$queryRaw<{ crop: string; n: number }[]>(Prisma.sql`
               SELECT unnest(f."cropTags") crop, COUNT(*)::int n FROM "Farmer" f
               JOIN "Store" s ON s.id = f."storeId"
-              WHERE s."zone" = ${scope.zone} GROUP BY 1 ORDER BY 2 DESC LIMIT 40`)
-          : prisma.$queryRaw<{ crop: string; n: number }[]>(Prisma.sql`
-              SELECT unnest("cropTags") crop, COUNT(*)::int n FROM "Farmer" GROUP BY 1 ORDER BY 2 DESC LIMIT 40`),
+              WHERE s."zone" = ${scope.zone} GROUP BY 1 ORDER BY 2 DESC LIMIT 40`).then((r) => r.map((x) => ({ crop: x.crop, count: Number(x.n) })))
+          : getGlobalCropFacet(),
+      // Target pests — same pattern.
+      scope.role === "officer" && scope.storeId != null
+        ? prisma.$queryRaw<{ pest: string; n: number }[]>(Prisma.sql`
+            SELECT unnest("pestTags") pest, COUNT(*)::int n FROM "Farmer"
+            WHERE "storeId" = ${scope.storeId} GROUP BY 1 ORDER BY 2 DESC LIMIT 60`).then((r) => r.map((x) => ({ pest: x.pest, count: Number(x.n) })))
+        : scope.role === "regional" && scope.zone
+          ? prisma.$queryRaw<{ pest: string; n: number }[]>(Prisma.sql`
+              SELECT unnest(f."pestTags") pest, COUNT(*)::int n FROM "Farmer" f
+              JOIN "Store" s ON s.id = f."storeId"
+              WHERE s."zone" = ${scope.zone} GROUP BY 1 ORDER BY 2 DESC LIMIT 60`).then((r) => r.map((x) => ({ pest: x.pest, count: Number(x.n) })))
+          : getGlobalPestFacet(),
     ]);
     facets = {
       stores: storeOpts.map((s) => ({ id: s.id, name: shortStoreName(s.name) || s.name })),
       zones: zoneRows.map((z) => z.zone!).filter(Boolean),
-      crops: cropRows.map((c) => ({ crop: c.crop, count: c.n })),
+      crops: cropRows,
+      pests: pestRows,
       spendTiers: SPEND_TIERS.map((t) => t.label),
     };
 
@@ -210,6 +227,7 @@ export default async function FarmersPage({
     store: storeId ? String(storeId) : null,
     zone,
     crop,
+    pest,
     spend: spendTier ? String(spendIdx) : null,
   };
 

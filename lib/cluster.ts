@@ -6,6 +6,7 @@ export const MAX_CLUSTER = 25_000;
 export interface FarmerFilters {
   villages?: string[]; // multi-select villages
   crop?: string; // canonical crop tag (sales ∪ visit crops)
+  pest?: string; // Target Pest/Disease/Weed tag (item-code derived)
   campaignSegment?: string; // HNI | POTENTIAL_HNI | REGULAR | AT_RISK | NEW | LAPSED
   spendTier?: number; // index into SPEND_TIERS (P12M spend)
   category?: string; // product category from sales
@@ -19,6 +20,11 @@ export interface VillageFacet {
 
 export interface CropFacet {
   crop: string; // canonical tag
+  count: number;
+}
+
+export interface PestFacet {
+  pest: string; // pest tag
   count: number;
 }
 
@@ -40,6 +46,7 @@ export interface StoreFarmersResult {
   pageSize: number;
   villages: VillageFacet[]; // per-store, with farmer counts, biggest first
   crops: CropFacet[]; // per-store crop tags, most common first
+  pests: PestFacet[]; // per-store pest tags, most common first
   categories: string[]; // per-store (products purchased)
 }
 

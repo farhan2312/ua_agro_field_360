@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { segMeta } from "@/lib/campaign-segments";
 import { cropLabel } from "@/lib/crops";
+import { tagLabel } from "@/lib/crop-pest";
 import type { SegFilterVM, FarmerFacetsVM, FarmerSelectedVM } from "./types";
 
 /**
@@ -44,6 +45,8 @@ export function FarmerFilterBar({
     if (zone) params.set("zone", zone);
     const crop = overrides.crop !== undefined ? overrides.crop : selected.crop;
     if (crop) params.set("crop", crop);
+    const pest = overrides.pest !== undefined ? overrides.pest : selected.pest;
+    if (pest) params.set("pest", pest);
     const spend = overrides.spend !== undefined ? overrides.spend : selected.spend;
     if (spend) params.set("spend", spend);
     const qs = params.toString();
@@ -56,7 +59,7 @@ export function FarmerFilterBar({
     debounce.current = setTimeout(() => push({ q: next }), 300);
   }
 
-  const anyFilter = selected.store || selected.zone || selected.crop || selected.spend || filters.some((f) => f.active && f.value !== null);
+  const anyFilter = selected.store || selected.zone || selected.crop || selected.pest || selected.spend || filters.some((f) => f.active && f.value !== null);
   const select = "rounded-xl border-[1.5px] border-[#E0E0E0] bg-white px-3 py-[9px] text-[12.5px] text-[#424242] outline-none focus:border-[#2E7D32]";
 
   return (
@@ -116,6 +119,12 @@ export function FarmerFilterBar({
           <option value="">All crops</option>
           {facets.crops.map((c) => (
             <option key={c.crop} value={c.crop}>{cropLabel(c.crop)} ({c.count.toLocaleString("en-IN")})</option>
+          ))}
+        </select>
+        <select className={select} value={selected.pest ?? ""} onChange={(e) => push({ pest: e.target.value || null })}>
+          <option value="">All pests / diseases</option>
+          {facets.pests.map((p) => (
+            <option key={p.pest} value={p.pest} className="capitalize">{tagLabel(p.pest)} ({p.count.toLocaleString("en-IN")})</option>
           ))}
         </select>
         <select className={select} value={selected.spend ?? ""} onChange={(e) => push({ spend: e.target.value || null })}>

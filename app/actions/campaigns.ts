@@ -39,6 +39,14 @@ export async function getCropOptions(): Promise<{ crop: string; count: number }[
   return rows.map((r) => ({ crop: r.crop, count: Number(r.n) }));
 }
 
+/** Distinct Target Pests/Diseases/Weeds across farmers (item-code derived), most common first. */
+export async function getPestOptions(): Promise<{ pest: string; count: number }[]> {
+  const rows = await prisma.$queryRawUnsafe<{ pest: string; n: number }[]>(
+    `SELECT unnest("pestTags") pest, COUNT(*)::int n FROM "Farmer" WHERE source='REAL' AND array_length("pestTags",1) > 0 GROUP BY 1 ORDER BY 2 DESC LIMIT 200`,
+  );
+  return rows.map((r) => ({ pest: r.pest, count: Number(r.n) }));
+}
+
 /* The old unscoped store×segment matrix + its drill-down (`getSegmentMatrix`,
    `getSegmentCustomers`) were removed with the officer/RM RBAC work: the analytics
    workbench replaced them, and as "use server" exports they stayed callable by any

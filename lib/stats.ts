@@ -97,3 +97,33 @@ export const getHeaderCounts = unstable_cache(
   ["header-counts"],
   { revalidate: REVALIDATE_SECONDS, tags: [STATS_TAG] },
 );
+
+/**
+ * Global crop / pest facet lists (farmer counts per tag). These are full-table `unnest`
+ * aggregates over the ~130k farmers — heavy to recompute on every farmers/clusters load, yet
+ * they only change when data is imported. Cached + tag-busted like the counts above. Officers/RMs
+ * still run a small live scoped query (their store/region is fast); only the unscoped case is cached.
+ */
+export const getGlobalCropFacet = unstable_cache(
+  async (): Promise<{ crop: string; count: number }[]> => {
+    try {
+      const rows = await prisma.$queryRawUnsafe<{ crop: string; n: number }[]>(
+        `SELECT unnest("cropTags") crop, COUNT(*)::int n FROM "Farmer" GROUP BY 1 ORDER BY 2 DESC LIMIT 40`);
+      return rows.map((r) => ({ crop: r.crop, count: Number(r.n) }));
+    } catch { return []; }
+  },
+  ["global-crop-facet"],
+  { revalidate: REVALIDATE_SECONDS, tags: [STATS_TAG] },
+);
+
+export const getGlobalPestFacet = unstable_cache(
+  async (): Promise<{ pest: string; count: number }[]> => {
+    try {
+      const rows = await prisma.$queryRawUnsafe<{ pest: string; n: number }[]>(
+        `SELECT unnest("pestTags") pest, COUNT(*)::int n FROM "Farmer" GROUP BY 1 ORDER BY 2 DESC LIMIT 60`);
+      return rows.map((r) => ({ pest: r.pest, count: Number(r.n) }));
+    } catch { return []; }
+  },
+  ["global-pest-facet"],
+  { revalidate: REVALIDATE_SECONDS, tags: [STATS_TAG] },
+);

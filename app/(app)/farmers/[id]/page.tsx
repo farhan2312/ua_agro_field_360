@@ -26,6 +26,15 @@ export const dynamic = "force-dynamic";
 const FALLBACK_SEG_BG = "#F5F5F5";
 const FALLBACK_SEG_COLOR = "#757575";
 
+/** ISO "YYYY-MM-DD" → "12 Aug 2026" for display (empty string when unset). */
+function fmtFollowUp(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
 function buildDetail(
   farmer: NonNullable<Awaited<ReturnType<typeof loadFarmer>>>,
 ): FarmerDetail {
@@ -51,6 +60,7 @@ function buildDetail(
     date: v.date ?? "",
     notes: v.notes ?? "",
     by: v.officerName ?? "",
+    followUp: fmtFollowUp(v.followUpDate),
   }));
 
   // Computed lifetime value from numeric amounts (falls back to ₹0).

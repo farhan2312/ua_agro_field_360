@@ -13,6 +13,8 @@ import {
 
 /** Distinct-crop option (kept here as it's imported by the Farmer Clusters + Projects screens). */
 export interface CropOption { crop: string; count: number }
+/** Distinct Target-pest option (item-code derived). */
+export interface PestOption { pest: string; count: number }
 
 export interface CommTemplateVM {
   id: number; name: string; language: string; promoType: string;

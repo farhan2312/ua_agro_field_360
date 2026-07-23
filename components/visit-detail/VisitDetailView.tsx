@@ -6,6 +6,7 @@ import type { RecCard } from "@/lib/visit-types";
 export interface VisitDetailData {
   vid: string;
   date: string;
+  followUpDate: string; // next-visit date the officer scheduled (display), or ""
   purpose: string;
   notes: string;
   officer: string;
@@ -190,6 +191,7 @@ export function VisitDetailView({ data }: { data: VisitDetailData }) {
                 <Field label="Officer">{data.officer || "—"}</Field>
                 <Field label="Recorded by">{data.recordedBy || "—"}</Field>
                 <Field label="Date">{data.date || "—"}</Field>
+                {data.followUpDate && <Field label="Follow-up date">📅 {data.followUpDate}</Field>}
               </div>
               <div className="grid grid-cols-2 px-[14px] py-[9px] border-b border-[#F5F5F5]">
                 <Field label="Village">{data.village || "—"}</Field>

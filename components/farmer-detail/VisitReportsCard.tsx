@@ -31,6 +31,11 @@ export function VisitReportsCard({
                 {vl.notes}
               </div>
             )}
+            {vl.followUp && (
+              <div className="ml-4 mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-[#FFF3E0] px-2.5 py-1 text-[11px] font-semibold text-[#E65100]">
+                <span>📅</span> Follow-up: {vl.followUp}
+              </div>
+            )}
             {vl.by && (
               <div className="text-[10.5px] text-[#9E9E9E] ml-4 mt-1">By {vl.by}</div>
             )}

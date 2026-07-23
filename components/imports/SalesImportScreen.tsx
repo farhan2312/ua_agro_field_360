@@ -128,6 +128,9 @@ export function SalesImportScreen({ history }: { history: ImportRow[] }) {
                 <div>Line-items: <b>{num(result.lineItems)}</b></div>
                 <div>Skipped (no mobile): <b>{num(result.skipped)}</b></div>
                 {result.rangeStart && <div>Range: <b>{result.rangeStart} – {result.rangeEnd}</b></div>}
+                {result.itemCodesSeen != null && result.itemCodesSeen > 0 && (
+                  <div className="col-span-2 sm:col-span-3">Crop/pest auto-map: <b>{num(result.itemCodesMatched)}</b>/{num(result.itemCodesSeen)} item codes matched · <b>{num(result.farmersTagged)}</b> farmers tagged</div>
+                )}
               </div>
             </div>
           )}

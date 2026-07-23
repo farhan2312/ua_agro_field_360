@@ -146,6 +146,7 @@ export async function submitVisitAction(
           month: "short",
           year: "numeric",
         }),
+        followUpDate: form.followUpDate || null, // next-visit date the officer set on Review & Submit
         purpose: form.visitPurpose || null,
         type: form.visitPurpose || null,
         visitMode: form.visitMode,

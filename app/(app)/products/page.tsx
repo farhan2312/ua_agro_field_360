@@ -13,7 +13,7 @@ export default async function ProductsPage() {
 
   const canEdit = role === "central" || role === "sysadmin";
   let initial = { rows: [], total: 0, page: 1, pageSize: 50 } as Awaited<ReturnType<typeof listProducts>>;
-  let facets: ProductFacets = { mainCategories: [], subCategories: [], cropTags: [], uoms: [] };
+  let facets: ProductFacets = { mainCategories: [], subCategories: [], cropTags: [], uoms: [], targetCrops: [], targetPests: [] };
   let kpis: CatalogKpis = { products: 0, revenue: 0, qty: 0, categories: 0 };
 
   try {

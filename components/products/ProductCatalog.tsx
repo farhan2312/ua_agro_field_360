@@ -18,6 +18,52 @@ const CAT_COLOR: Record<string, string> = {
   "OTHERS": "#757575", "MECHANICAL SPRAYER": "#6A1B9A", "ELECTRICAL EQUIPMENT": "#00838F",
 };
 const catColor = (c: string | null) => (c ? CAT_COLOR[c] ?? "#616161" : "#9E9E9E");
+const CONF_COLOR: Record<string, string> = { High: "#2E7D32", Medium: "#F9A825", Low: "#C62828" };
+
+/** Truncated free-text cell with a hover tooltip carrying the full value. */
+function Trunc({ v, w = "180px" }: { v: string | null; w?: string }) {
+  if (!v) return <span className="text-[#DDD]">·</span>;
+  return <span className="block truncate text-[#616161]" style={{ maxWidth: w }} title={v}>{v}</span>;
+}
+/** Chip list for the multi-value crop/pest tags. */
+function Chips({ tags, bg, fg }: { tags: string[]; bg: string; fg: string }) {
+  if (!tags.length) return <span className="text-[#DDD]">·</span>;
+  return (
+    <div className="flex max-w-[240px] flex-wrap gap-1">
+      {tags.map((t) => <span key={t} className="rounded-full px-1.5 py-0.5 text-[9.5px] font-semibold capitalize" style={{ background: bg, color: fg }}>{t}</span>)}
+    </div>
+  );
+}
+
+/** Every inventory-master column, in file order, plus the sales rollups. */
+type Col = { key: string; label: string; align?: "right" | "center"; render: (p: ProductVM) => React.ReactNode };
+const COLUMNS: Col[] = [
+  { key: "itemCode", label: "Item Code", render: (p) => p.itemCode ? <span className="whitespace-nowrap font-mono text-[11.5px] text-[#1565C0]">{p.itemCode}</span> : <span className="text-[#DDD]">·</span> },
+  { key: "name", label: "Clean Item Name", render: (p) => (<div className="min-w-[180px]"><div className="font-semibold text-[#1A1C1A]">{p.name}</div>{p.name !== p.rawName && <div className="text-[10px] text-[#BDBDBD]">{p.rawName}</div>}</div>) },
+  { key: "cat", label: "Category", render: (p) => <span className="whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold text-white" style={{ background: catColor(p.mainCategory) }}>{p.mainCategory ?? "—"}</span> },
+  { key: "sub", label: "Sub Category", render: (p) => <Trunc v={p.subCategory} w="130px" /> },
+  { key: "brand", label: "Canonical Brand", render: (p) => <Trunc v={p.brand} w="140px" /> },
+  { key: "pack", label: "Pack Size", render: (p) => <span className="whitespace-nowrap text-[#616161]">{p.packSize ?? "—"}</span> },
+  { key: "uom", label: "UOM", align: "center", render: (p) => <span className="text-[#616161]">{p.uom ?? "—"}</span> },
+  { key: "hsn", label: "HSN Code", render: (p) => <span className="whitespace-nowrap font-mono text-[11px] text-[#757575]">{p.hsnCode ?? "—"}</span> },
+  { key: "gst", label: "GST %", align: "right", render: (p) => <span className="text-[#616161]">{p.taxRate != null ? `${p.taxRate}%` : "—"}</span> },
+  { key: "tech", label: "Technical Name", render: (p) => <Trunc v={p.technicalName} w="200px" /> },
+  { key: "ai", label: "Active Ingredient(s)", render: (p) => <Trunc v={p.activeIngredients} w="180px" /> },
+  { key: "tCrops", label: "Target Crops", render: (p) => <Chips tags={p.targetCrops} bg="#E8F5E9" fg="#1B5E20" /> },
+  { key: "tPests", label: "Target Pests / Diseases / Weeds", render: (p) => <Chips tags={p.targetPests} bg="#FFF3E0" fg="#E65100" /> },
+  { key: "cropTag", label: "Seed Crop", render: (p) => p.cropTag ? <span className="whitespace-nowrap rounded-full bg-[#FFF8E1] px-2 py-0.5 text-[10.5px] font-semibold text-[#8D6E00] capitalize">{p.cropTag}</span> : <span className="text-[#DDD]">·</span> },
+  { key: "alt", label: "Alternative Products", render: (p) => <Trunc v={p.alternativeProducts} w="200px" /> },
+  { key: "conf", label: "Mapping Confidence", align: "center", render: (p) => p.mappingConfidence ? <span className="whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold text-white" style={{ background: CONF_COLOR[p.mappingConfidence] ?? "#9E9E9E" }}>{p.mappingConfidence}</span> : <span className="text-[#DDD]">·</span> },
+  { key: "quality", label: "Quality Flag", render: (p) => <Trunc v={p.qualityFlag} w="120px" /> },
+  { key: "status", label: "Status", align: "center", render: (p) => <span className="whitespace-nowrap text-[#616161]">{p.statusFlag ?? "—"}</span> },
+  { key: "origName", label: "Original Item Name", render: (p) => <Trunc v={p.originalItemName} w="180px" /> },
+  { key: "origBrand", label: "Original Brand", render: (p) => <Trunc v={p.originalBrand} w="120px" /> },
+  { key: "origDesc", label: "Original Description", render: (p) => <Trunc v={p.originalDescription} w="200px" /> },
+  { key: "price", label: "Unit price", align: "right", render: (p) => <span className="whitespace-nowrap text-[#1A1C1A]">{price(p.avgPrice)}</span> },
+  { key: "qty", label: "Units sold", align: "right", render: (p) => <span className="whitespace-nowrap font-semibold text-[#1A1C1A]">{n(p.totalQty)}</span> },
+  { key: "rev", label: "Revenue", align: "right", render: (p) => <span className="whitespace-nowrap font-bold text-[#2E7D32]">{inr(p.totalRevenue)}</span> },
+  { key: "last", label: "Last sold", align: "right", render: (p) => <span className="whitespace-nowrap text-[11.5px] text-[#9E9E9E]">{p.lastSoldAt ?? "—"}</span> },
+];
 
 export interface CatalogKpis { products: number; revenue: number; qty: number; categories: number }
 
@@ -30,6 +76,7 @@ export function ProductCatalog({ initial, facets, kpis, canEdit }: {
   const [loading, start] = useTransition();
   const [editing, setEditing] = useState<ProductVM | null>(null);
   const [merging, setMerging] = useState<ProductVM | null>(null);
+  const [viewing, setViewing] = useState<ProductVM | null>(null);
 
   const load = (f: ProductFilters) => start(async () => setData(await listProducts(f)));
   const set = (patch: Partial<ProductFilters>) => {
@@ -65,53 +112,45 @@ export function ProductCatalog({ initial, facets, kpis, canEdit }: {
 
       {/* Filters */}
       <div className={`${CARD} mb-3 flex flex-wrap items-center gap-2 p-3`}>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search product…"
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, item code, technical, brand…"
           className="min-w-[180px] flex-1 rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" />
         <Select value={filters.mainCategory ?? ""} onChange={(v) => set({ mainCategory: v || undefined })} placeholder="All categories" options={facets.mainCategories} />
         <Select value={filters.subCategory ?? ""} onChange={(v) => set({ subCategory: v || undefined })} placeholder="All sub-categories" options={facets.subCategories} />
-        <Select value={filters.cropTag ?? ""} onChange={(v) => set({ cropTag: v || undefined })} placeholder="All crops" options={facets.cropTags} />
+        <Select value={filters.targetCrop ?? ""} onChange={(v) => set({ targetCrop: v || undefined })} placeholder="Target crop (any)" options={facets.targetCrops} />
+        <Select value={filters.targetPest ?? ""} onChange={(v) => set({ targetPest: v || undefined })} placeholder="Target pest (any)" options={facets.targetPests} />
+        <Select value={filters.cropTag ?? ""} onChange={(v) => set({ cropTag: v || undefined })} placeholder="Seed crop (any)" options={facets.cropTags} />
         <Select value={filters.uom ?? ""} onChange={(v) => set({ uom: v || undefined })} placeholder="Any unit" options={facets.uoms} />
         <Select value={filters.sort ?? "revenue"} onChange={(v) => set({ sort: v as ProductFilters["sort"] })} placeholder="Sort"
           options={[["revenue", "Top revenue"], ["qty", "Top units"], ["recent", "Recently sold"], ["name", "Name A–Z"]]} />
         {loading && <span className="text-[12px] text-[#9E9E9E]">Updating…</span>}
       </div>
 
-      {/* Table */}
+      {/* Table — every inventory-master column (horizontally scrollable). Long free-text is
+          truncated with a hover tooltip; the Details button opens the full untruncated record. */}
       <div className={`${CARD} overflow-hidden`}>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[920px] text-left text-[12.5px]">
+          <table className="w-full min-w-[2600px] text-left text-[12.5px]">
             <thead>
               <tr className="border-b border-[#EEE] bg-[#FAFAFA] text-[10px] font-bold uppercase tracking-[0.3px] text-[#9E9E9E]">
-                <th className="px-4 py-2.5">Product</th><th>Category</th><th>Crop</th><th className="text-center">Unit</th>
-                <th className="text-right">Unit price</th><th className="text-right">Units sold</th><th className="text-right">Revenue</th>
-                <th className="text-right">Last sold</th>{canEdit && <th className="text-right px-4">Actions</th>}
+                {COLUMNS.map((c) => <th key={c.key} className={`whitespace-nowrap px-3 py-2.5 ${c.align === "right" ? "text-right" : c.align === "center" ? "text-center" : ""}`}>{c.label}</th>)}
+                <th className="whitespace-nowrap px-4 py-2.5 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {data.rows.length === 0 ? (
-                <tr><td colSpan={canEdit ? 9 : 8} className="px-4 py-10 text-center text-[13px] text-[#9E9E9E]">No products match.</td></tr>
+                <tr><td colSpan={COLUMNS.length + 1} className="px-4 py-10 text-center text-[13px] text-[#9E9E9E]">No products match.</td></tr>
               ) : data.rows.map((p) => (
-                <tr key={p.id} className={`border-b border-[#F5F5F5] ${p.active ? "" : "opacity-50"}`}>
-                  <td className="px-4 py-2.5">
-                    <div className="font-semibold text-[#1A1C1A]">{p.name}</div>
-                    {p.name !== p.rawName && <div className="text-[10.5px] text-[#BDBDBD]">{p.rawName}</div>}
-                  </td>
-                  <td>
-                    <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold text-white" style={{ background: catColor(p.mainCategory) }}>{p.mainCategory ?? "—"}</span>
-                    {p.subCategory && <div className="mt-0.5 text-[10.5px] text-[#9E9E9E]">{p.subCategory}</div>}
-                  </td>
-                  <td>{p.cropTag ? <span className="rounded-full bg-[#FFF8E1] px-2 py-0.5 text-[10.5px] font-semibold text-[#8D6E00]">{p.cropTag}</span> : <span className="text-[#DDD]">·</span>}</td>
-                  <td className="text-center text-[#616161]">{p.uom ?? "—"}</td>
-                  <td className="text-right text-[#1A1C1A]">{price(p.avgPrice)}</td>
-                  <td className="text-right font-semibold text-[#1A1C1A]">{n(p.totalQty)}</td>
-                  <td className="text-right font-bold text-[#2E7D32]">{inr(p.totalRevenue)}</td>
-                  <td className="text-right text-[11.5px] text-[#9E9E9E]">{p.lastSoldAt ?? "—"}</td>
-                  {canEdit && (
-                    <td className="px-4 text-right whitespace-nowrap">
-                      <button type="button" onClick={() => setEditing(p)} className="text-[12px] font-semibold text-[#2E7D32] hover:underline">Edit</button>
+                <tr key={p.id} className={`border-b border-[#F5F5F5] align-top ${p.active ? "" : "opacity-50"}`}>
+                  {COLUMNS.map((c) => (
+                    <td key={c.key} className={`px-3 py-2.5 ${c.align === "right" ? "text-right" : c.align === "center" ? "text-center" : ""}`}>{c.render(p)}</td>
+                  ))}
+                  <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                    <button type="button" onClick={() => setViewing(p)} className="text-[12px] font-semibold text-[#6A1B9A] hover:underline">Details</button>
+                    {canEdit && <>
+                      <button type="button" onClick={() => setEditing(p)} className="ml-3 text-[12px] font-semibold text-[#2E7D32] hover:underline">Edit</button>
                       <button type="button" onClick={() => setMerging(p)} className="ml-3 text-[12px] font-semibold text-[#1565C0] hover:underline">Merge</button>
-                    </td>
-                  )}
+                    </>}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -127,9 +166,56 @@ export function ProductCatalog({ initial, facets, kpis, canEdit }: {
         </div>
       </div>
 
+      {viewing && <DetailModal product={viewing} onClose={() => setViewing(null)} />}
       {editing && <EditModal product={editing} facets={facets} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(filters); }} />}
       {merging && <MergeModal product={merging} onClose={() => setMerging(null)} onMerged={() => { setMerging(null); load(filters); }} />}
     </div>
+  );
+}
+
+/** Full inventory-master record for one product — every column, untruncated. */
+function DetailModal({ product: p, onClose }: { product: ProductVM; onClose: () => void }) {
+  const rows: [string, React.ReactNode][] = [
+    ["Item Code", p.itemCode ?? "—"],
+    ["Clean Item Name", p.name],
+    ["Original Item Name", p.originalItemName ?? "—"],
+    ["Category", p.mainCategory ?? "—"],
+    ["Sub Category", p.subCategory ?? "—"],
+    ["Canonical Brand", p.brand ?? "—"],
+    ["Original Brand", p.originalBrand ?? "—"],
+    ["Pack Size", p.packSize ?? "—"],
+    ["UOM", p.uom ?? "—"],
+    ["HSN Code", p.hsnCode ?? "—"],
+    ["GST %", p.taxRate != null ? `${p.taxRate}%` : "—"],
+    ["Standardized Technical Name", p.technicalName ?? "—"],
+    ["Active Ingredient(s)", p.activeIngredients ?? "—"],
+    ["Target Crops", p.targetCropsRaw || (p.targetCrops.length ? p.targetCrops.join("; ") : "—")],
+    ["Target Pests / Diseases / Weeds", p.targetPestsRaw || (p.targetPests.length ? p.targetPests.join("; ") : "—")],
+    ["Seed Crop (derived)", p.cropTag ?? "—"],
+    ["Alternative Products", p.alternativeProducts ?? "—"],
+    ["Mapping Confidence", p.mappingConfidence ?? "—"],
+    ["Quality Flag", p.qualityFlag ?? "—"],
+    ["Status", p.statusFlag ?? "—"],
+    ["Original Description", p.originalDescription ?? "—"],
+    ["Units sold", n(p.totalQty)],
+    ["Revenue", inr(p.totalRevenue)],
+    ["Avg / last price", `${price(p.avgPrice)} / ${price(p.lastPrice)}`],
+    ["First / last sold", `${p.firstSoldAt ?? "—"} · ${p.lastSoldAt ?? "—"}`],
+  ];
+  return (
+    <Modal open onClose={onClose} className="max-w-[680px]">
+      <ModalHeader eyebrow={p.itemCode ?? "Product"} eyebrowColor="#6A1B9A" title={p.name} subtitle={p.mainCategory ?? undefined} onClose={onClose} />
+      <div className="max-h-[74vh] overflow-y-auto px-5 py-4">
+        <dl className="grid grid-cols-1 gap-x-6 gap-y-2.5 sm:grid-cols-2">
+          {rows.map(([k, v]) => (
+            <div key={k} className="min-w-0">
+              <dt className="text-[10px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">{k}</dt>
+              <dd className="mt-0.5 break-words text-[12.5px] leading-[1.5] text-[#1A1C1A]">{v}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </Modal>
   );
 }
 

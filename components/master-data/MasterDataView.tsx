@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { EmptyState } from "@/components/ui";
+import { Modal, ModalHeader } from "@/components/interactive";
 import { ChevronLeft, ChevronRight } from "@/components/icons";
 import { StoreEditModal, FarmerEditModal } from "./EditModal";
 import type {
@@ -94,12 +95,10 @@ const STORE_COLS = "0.5fr 1.4fr 1fr 1fr 1fr 0.8fr 0.6fr";
 
 function StoresTable({
   rows,
-  canEdit,
-  onEdit,
+  onOpen,
 }: {
   rows: StoreRow[];
-  canEdit: boolean;
-  onEdit: (s: StoreRow) => void;
+  onOpen: (s: StoreRow) => void;
 }) {
   return (
     <TableCard>
@@ -122,11 +121,8 @@ function StoresTable({
         rows.map((st) => (
           <div
             key={st.id}
-            onClick={canEdit ? () => onEdit(st) : undefined}
-            className={cn(
-              "grid items-start gap-3 border-b border-[#F5F5F5] px-5 py-3.5 transition-[background] duration-[120ms] hover:bg-[#FAFFF8]",
-              canEdit && "cursor-pointer",
-            )}
+            onClick={() => onOpen(st)}
+            className="grid cursor-pointer items-start gap-3 border-b border-[#F5F5F5] px-5 py-3.5 transition-[background] duration-[120ms] hover:bg-[#FAFFF8]"
             style={{ gridTemplateColumns: STORE_COLS }}
           >
             <div>
@@ -194,12 +190,10 @@ const FARMER_COLS =
 
 function FarmersTable({
   rows,
-  canEdit,
-  onEdit,
+  onOpen,
 }: {
   rows: FarmerRow[];
-  canEdit: boolean;
-  onEdit: (f: FarmerRow) => void;
+  onOpen: (f: FarmerRow) => void;
 }) {
   return (
     <TableCard>
@@ -224,11 +218,8 @@ function FarmersTable({
         rows.map((fr) => (
           <div
             key={fr.id}
-            onClick={canEdit ? () => onEdit(fr) : undefined}
-            className={cn(
-              "grid items-center gap-2.5 border-b border-[#F5F5F5] px-5 py-3 transition-[background] duration-[120ms] hover:bg-[#FAFFF8]",
-              canEdit && "cursor-pointer",
-            )}
+            onClick={() => onOpen(fr)}
+            className="grid cursor-pointer items-center gap-2.5 border-b border-[#F5F5F5] px-5 py-3 transition-[background] duration-[120ms] hover:bg-[#FAFFF8]"
             style={{ gridTemplateColumns: FARMER_COLS }}
           >
             <div className="text-[11px] font-semibold text-[#BDBDBD]">
@@ -273,7 +264,7 @@ function FarmersTable({
 
 const EMP_COLS = "0.3fr 1.4fr 1fr 1fr 0.8fr 1.2fr";
 
-function EmployeesTable({ rows }: { rows: EmployeeRow[] }) {
+function EmployeesTable({ rows, onOpen }: { rows: EmployeeRow[]; onOpen: (e: EmployeeRow) => void }) {
   return (
     <TableCard>
       <HeaderRow
@@ -297,7 +288,8 @@ function EmployeesTable({ rows }: { rows: EmployeeRow[] }) {
         rows.map((emp) => (
           <div
             key={emp.id}
-            className="grid items-center gap-3 border-b border-[#F5F5F5] px-5 py-[13px] transition-[background] duration-[120ms] hover:bg-[#FAFFF8]"
+            onClick={() => onOpen(emp)}
+            className="grid cursor-pointer items-center gap-3 border-b border-[#F5F5F5] px-5 py-[13px] transition-[background] duration-[120ms] hover:bg-[#FAFFF8]"
             style={{ gridTemplateColumns: EMP_COLS }}
           >
             <div className="text-[11px] font-semibold text-[#BDBDBD]">
@@ -397,6 +389,12 @@ export function MasterDataView({
   canEdit: boolean;
 }) {
   const [tab, setTab] = useState<MasterDataTab>(initialTab);
+  const [detail, setDetail] = useState<
+    | { kind: "store"; row: StoreRow }
+    | { kind: "farmer"; row: FarmerRow }
+    | { kind: "employee"; row: EmployeeRow }
+    | null
+  >(null);
   const [editStore, setEditStore] = useState<StoreRow | null>(null);
   const [editFarmer, setEditFarmer] = useState<FarmerRow | null>(null);
 
@@ -417,20 +415,30 @@ export function MasterDataView({
       <TabBar active={tab} onChange={setTab} />
 
       {tab === "stores" && (
-        <StoresTable rows={stores} canEdit={canEdit} onEdit={setEditStore} />
+        <StoresTable rows={stores} onOpen={(s) => setDetail({ kind: "store", row: s })} />
       )}
       {tab === "farmers" && (
         <>
-          <FarmersTable
-            rows={farmers}
-            canEdit={canEdit}
-            onEdit={setEditFarmer}
-          />
+          <FarmersTable rows={farmers} onOpen={(f) => setDetail({ kind: "farmer", row: f })} />
           <FarmerPager page={farmerPage} pageCount={farmerPageCount} />
         </>
       )}
-      {tab === "employees" && <EmployeesTable rows={employees} />}
+      {tab === "employees" && (
+        <EmployeesTable rows={employees} onOpen={(e) => setDetail({ kind: "employee", row: e })} />
+      )}
 
+      {detail && (
+        <DetailModal
+          detail={detail}
+          canEdit={canEdit}
+          onClose={() => setDetail(null)}
+          onEdit={() => {
+            if (detail.kind === "store") setEditStore(detail.row);
+            else if (detail.kind === "farmer") setEditFarmer(detail.row);
+            setDetail(null);
+          }}
+        />
+      )}
       {editStore && (
         <StoreEditModal store={editStore} onClose={() => setEditStore(null)} />
       )}
@@ -441,5 +449,82 @@ export function MasterDataView({
         />
       )}
     </div>
+  );
+}
+
+/* ── Read-only details modal (all 3 tabs) — reliable render + clear X close ── */
+
+type DetailState =
+  | { kind: "store"; row: StoreRow }
+  | { kind: "farmer"; row: FarmerRow }
+  | { kind: "employee"; row: EmployeeRow };
+
+function detailFields(d: DetailState): { title: string; eyebrow: string; color: string; rows: [string, string][] } {
+  if (d.kind === "store") {
+    const s = d.row;
+    const officers = [s.ao1Name && `${s.ao1Name}${s.ao1Mobile ? ` · ${s.ao1Mobile}` : ""}`, s.ao2Name && `${s.ao2Name}${s.ao2Mobile ? ` · ${s.ao2Mobile}` : ""}`]
+      .filter(Boolean).join("\n") || "—";
+    return {
+      title: s.name, eyebrow: `Store · ${s.code}`, color: s.color,
+      rows: [
+        ["Code", s.code], ["Store name", s.name], ["Address", s.address || "—"],
+        ["Zone / District", s.zone || "—"], ["Agri officer(s)", officers],
+        ["BDM", s.bdmName ? `${s.bdmName}${s.bdmMobile ? ` · ${s.bdmMobile}` : ""}` : "—"],
+        ["Registered farmers", s.farmerCountLabel], ["Status", s.status],
+      ],
+    };
+  }
+  if (d.kind === "farmer") {
+    const f = d.row;
+    return {
+      title: f.name, eyebrow: `Farmer · ${f.code}`, color: f.storeColor,
+      rows: [
+        ["Code", f.code], ["Name", f.name], ["Mobile", f.mobile || "—"],
+        ["Village", f.village || "—"], ["District", f.district || "—"], ["Main crop", f.crop || "—"],
+        ["Store", f.storeName || "—"], ["Agri officer", f.aoName || "—"], ["Segment", f.segment || "—"],
+      ],
+    };
+  }
+  const e = d.row;
+  return {
+    title: e.name, eyebrow: `Employee${e.storeCode ? ` · ${e.storeCode}` : ""}`, color: e.storeColor,
+    rows: [
+      ["Name", e.name], ["Email", e.email || "—"], ["Role", e.role || "—"],
+      ["Mobile", e.mobile || "—"], ["Store code", e.storeCode || "—"], ["Store name", e.storeName || "—"],
+    ],
+  };
+}
+
+function DetailModal({ detail, canEdit, onClose, onEdit }: {
+  detail: DetailState; canEdit: boolean; onClose: () => void; onEdit: () => void;
+}) {
+  const { title, eyebrow, color, rows } = detailFields(detail);
+  const editable = canEdit && (detail.kind === "store" || detail.kind === "farmer");
+  return (
+    <Modal open onClose={onClose} className="max-w-[560px]">
+      <ModalHeader eyebrow={eyebrow} eyebrowColor={color} title={title} onClose={onClose} />
+      <div className="max-h-[70vh] overflow-y-auto px-6 py-5">
+        <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+          {rows.map(([k, v]) => (
+            <div key={k} className="min-w-0">
+              <dt className="text-[10px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">{k}</dt>
+              <dd className="mt-0.5 whitespace-pre-line break-words text-[13px] leading-[1.5] text-[#1A1C1A]">{v}</dd>
+            </div>
+          ))}
+        </dl>
+        <div className="mt-6 flex justify-end gap-2 border-t border-[#F0F0F0] pt-4">
+          {editable && (
+            <button type="button" onClick={onEdit}
+              className="rounded-[10px] bg-brand-600 px-5 py-2 text-[13px] font-semibold text-white hover:bg-brand-700">
+              Edit
+            </button>
+          )}
+          <button type="button" onClick={onClose}
+            className="rounded-[10px] border-[1.5px] border-[#E0E0E0] px-5 py-2 text-[13px] font-semibold text-[#616161] hover:border-[#9E9E9E]">
+            Close
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }

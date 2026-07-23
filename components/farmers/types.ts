@@ -13,6 +13,8 @@ export interface FarmerFacetsVM {
   zones: string[];
   /** Canonical crop tags with farmer counts, most common first. */
   crops: { crop: string; count: number }[];
+  /** Target pest/disease/weed tags with farmer counts, most common first. */
+  pests: { pest: string; count: number }[];
   /** Spend-tier labels; the URL value is the tier's index. */
   spendTiers: string[];
 }
@@ -22,6 +24,7 @@ export interface FarmerSelectedVM {
   store: string | null;
   zone: string | null;
   crop: string | null;
+  pest: string | null;
   spend: string | null;
 }
 

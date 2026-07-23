@@ -22,6 +22,7 @@ type VisitRow = {
   id: number;
   date: string | null;
   visitedAt: Date | null;
+  followUpDate: string | null;
   purpose: string | null;
   notes: string | null;
   officerName: string | null;
@@ -102,6 +103,7 @@ function emptyDetail(id: number, justCreated: boolean): VisitDetailData {
   return {
     vid: `VIS-${String(id).padStart(4, "0")}`,
     date: "",
+    followUpDate: "",
     purpose: "",
     notes: "",
     officer: "",
@@ -184,6 +186,7 @@ export default async function VisitDetailPage({
         id: true,
         date: true,
         visitedAt: true,
+        followUpDate: true,
         purpose: true,
         notes: true,
         officerName: true,
@@ -259,6 +262,9 @@ export default async function VisitDetailPage({
   const data: VisitDetailData = {
     vid: `VIS-${String(visit.id).padStart(4, "0")}`,
     date: displayDate(visit.date, visit.visitedAt),
+    followUpDate: visit.followUpDate
+      ? (() => { const d = new Date(`${visit.followUpDate}T00:00:00`); return Number.isNaN(d.getTime()) ? visit.followUpDate! : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); })()
+      : "",
     purpose: visit.purpose ?? "",
     notes: visit.notes ?? "",
     officer: visit.officerName ?? "",

@@ -16,6 +16,7 @@ export interface ClusterCriteria {
   villages?: string[];
   crop?: string; // farmer.crop (enrichment)
   cropTags?: string[]; // any crop (sales ∪ visit) — match ANY
+  pestTags?: string[]; // any Target Pest/Disease/Weed (item-code derived) — match ANY
   salesCrops?: string[]; // crops from the sales upload — match ANY
   visitCrops?: string[]; // crops from field visits — match ANY
   visitProblem?: string; // farmer has a visit recording this problem
@@ -42,6 +43,7 @@ export function criteriaToWhere(c: ClusterCriteria): Prisma.FarmerWhereInput {
   if (c.villages?.length) and.push({ village: { in: c.villages } });
   if (c.crop) and.push({ crop: c.crop });
   if (c.cropTags?.length) and.push({ cropTags: { hasSome: c.cropTags } });
+  if (c.pestTags?.length) and.push({ pestTags: { hasSome: c.pestTags } });
   if (c.salesCrops?.length) and.push({ salesCropTags: { hasSome: c.salesCrops } });
   if (c.visitCrops?.length) and.push({ visitCropTags: { hasSome: c.visitCrops } });
   if (c.visitProblem) and.push({ visits: { some: { currentProblem: { has: c.visitProblem } } } });
@@ -105,6 +107,7 @@ export function describeCriteria(c: ClusterCriteria, storeNames?: Map<number, st
   if (c.segment) parts.push(c.segment);
   if (c.crop) parts.push(`Crop: ${c.crop}`);
   if (c.cropTags?.length) parts.push(c.cropTags.map(cropLabel).join(" + "));
+  if (c.pestTags?.length) parts.push(`Pest: ${c.pestTags.join(" / ")}`);
   if (c.salesCrops?.length) parts.push(`Sales crop: ${c.salesCrops.map(cropLabel).join(" / ")}`);
   if (c.visitCrops?.length) parts.push(`Visit crop: ${c.visitCrops.map(cropLabel).join(" / ")}`);
   if (c.visitProblem) parts.push(`Problem: ${c.visitProblem}`);

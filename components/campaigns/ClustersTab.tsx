@@ -4,9 +4,10 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
 import { SEGMENT_COLUMNS, segMeta } from "@/lib/campaign-segments";
 import { cropLabel } from "@/lib/crops";
+import { tagLabel } from "@/lib/crop-pest";
 import { shortStoreName } from "@/lib/store-utils";
 import type { ClusterCriteria } from "@/lib/cluster-rules";
-import type { CropOption } from "./CampaignsScreen";
+import type { CropOption, PestOption } from "./CampaignsScreen";
 import {
   listClustersWithCounts, deleteCluster, previewClusterCount, type ClusterVM,
 } from "@/app/actions/campaigns";
@@ -27,8 +28,8 @@ const ORIGIN_LABEL: Record<string, string> = { map: "Map", segment: "Builder", a
 
 export interface StoreOption { id: number; name: string; zone: string | null }
 
-export function ClustersTab({ initial, zones, crops, stores, canChain, canCreate = true, scopeLabel }: {
-  initial: ClusterVM[]; zones: string[]; crops: CropOption[]; stores: StoreOption[]; canChain: boolean;
+export function ClustersTab({ initial, zones, crops, pests, stores, canChain, canCreate = true, scopeLabel }: {
+  initial: ClusterVM[]; zones: string[]; crops: CropOption[]; pests: PestOption[]; stores: StoreOption[]; canChain: boolean;
   /** Central/sysadmin only — RMs get a read-only, region-scoped view. */
   canCreate?: boolean;
   /** e.g. "SULTANPUR" — shown so a scoped viewer knows the counts are their region's. */
@@ -79,18 +80,19 @@ export function ClustersTab({ initial, zones, crops, stores, canChain, canCreate
         ))}
       </div>
 
-      {building && <RuleBuilder zones={zones} crops={crops} stores={stores} canChain={canChain} onClose={() => setBuilding(false)} onCreated={() => { setBuilding(false); refresh(); }} />}
+      {building && <RuleBuilder zones={zones} crops={crops} pests={pests} stores={stores} canChain={canChain} onClose={() => setBuilding(false)} onCreated={() => { setBuilding(false); refresh(); }} />}
       {viewing && <MembersModal cluster={viewing} onClose={() => setViewing(null)} />}
     </div>
   );
 }
 
 /* ── Rule builder ── */
-function RuleBuilder({ zones, crops: cropOpts, stores, canChain, onClose, onCreated }: { zones: string[]; crops: CropOption[]; stores: StoreOption[]; canChain: boolean; onClose: () => void; onCreated: () => void }) {
+function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain, onClose, onCreated }: { zones: string[]; crops: CropOption[]; pests: PestOption[]; stores: StoreOption[]; canChain: boolean; onClose: () => void; onCreated: () => void }) {
   const [name, setName] = useState("");
   const [createdId, setCreatedId] = useState<number | null>(null); // chain: cluster → project
   const [segs, setSegs] = useState<string[]>([]);
   const [crops, setCrops] = useState<string[]>([]);
+  const [pests, setPests] = useState<string[]>([]);
   const [zoneList, setZoneList] = useState<string[]>([]);
   const [storeIds, setStoreIds] = useState<number[]>([]);
   const [spendIdx, setSpendIdx] = useState(-1);
@@ -110,12 +112,13 @@ function RuleBuilder({ zones, crops: cropOpts, stores, canChain, onClose, onCrea
   const criteria = (): ClusterCriteria => ({
     campaignSegments: segs.length ? segs : undefined,
     cropTags: crops.length ? crops : undefined,
+    pestTags: pests.length ? pests : undefined,
     zones: zoneList.length ? zoneList : undefined,
     storeIds: storeIds.length ? storeIds : undefined,
     ...(spendIdx >= 0 ? { spendMin: SPEND_PRESETS[spendIdx].min, spendMax: SPEND_PRESETS[spendIdx].max } : {}),
     q: q.trim() || undefined,
   });
-  const hasAny = segs.length || crops.length || zoneList.length || storeIds.length || spendIdx >= 0 || q.trim();
+  const hasAny = segs.length || crops.length || pests.length || zoneList.length || storeIds.length || spendIdx >= 0 || q.trim();
 
   // Debounced live count preview.
   useEffect(() => {
@@ -124,7 +127,7 @@ function RuleBuilder({ zones, crops: cropOpts, stores, canChain, onClose, onCrea
     const t = setTimeout(async () => { setCount(await previewClusterCount(criteria())); setCounting(false); }, 350);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segs, crops, zoneList, storeIds, spendIdx, q]);
+  }, [segs, crops, pests, zoneList, storeIds, spendIdx, q]);
 
   const toggle = (arr: string[], set: (a: string[]) => void, v: string) => set(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
   const toggleZone = (z: string) => {
@@ -171,6 +174,16 @@ function RuleBuilder({ zones, crops: cropOpts, stores, canChain, onClose, onCrea
         </select>
         <div className="mb-3 flex flex-wrap gap-1.5">{crops.map((c) => (
           <button key={c} type="button" onClick={() => toggle(crops, setCrops, c)} className="rounded-full border-[1.5px] border-[#2E7D32] bg-[#E8F5E9] px-3 py-1 text-[12px] font-semibold text-[#2E7D32]">{cropLabel(c)} ✕</button>
+        ))}</div>
+
+        <div className="mb-1.5 text-[11px] font-semibold uppercase text-[#9E9E9E]">Target pest / disease (any of)</div>
+        <select value="" onChange={(e) => { if (e.target.value) toggle(pests, setPests, e.target.value); }}
+          className="mb-2 w-full rounded-lg border border-[#E0E0E0] bg-white px-3 py-2 text-[13px]">
+          <option value="">+ Add a pest / disease…</option>
+          {pestOpts.filter((p) => !pests.includes(p.pest)).map((p) => <option key={p.pest} value={p.pest}>{tagLabel(p.pest)} ({p.count.toLocaleString("en-IN")})</option>)}
+        </select>
+        <div className="mb-3 flex flex-wrap gap-1.5">{pests.map((p) => (
+          <button key={p} type="button" onClick={() => toggle(pests, setPests, p)} className="rounded-full border-[1.5px] border-[#E65100] bg-[#FFF3E0] px-3 py-1 text-[12px] font-semibold text-[#E65100]">{tagLabel(p)} ✕</button>
         ))}</div>
 
         <div className="mb-1.5 text-[11px] font-semibold uppercase text-[#9E9E9E]">Spend tier (optional)</div>
