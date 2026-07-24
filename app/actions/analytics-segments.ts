@@ -80,6 +80,7 @@ export interface WbFacets {
   pests: { pest: string; count: number }[]; // item-code derived, both lenses
   problems: { problem: string; count: number }[];
   spendTiers: string[];
+  years: number[]; // distinct sale years (for the crop-trend year filter), role-scoped
 }
 export async function getWorkbenchFacets(): Promise<WbFacets> {
   const { role, storeId, zone } = await getScope();
@@ -99,8 +100,13 @@ export async function getWorkbenchFacets(): Promise<WbFacets> {
     ? (storeId != null ? Prisma.sql`v."storeId" = ${storeId}` : Prisma.sql`false`)
     : isRM ? (zone != null ? Prisma.sql`f."zone" = ${zone}` : Prisma.sql`false`)
     : Prisma.sql`true`;
+  // Sale-line scope for the year facet (officer by store, RM by the store's zone).
+  const slScope: Prisma.Sql = isOfficer
+    ? (storeId != null ? Prisma.sql`AND sl."storeId" = ${storeId}` : Prisma.sql`AND false`)
+    : isRM ? (zone != null ? Prisma.sql`AND EXISTS (SELECT 1 FROM "Store" st WHERE st.id = sl."storeId" AND st."zone" = ${zone})` : Prisma.sql`AND false`)
+    : Prisma.empty;
 
-  const [stores, zoneRows, sc, vc, pt, pr] = await Promise.all([
+  const [stores, zoneRows, sc, vc, pt, pr, yr] = await Promise.all([
     prisma.store.findMany({ where: storeWhere, orderBy: { name: "asc" }, select: { id: true, name: true } }),
     isOfficer || isRM
       ? Promise.resolve([] as { zone: string | null }[])
@@ -109,6 +115,7 @@ export async function getWorkbenchFacets(): Promise<WbFacets> {
     prisma.$queryRaw<{ crop: string; n: number }[]>(Prisma.sql`SELECT unnest("visitCropTags") crop, COUNT(*)::int n FROM "Farmer" WHERE source='REAL' AND ${fScope} GROUP BY 1 ORDER BY 2 DESC`),
     prisma.$queryRaw<{ pest: string; n: number }[]>(Prisma.sql`SELECT unnest("pestTags") pest, COUNT(*)::int n FROM "Farmer" WHERE source='REAL' AND ${fScope} GROUP BY 1 ORDER BY 2 DESC LIMIT 200`),
     prisma.$queryRaw<{ problem: string; n: number }[]>(Prisma.sql`SELECT unnest(v."currentProblem") problem, COUNT(*)::int n FROM "Visit" v JOIN "Farmer" f ON f.id = v."farmerId" WHERE array_length(v."currentProblem",1) > 0 AND ${vScope} GROUP BY 1 ORDER BY 2 DESC LIMIT 40`),
+    prisma.$queryRaw<{ y: number }[]>(Prisma.sql`SELECT DISTINCT EXTRACT(YEAR FROM sl."soldAt")::int y FROM "SaleLine" sl WHERE sl."soldAt" IS NOT NULL ${slScope} ORDER BY 1`),
   ]);
   const zones = isRM ? (zone != null ? [zone] : []) : isOfficer ? [] : zoneRows.map((z) => z.zone!).filter(Boolean);
   return {
@@ -119,6 +126,7 @@ export async function getWorkbenchFacets(): Promise<WbFacets> {
     pests: pt.map((r) => ({ pest: r.pest, count: num(r.n) })),
     problems: pr.map((r) => ({ problem: r.problem, count: num(r.n) })),
     spendTiers: SPEND_TIERS.map((t) => t.label),
+    years: yr.map((r) => num(r.y)).filter(Boolean),
   };
 }
 
@@ -488,10 +496,9 @@ export interface CropTrendPoint {
   lines: number; // sale lines
 }
 
-/** Monthly purchase trend for a crop (SaleLine.cropTag), role-scoped like the rest of the workbench. */
+/** Monthly purchase trend (SaleLine), role-scoped. No crop → every crop's sale lines combined. */
 export async function getCropTrend(crop: string): Promise<CropTrendPoint[]> {
   const safe = (crop || "").toLowerCase().replace(/[^a-z_]/g, "");
-  if (!safe) return [];
   const { role, storeId, zone } = await getScope();
   const scopeSql: Prisma.Sql =
     role === "officer"
@@ -501,11 +508,12 @@ export async function getCropTrend(crop: string): Promise<CropTrendPoint[]> {
           ? Prisma.sql`AND EXISTS (SELECT 1 FROM "Store" st WHERE st.id = sl."storeId" AND st."zone" = ${zone})`
           : Prisma.sql`AND false`
         : Prisma.empty;
+  const cropCond = safe ? Prisma.sql`sl."cropTag" = ${safe} AND ` : Prisma.empty;
   const rows = await prisma.$queryRaw<{ ym: string; rev: number; lines: number }[]>(Prisma.sql`
     SELECT to_char(date_trunc('month', sl."soldAt"), 'YYYY-MM') ym,
            COALESCE(SUM(sl."totalPrice"), 0)::float rev, COUNT(*)::int lines
     FROM "SaleLine" sl
-    WHERE sl."cropTag" = ${safe} AND sl."soldAt" IS NOT NULL ${scopeSql}
+    WHERE ${cropCond}sl."soldAt" IS NOT NULL ${scopeSql}
     GROUP BY 1 ORDER BY 1`);
   if (!rows.length) return [];
 

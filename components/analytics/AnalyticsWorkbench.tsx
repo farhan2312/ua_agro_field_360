@@ -26,6 +26,8 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
   const [rows, setRows] = useState<WbCustomer[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [years, setYears] = useState<number[]>([]); // crop-trend year filter (client-side; [] = all years)
+  const toggleYear = (y: number) => setYears((prev) => (prev.includes(y) ? prev.filter((x) => x !== y) : [...prev, y].sort((a, b) => a - b)));
 
   const exportXlsx = () => {
     setExporting(true);
@@ -51,7 +53,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
     });
   };
   const setLens = (lens: Lens) => apply({ lens, crop: undefined, segment: undefined, spendTier: undefined, problem: undefined });
-  const clearAll = () => apply({ storeId: undefined, zone: undefined, crop: undefined, pest: undefined, segment: undefined, spendTier: undefined, problem: undefined });
+  const clearAll = () => { setYears([]); apply({ storeId: undefined, zone: undefined, crop: undefined, pest: undefined, segment: undefined, spendTier: undefined, problem: undefined }); };
 
   const openCell = (storeId: number | null, storeName: string, seg: string) => {
     setCell({ storeId, storeName, seg }); setRows(null);
@@ -59,7 +61,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
   };
 
   const cropOpts = filters.lens === "sales" ? facets.salesCrops : facets.visitCrops;
-  const activeFilterCount = [filters.storeId, filters.zone, filters.crop, filters.pest, filters.segment, filters.spendTier, filters.problem].filter((x) => x != null && x !== "").length;
+  const activeFilterCount = [filters.storeId, filters.zone, filters.crop, filters.pest, filters.segment, filters.spendTier, filters.problem].filter((x) => x != null && x !== "").length + (years.length > 0 ? 1 : 0);
   const k = data.kpis;
   const vk = visitData?.kpis;
   const vd = (x: number | undefined) => (visitData ? n(x ?? 0) : "…");
@@ -109,6 +111,9 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
           <Sel value={filters.problem ?? ""} onChange={(v) => apply({ problem: v || undefined })} ph="Any problem"
             options={facets.problems.map((p) => [p.problem, `${p.problem} (${n(p.count)})`])} />
         )}
+        {filters.lens === "sales" && facets.years.length > 0 && (
+          <YearMultiSel years={facets.years} selected={years} onToggle={toggleYear} onClear={() => setYears([])} />
+        )}
         {activeFilterCount > 0 && <button type="button" onClick={clearAll} className="text-[12px] font-semibold text-[#C62828] hover:underline">Clear ({activeFilterCount})</button>}
       </div>
 
@@ -125,7 +130,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
       {/* Sales board — trend, charts, matrix. The Visit lens gets its own board built purely from visit data. */}
       {filters.lens === "sales" ? (
       <div className="flex flex-col gap-[14px]">
-        <CropTrendCard crops={facets.salesCrops} />
+        <CropTrendCard crop={filters.crop} years={years} />
 
         <div className="grid grid-cols-1 gap-[14px] lg:grid-cols-2">
           <DonutCard title="Segment share" slices={data.segmentDist} />
@@ -227,6 +232,29 @@ function Sel({ value, onChange, ph, options }: { value: string; onChange: (v: st
   );
 }
 
+/** Multi-select year filter (checkbox dropdown; empty = all years). Native <details> for a JS-free popover. */
+function YearMultiSel({ years, selected, onToggle, onClear }: { years: number[]; selected: number[]; onToggle: (y: number) => void; onClear: () => void }) {
+  const label = selected.length === 0 ? "All years" : selected.length === 1 ? String(selected[0]) : `${selected.length} years`;
+  return (
+    <details className="group relative">
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-lg border border-[#E0E0E0] bg-white px-2.5 py-2 text-[12.5px] text-[#424242]">
+        <span className={selected.length ? "font-semibold text-[#1565C0]" : ""}>{label}</span>
+        <span className="text-[10px] text-[#9E9E9E] transition-transform group-open:rotate-180">▾</span>
+      </summary>
+      <div className="absolute left-0 z-30 mt-1 w-[140px] rounded-lg border border-[#E0E0E0] bg-white p-1 shadow-[0_6px_20px_rgba(0,0,0,0.12)]">
+        <button type="button" onClick={onClear}
+          className={`w-full rounded px-2 py-1.5 text-left text-[12.5px] font-semibold hover:bg-[#F5F7F5] ${selected.length === 0 ? "text-[#1565C0]" : "text-[#616161]"}`}>All years</button>
+        {years.map((y) => (
+          <label key={y} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[12.5px] text-[#424242] hover:bg-[#F5F7F5]">
+            <input type="checkbox" checked={selected.includes(y)} onChange={() => onToggle(y)} className="accent-[#1565C0]" />
+            {y}
+          </label>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 function BarCard({ title, bars, fmt, accent = "#2E7D32" }: { title: string; bars: WbBar[]; fmt: (x: number) => string; accent?: string }) {
   const max = Math.max(1, ...bars.map((b) => b.value));
   const shown = bars.filter((b) => b.value > 0);
@@ -317,18 +345,19 @@ function HistogramCard({ title, bars, accent = "#1565C0" }: { title: string; bar
 /** Monthly purchase trend for one crop, coloured by cropping season (uses the per-line crop tags). */
 const SEASON_COLOR: Record<CropTrendPoint["season"], string> = { Kharif: "#2E7D32", Rabi: "#1565C0", Zaid: "#F9A825" };
 
-function CropTrendCard({ crops }: { crops: { crop: string; count: number }[] }) {
-  const [crop, setCrop] = useState(crops[0]?.crop ?? "");
+/** Driven by the main crop + year filters above — no dropdown of its own. No crop → all crops; no year → all years. */
+function CropTrendCard({ crop, years }: { crop?: string; years: number[] }) {
   const [points, setPoints] = useState<CropTrendPoint[] | null>(null);
   const [loading, start] = useTransition();
 
   useEffect(() => {
-    if (!crop) { setPoints([]); return; }
-    start(async () => setPoints(await getCropTrend(crop)));
+    setPoints(null);
+    start(async () => setPoints(await getCropTrend(crop ?? "")));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [crop]);
 
-  const pts = points ?? [];
+  const all = points ?? [];
+  const pts = years.length ? all.filter((p) => years.includes(p.year)) : all;
   const max = Math.max(1, ...pts.map((p) => p.revenue));
   const totalRev = pts.reduce((a, p) => a + p.revenue, 0);
   const seasonTotals = pts.reduce((m, p) => { m[p.season] = (m[p.season] ?? 0) + p.revenue; return m; }, {} as Record<string, number>);
@@ -337,8 +366,8 @@ function CropTrendCard({ crops }: { crops: { crop: string; count: number }[] }) 
     <div className={`${CARD} p-4`}>
       <div className="mb-1 flex flex-wrap items-center gap-2.5">
         <div className="text-[13px] font-bold text-[#1A1C1A]">Crop purchase trend</div>
-        <Sel value={crop} onChange={setCrop} ph="Pick a crop"
-          options={crops.map((c) => [c.crop, `${cropLabel(c.crop)} (${n(c.count)})`])} />
+        <span className="rounded-full bg-[#E8F5E9] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#2E7D32]">{crop ? cropLabel(crop) : "All crops"}</span>
+        <span className="rounded-full bg-[#E3F2FD] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#1565C0]">{years.length ? years.join(", ") : "All years"}</span>
         {loading && <span className="text-[11.5px] text-[#9E9E9E]">Loading…</span>}
         <div className="ml-auto flex flex-wrap items-center gap-3 text-[11px] font-medium text-[#616161]">
           {(["Kharif", "Rabi", "Zaid"] as const).map((s) => (
@@ -351,7 +380,7 @@ function CropTrendCard({ crops }: { crops: { crop: string; count: number }[] }) 
         </div>
       </div>
       <div className="mb-3 text-[11px] text-[#9E9E9E]">
-        Monthly ₹ of {crop ? cropLabel(crop) : "—"}-tagged sale lines · seasons: Kharif Jun–Oct · Rabi Nov–Mar · Zaid Apr–May
+        Monthly ₹ of {crop ? `${cropLabel(crop)}-tagged` : "all"} sale lines · seasons: Kharif Jun–Oct · Rabi Nov–Mar · Zaid Apr–May
       </div>
       {points == null ? (
         <div className="py-10 text-center text-[12.5px] text-[#9E9E9E]">Loading…</div>
