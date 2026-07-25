@@ -23,16 +23,19 @@ const prisma = new PrismaClient();
 async function main() {
   console.log("Rebuilding farmer crop tags — AE crop first, catalogue fallback…\n");
 
-  // 1. Farmers WITH sales: recompute salesCropTags from their lines, cropTags = sales ∪ visit.
-  const withSales: number = await prisma.$executeRawUnsafe(`
+  // Single pass over EVERY real farmer (LEFT JOIN): those with sale-derived crops get them,
+  // those without get an empty sales set. salesCropTags is REPLACED; cropTags = sales ∪ visit.
+  const updated: number = await prisma.$executeRawUnsafe(`
     UPDATE "Farmer" f
     SET "salesCropTags" = COALESCE(s.crops, '{}'::text[]),
         "cropTags"      = ARRAY(
           SELECT DISTINCT e FROM unnest(COALESCE(s.crops, '{}'::text[]) || f."visitCropTags") e
           WHERE e IS NOT NULL AND btrim(e) <> '' ORDER BY e)
-    FROM (
+    FROM (SELECT id FROM "Farmer" WHERE source = 'REAL') rf
+    LEFT JOIN (
       SELECT fid, array_agg(DISTINCT crop) AS crops
       FROM (
+        -- (a) Sale lines: AE crop (Crops col) wins; else the line's catalogue crop.
         SELECT sl."farmerId" AS fid,
                unnest(
                  CASE
@@ -44,25 +47,21 @@ async function main() {
         FROM "SaleLine" sl
         JOIN "Product" p ON p.id = sl."productId"
         WHERE sl."farmerId" IS NOT NULL
+        UNION ALL
+        -- (b) Bills with NO sale lines (older app-uploaded): no AE available → catalogue crops
+        --     from the bill's item codes, so these farmers don't lose their tags.
+        SELECT s2."farmerId" AS fid, unnest(p."targetCrops") AS crop
+        FROM "Sale" s2
+        JOIN "Product" p ON p."itemCode" = ANY(s2."itemCodes")
+        WHERE s2.source = 'REAL' AND s2."farmerId" IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM "SaleLine" sl WHERE sl."orderNo" = s2.invoice)
       ) per_line
       WHERE crop IS NOT NULL AND btrim(crop) <> ''
       GROUP BY fid
-    ) s
-    WHERE f.id = s.fid
+    ) s ON s.fid = rf.id
+    WHERE f.id = rf.id
   `);
-  console.log(`  ${withSales.toLocaleString()} farmers rebuilt from their sale lines`);
-
-  // 2. REAL farmers with NO sales: clear salesCropTags, cropTags = visit crops only.
-  const noSales: number = await prisma.$executeRawUnsafe(`
-    UPDATE "Farmer" f
-    SET "salesCropTags" = '{}'::text[],
-        "cropTags"      = ARRAY(
-          SELECT DISTINCT e FROM unnest(f."visitCropTags") e
-          WHERE e IS NOT NULL AND btrim(e) <> '' ORDER BY e)
-    WHERE f."source" = 'REAL'
-      AND NOT EXISTS (SELECT 1 FROM "SaleLine" sl WHERE sl."farmerId" = f.id)
-  `);
-  console.log(`  ${noSales.toLocaleString()} REAL farmers with no sales reset to visit-only crops\n`);
+  console.log(`  ${updated.toLocaleString()} REAL farmers rebuilt (AE-first, catalogue fallback)\n`);
 
   // How often did AE win vs the catalogue fallback?
   const [split] = await prisma.$queryRawUnsafe<{ ae: bigint; fallback: bigint }[]>(`
