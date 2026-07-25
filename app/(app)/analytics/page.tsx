@@ -5,6 +5,7 @@ import { canAccess } from "@/lib/roles";
 import { loadOverview } from "@/lib/overview";
 import { canManage } from "@/lib/scope";
 import { getWorkbench, getWorkbenchFacets, type WbData, type WbFacets } from "@/app/actions/analytics-segments";
+import { VALUE_SEGMENTS, LIFECYCLE_SEGMENTS } from "@/lib/campaign-segments";
 import { AnalyticsWorkbench } from "@/components/analytics/AnalyticsWorkbench";
 import { ScopedDashboard, UnassignedDashboard, type ScopedDashboardData } from "@/components/dashboard/ScopedDashboard";
 
@@ -12,7 +13,8 @@ export const dynamic = "force-dynamic";
 
 const EMPTY: WbData = {
   kpis: { farmers: 0, hni: 0, potentialHni: 0, atRisk: 0, lapsed: 0, spend: 0, visits: 0 },
-  matrix: { rows: [], totals: {}, grandTotal: 0 },
+  valueMatrix: { cols: [...VALUE_SEGMENTS], rows: [], totals: {}, grandTotal: 0 },
+  lifecycleMatrix: { cols: [...LIFECYCLE_SEGMENTS], rows: [], totals: {}, grandTotal: 0 },
   segmentDist: [], cropBreakdown: [], extra: [], extraTitle: "", secondary: [], secondaryTitle: "",
 };
 

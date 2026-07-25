@@ -2,7 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
-import { SEGMENT_COLUMNS, segMeta } from "@/lib/campaign-segments";
+import { SEGMENT_COLUMNS, segMeta, VALUE_SEGMENTS, LIFECYCLE_SEGMENTS } from "@/lib/campaign-segments";
 import { inr } from "@/lib/format";
 import { cropLabel } from "@/lib/crops";
 import { tagLabel } from "@/lib/crop-pest";
@@ -20,7 +20,8 @@ export interface WbFilters {
   zone?: string;
   crop?: string; // matched against sales or visit crops depending on lens
   pest?: string; // Target Pest/Disease/Weed (item-code derived) — farmer attribute, both lenses
-  segment?: string; // campaignSegment
+  valueSegments?: string[]; // value tier(s): HNI | POTENTIAL_HNI | REGULAR (multi-select)
+  lifecycleSegments?: string[]; // lifecycle stage(s): NEW | AT_RISK | LAPSED (multi-select)
   spendTier?: number | null; // index into SPEND_TIERS (sales lens)
   problem?: string; // visit lens
 }
@@ -34,7 +35,8 @@ function farmerConds(f: WbFilters, alias = ""): Prisma.Sql[] {
   const c: Prisma.Sql[] = [Prisma.sql`${col(alias, "source")} = 'REAL'`];
   if (f.storeId != null) c.push(Prisma.sql`${col(alias, "storeId")} = ${f.storeId}`);
   if (f.zone) c.push(Prisma.sql`${col(alias, "zone")} = ${f.zone}`);
-  if (f.segment) c.push(Prisma.sql`${col(alias, "campaignSegment")} = ${f.segment}`);
+  if (f.valueSegments?.length) c.push(Prisma.sql`${col(alias, "valueSegment")} = ANY(${f.valueSegments})`);
+  if (f.lifecycleSegments?.length) c.push(Prisma.sql`${col(alias, "lifecycleSegment")} = ANY(${f.lifecycleSegments})`);
   if (f.crop) {
     const cc = f.lens === "sales" ? "salesCropTags" : "visitCropTags";
     // Array-contains (@>) so the GIN index on the crop column is actually used.
@@ -134,10 +136,12 @@ export async function getWorkbenchFacets(): Promise<WbFacets> {
 /* ── The workbench data for the current filter ── */
 export interface WbKpis { farmers: number; hni: number; potentialHni: number; atRisk: number; lapsed: number; spend: number; visits: number }
 export interface MatrixRow { storeId: number | null; storeName: string; counts: Record<string, number>; total: number }
+export interface Matrix { cols: string[]; rows: MatrixRow[]; totals: Record<string, number>; grandTotal: number }
 export interface WbBar { label: string; value: number; color?: string }
 export interface WbData {
   kpis: WbKpis;
-  matrix: { rows: MatrixRow[]; totals: Record<string, number>; grandTotal: number };
+  valueMatrix: Matrix;     // store × value tier (HNI/Potential/Regular)
+  lifecycleMatrix: Matrix; // store × lifecycle (New/At Risk/Lapsed)
   segmentDist: WbBar[];
   cropBreakdown: WbBar[];
   extra: WbBar[]; // sales: spend-tier dist ; visit: problem dist
@@ -146,11 +150,30 @@ export interface WbData {
   secondaryTitle: string;
 }
 
+const emptyMatrix = (cols: string[]): Matrix => ({ cols, rows: [], totals: {}, grandTotal: 0 });
 const EMPTY_WB: WbData = {
   kpis: { farmers: 0, hni: 0, potentialHni: 0, atRisk: 0, lapsed: 0, spend: 0, visits: 0 },
-  matrix: { rows: [], totals: {}, grandTotal: 0 },
+  valueMatrix: emptyMatrix([...VALUE_SEGMENTS]), lifecycleMatrix: emptyMatrix([...LIFECYCLE_SEGMENTS]),
   segmentDist: [], cropBreakdown: [], extra: [], extraTitle: "", secondary: [], secondaryTitle: "",
 };
+
+/** Build a store×segment matrix from grouped {storeId, seg, n} rows for the given column keys. */
+function buildMatrix(grouped: { storeId: number | null; seg: string; n: number }[], cols: string[], nameById: Map<number, string>): Matrix {
+  const byStore = new Map<number | null, Record<string, number>>();
+  const totals: Record<string, number> = {};
+  for (const g of grouped) {
+    if (!cols.includes(g.seg)) continue;
+    const m = byStore.get(g.storeId) ?? {};
+    m[g.seg] = num(g.n); byStore.set(g.storeId, m);
+    totals[g.seg] = (totals[g.seg] ?? 0) + num(g.n);
+  }
+  const rows: MatrixRow[] = [...byStore.entries()].map(([storeId, counts]) => ({
+    storeId, storeName: storeId == null ? "Unassigned" : nameById.get(storeId) ?? `Store #${storeId}`,
+    counts, total: cols.reduce((s, k) => s + (counts[k] ?? 0), 0),
+  })).sort((a, b) => b.total - a.total).slice(0, 100);
+  const grandTotal = cols.reduce((s, k) => s + (totals[k] ?? 0), 0);
+  return { cols, rows, totals, grandTotal };
+}
 
 export async function getWorkbench(f: WbFilters): Promise<WbData> {
   const scoped = await scopeFilters(f);
@@ -160,18 +183,21 @@ export async function getWorkbench(f: WbFilters): Promise<WbData> {
   // (a bare "id" would bind to Visit.id and collapse the visit lens to ~0).
   const whereF = whereOf(f, "f");
 
-  const [kpiRows, matrixRows, segRows, cropRows, stores] = await Promise.all([
+  const [kpiRows, valueMatrixRows, lifecycleMatrixRows, segRows, cropRows, stores] = await Promise.all([
     prisma.$queryRaw<{ total: number; hni: number; phni: number; atrisk: number; lapsed: number; spend: number }[]>(Prisma.sql`
       SELECT COUNT(*)::int total,
-        COUNT(*) FILTER (WHERE f."campaignSegment"='HNI')::int hni,
-        COUNT(*) FILTER (WHERE f."campaignSegment"='POTENTIAL_HNI')::int phni,
-        COUNT(*) FILTER (WHERE f."campaignSegment"='AT_RISK')::int atrisk,
-        COUNT(*) FILTER (WHERE f."campaignSegment"='LAPSED')::int lapsed,
+        COUNT(*) FILTER (WHERE f."valueSegment"='HNI')::int hni,
+        COUNT(*) FILTER (WHERE f."valueSegment"='POTENTIAL_HNI')::int phni,
+        COUNT(*) FILTER (WHERE f."lifecycleSegment"='AT_RISK')::int atrisk,
+        COUNT(*) FILTER (WHERE f."lifecycleSegment"='LAPSED')::int lapsed,
         COALESCE(SUM(f."p12mSpend"),0)::float spend
       FROM "Farmer" f ${whereF}`),
     prisma.$queryRaw<{ storeId: number | null; seg: string; n: number }[]>(Prisma.sql`
-      SELECT f."storeId" AS "storeId", f."campaignSegment" seg, COUNT(*)::int n FROM "Farmer" f ${whereF}
-      AND f."campaignSegment" IS NOT NULL AND f."campaignSegment" <> 'OTHER' GROUP BY 1, 2`),
+      SELECT f."storeId" AS "storeId", f."valueSegment" seg, COUNT(*)::int n FROM "Farmer" f ${whereF}
+      AND f."valueSegment" IS NOT NULL GROUP BY 1, 2`),
+    prisma.$queryRaw<{ storeId: number | null; seg: string; n: number }[]>(Prisma.sql`
+      SELECT f."storeId" AS "storeId", f."lifecycleSegment" seg, COUNT(*)::int n FROM "Farmer" f ${whereF}
+      AND f."lifecycleSegment" IS NOT NULL GROUP BY 1, 2`),
     prisma.$queryRaw<{ seg: string; n: number }[]>(Prisma.sql`
       SELECT f."campaignSegment" seg, COUNT(*)::int n FROM "Farmer" f ${whereF}
       AND f."campaignSegment" IS NOT NULL GROUP BY 1`),
@@ -224,24 +250,14 @@ export async function getWorkbench(f: WbFilters): Promise<WbData> {
   }
 
   const nameById = new Map(stores.map((s) => [s.id, shortStore(s.name)]));
-  const byStore = new Map<number | null, Record<string, number>>();
-  const totals: Record<string, number> = {};
-  for (const g of matrixRows) {
-    const m = byStore.get(g.storeId) ?? {};
-    m[g.seg] = num(g.n); byStore.set(g.storeId, m);
-    totals[g.seg] = (totals[g.seg] ?? 0) + num(g.n);
-  }
-  const rows: MatrixRow[] = [...byStore.entries()].map(([storeId, counts]) => ({
-    storeId, storeName: storeId == null ? "Unassigned" : nameById.get(storeId) ?? `Store #${storeId}`,
-    counts, total: SEGMENT_COLUMNS.reduce((s, k) => s + (counts[k] ?? 0), 0),
-  })).sort((a, b) => b.total - a.total).slice(0, 100);
-  const grandTotal = SEGMENT_COLUMNS.reduce((s, k) => s + (totals[k] ?? 0), 0);
+  const valueMatrix = buildMatrix(valueMatrixRows, [...VALUE_SEGMENTS], nameById);
+  const lifecycleMatrix = buildMatrix(lifecycleMatrixRows, [...LIFECYCLE_SEGMENTS], nameById);
 
   const k = kpiRows[0] ?? { total: 0, hni: 0, phni: 0, atrisk: 0, lapsed: 0, spend: 0 };
   const segMap = new Map(segRows.map((r) => [r.seg, num(r.n)]));
   return {
     kpis: { farmers: num(k.total), hni: num(k.hni), potentialHni: num(k.phni), atRisk: num(k.atrisk), lapsed: num(k.lapsed), spend: num(k.spend), visits },
-    matrix: { rows, totals, grandTotal },
+    valueMatrix, lifecycleMatrix,
     segmentDist: SEGMENT_COLUMNS.map((s) => ({ label: segMeta(s).label, value: segMap.get(s) ?? 0, color: segMeta(s).color })),
     cropBreakdown: cropRows.map((r) => ({ label: r.crop, value: num(r.n) })),
     extra, extraTitle, secondary, secondaryTitle,
@@ -408,19 +424,22 @@ export async function getVisitAnalytics(f: WbFilters): Promise<VisitAnalytics> {
 
 /* ── Drill: farmers in a matrix cell (respects the active filters) ── */
 export interface WbCustomer { id: number; name: string; mobile: string | null; village: string | null; spend: string; segment: string; salesCrops: string[]; visitCrops: string[] }
-export async function getWorkbenchCustomers(f: WbFilters, storeId: number | null, segment: string, limit = 400): Promise<WbCustomer[]> {
+export type SegDim = "value" | "lifecycle";
+export async function getWorkbenchCustomers(f: WbFilters, storeId: number | null, dim: SegDim, seg: string, limit = 400): Promise<WbCustomer[]> {
   // Scope LAST (after applying the clicked cell's store) so an officer/RM can't drill into a foreign store.
-  const scoped = await scopeFilters({ ...f, storeId: storeId ?? undefined, segment });
+  const cell = dim === "value" ? { valueSegments: [seg] } : { lifecycleSegments: [seg] };
+  const scoped = await scopeFilters({ ...f, ...cell, storeId: storeId ?? undefined });
   if (scoped === "none") return [];
   const conds = farmerConds(scoped, "f"); // alias f so the visit-problem EXISTS correlates to Farmer.id
   if (storeId == null && scoped.storeId == null) conds.push(Prisma.sql`f."storeId" IS NULL`);
-  const rows = await prisma.$queryRaw<{ id: number; name: string; mobile: string | null; village: string | null; spend: number | null; seg: string | null; salesc: string[]; visitc: string[] }[]>(Prisma.sql`
-    SELECT f.id, f.name, f.mobile, f.village, f."p12mSpend" spend, f."campaignSegment" seg, f."salesCropTags" salesc, f."visitCropTags" visitc
+  const rows = await prisma.$queryRaw<{ id: number; name: string; mobile: string | null; village: string | null; spend: number | null; vseg: string | null; lseg: string | null; salesc: string[]; visitc: string[] }[]>(Prisma.sql`
+    SELECT f.id, f.name, f.mobile, f.village, f."p12mSpend" spend, f."valueSegment" vseg, f."lifecycleSegment" lseg, f."salesCropTags" salesc, f."visitCropTags" visitc
     FROM "Farmer" f WHERE ${Prisma.join(conds, " AND ")}
     ORDER BY f."p12mSpend" DESC NULLS LAST LIMIT ${limit}`);
   return rows.map((r) => ({
     id: r.id, name: r.name, mobile: r.mobile, village: r.village,
-    spend: r.spend != null ? inr(r.spend) : "—", segment: r.seg ?? "—",
+    spend: r.spend != null ? inr(r.spend) : "—",
+    segment: [r.vseg, r.lseg].filter(Boolean).map((s) => segMeta(s!).label).join(" · ") || "—",
     salesCrops: r.salesc ?? [], visitCrops: r.visitc ?? [],
   }));
 }
@@ -433,45 +452,39 @@ export async function exportWorkbookXlsx(f: WbFilters): Promise<{ ok: boolean; f
   if (scoped === "none") return { ok: false, error: "No store or region is assigned to your account." };
   const whereF = whereOf(scoped, "f");
 
-  const [matrixRows, stores, farmerRows] = await Promise.all([
+  const [valueRows, lifecycleRows, stores, farmerRows] = await Promise.all([
     prisma.$queryRaw<{ storeId: number | null; seg: string; n: number }[]>(Prisma.sql`
-      SELECT f."storeId" AS "storeId", f."campaignSegment" seg, COUNT(*)::int n FROM "Farmer" f ${whereF}
-      AND f."campaignSegment" IS NOT NULL AND f."campaignSegment" <> 'OTHER' GROUP BY 1, 2`),
+      SELECT f."storeId" AS "storeId", f."valueSegment" seg, COUNT(*)::int n FROM "Farmer" f ${whereF}
+      AND f."valueSegment" IS NOT NULL GROUP BY 1, 2`),
+    prisma.$queryRaw<{ storeId: number | null; seg: string; n: number }[]>(Prisma.sql`
+      SELECT f."storeId" AS "storeId", f."lifecycleSegment" seg, COUNT(*)::int n FROM "Farmer" f ${whereF}
+      AND f."lifecycleSegment" IS NOT NULL GROUP BY 1, 2`),
     prisma.store.findMany({ select: { id: true, name: true } }),
-    prisma.$queryRaw<{ name: string; mobile: string | null; village: string | null; zone: string | null; storeId: number | null; seg: string | null; spend: number | null; salesc: string[]; visitc: string[]; pests: string[] }[]>(Prisma.sql`
-      SELECT f.name, f.mobile, f.village, f."zone" AS zone, f."storeId" AS "storeId", f."campaignSegment" seg,
+    prisma.$queryRaw<{ name: string; mobile: string | null; village: string | null; zone: string | null; storeId: number | null; vseg: string | null; lseg: string | null; spend: number | null; salesc: string[]; visitc: string[]; pests: string[] }[]>(Prisma.sql`
+      SELECT f.name, f.mobile, f.village, f."zone" AS zone, f."storeId" AS "storeId", f."valueSegment" vseg, f."lifecycleSegment" lseg,
         f."p12mSpend" spend, f."salesCropTags" salesc, f."visitCropTags" visitc, f."pestTags" pests
       FROM "Farmer" f ${whereF} ORDER BY f."p12mSpend" DESC NULLS LAST LIMIT ${FARMER_EXPORT_CAP}`),
   ]);
 
   const nameById = new Map(stores.map((s) => [s.id, shortStore(s.name)]));
 
-  // Matrix — identical shape to the on-screen table (top 100 stores by total, All-stores summary row).
-  const byStore = new Map<number | null, Record<string, number>>();
-  const totals: Record<string, number> = {};
-  for (const g of matrixRows) {
-    const m = byStore.get(g.storeId) ?? {};
-    m[g.seg] = num(g.n); byStore.set(g.storeId, m);
-    totals[g.seg] = (totals[g.seg] ?? 0) + num(g.n);
-  }
-  const mrows = [...byStore.entries()].map(([storeId, counts]) => ({
-    storeName: storeId == null ? "Unassigned" : nameById.get(storeId) ?? `Store #${storeId}`,
-    counts, total: SEGMENT_COLUMNS.reduce((s, k) => s + (counts[k] ?? 0), 0),
-  })).sort((a, b) => b.total - a.total).slice(0, 100);
-  const grand = SEGMENT_COLUMNS.reduce((s, k) => s + (totals[k] ?? 0), 0);
-
-  const segLabels = SEGMENT_COLUMNS.map((s) => segMeta(s).label);
-  const matrixSheet: (string | number)[][] = [
-    ["Store", ...segLabels, "Total"],
-    ["All stores", ...SEGMENT_COLUMNS.map((s) => totals[s] ?? 0), grand],
-    ...mrows.map((r) => [r.storeName, ...SEGMENT_COLUMNS.map((s) => r.counts[s] ?? 0), r.total]),
-  ];
+  // A store×segment sheet (top 100 stores by total, All-stores summary row) for one dimension.
+  const matrixSheet = (grouped: { storeId: number | null; seg: string; n: number }[], cols: string[]): (string | number)[][] => {
+    const m = buildMatrix(grouped, cols, nameById);
+    return [
+      ["Store", ...cols.map((s) => segMeta(s).label), "Total"],
+      ["All stores", ...cols.map((s) => m.totals[s] ?? 0), m.grandTotal],
+      ...m.rows.map((r) => [r.storeName, ...cols.map((s) => r.counts[s] ?? 0), r.total]),
+    ];
+  };
+  const valueSheet = matrixSheet(valueRows, [...VALUE_SEGMENTS]);
+  const lifecycleSheet = matrixSheet(lifecycleRows, [...LIFECYCLE_SEGMENTS]);
 
   const farmerSheet: (string | number)[][] = [
-    ["Farmer", "Mobile", "Store", "Region", "Village", "Segment", "P12M Spend (₹)", "Sales crops", "Visit crops", "Target pests / diseases"],
+    ["Farmer", "Mobile", "Store", "Region", "Village", "Value segment", "Lifecycle", "P12M Spend (₹)", "Sales crops", "Visit crops", "Target pests / diseases"],
     ...farmerRows.map((r) => [
       r.name, r.mobile ?? "", r.storeId != null ? nameById.get(r.storeId) ?? "" : "", r.zone ?? "", r.village ?? "",
-      r.seg ? segMeta(r.seg).label : "—", r.spend ?? 0,
+      r.vseg ? segMeta(r.vseg).label : "—", r.lseg ? segMeta(r.lseg).label : "—", r.spend ?? 0,
       (r.salesc ?? []).map(cropLabel).join(", "), (r.visitc ?? []).map(cropLabel).join(", "), (r.pests ?? []).map(tagLabel).join(", "),
     ]),
   ];
@@ -480,7 +493,8 @@ export async function exportWorkbookXlsx(f: WbFilters): Promise<{ ok: boolean; f
   }
 
   const b64 = buildWorkbookB64([
-    { name: "Segment x Store", rows: matrixSheet },
+    { name: "Value x Store", rows: valueSheet },
+    { name: "Lifecycle x Store", rows: lifecycleSheet },
     { name: "Farmers", rows: farmerSheet },
   ]);
   const today = new Date().toISOString().slice(0, 10);
@@ -543,7 +557,8 @@ export async function saveWorkbenchSegment(f: WbFilters, name: string): Promise<
   const criteria: ClusterCriteria = {
     storeIds: f.storeId != null ? [f.storeId] : undefined,
     zone: f.zone || undefined,
-    campaignSegments: f.segment ? [f.segment] : undefined,
+    valueSegments: f.valueSegments?.length ? f.valueSegments : undefined,
+    lifecycleSegments: f.lifecycleSegments?.length ? f.lifecycleSegments : undefined,
     salesCrops: f.lens === "sales" && f.crop ? [f.crop] : undefined,
     visitCrops: f.lens === "visit" && f.crop ? [f.crop] : undefined,
     pestTags: f.pest ? [f.pest] : undefined,

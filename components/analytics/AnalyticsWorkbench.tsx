@@ -1,15 +1,15 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState, useTransition, type ReactNode } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
 import { ChainNext } from "@/components/ChainNext";
-import { SEGMENT_COLUMNS, segMeta } from "@/lib/campaign-segments";
+import { VALUE_SEGMENTS, LIFECYCLE_SEGMENTS, VALUE_TITLE, LIFECYCLE_TITLE, segMeta } from "@/lib/campaign-segments";
 import { cropLabel } from "@/lib/crops";
 import { tagLabel } from "@/lib/crop-pest";
 import {
   getWorkbench, getWorkbenchCustomers, saveWorkbenchSegment, getCropTrend, getVisitAnalytics, exportWorkbookXlsx,
   type Lens, type WbFilters, type WbData, type WbFacets, type WbBar, type WbCustomer, type CropTrendPoint,
-  type VisitAnalytics, type VisitMonth, type VisitAdoption, type VisitStoreRow,
+  type VisitAnalytics, type VisitMonth, type VisitAdoption, type VisitStoreRow, type Matrix, type SegDim,
 } from "@/app/actions/analytics-segments";
 import { downloadB64 } from "@/lib/download";
 
@@ -26,12 +26,16 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
   const [data, setData] = useState(initial);
   const [visitData, setVisitData] = useState<VisitAnalytics | null>(null);
   const [loading, start] = useTransition();
-  const [cell, setCell] = useState<{ storeId: number | null; storeName: string; seg: string } | null>(null);
+  const [cell, setCell] = useState<{ storeId: number | null; storeName: string; dim: SegDim; seg: string } | null>(null);
   const [rows, setRows] = useState<WbCustomer[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [years, setYears] = useState<number[]>([]); // crop-trend year filter (client-side; [] = all years)
   const toggleYear = (y: number) => setYears((prev) => (prev.includes(y) ? prev.filter((x) => x !== y) : [...prev, y].sort((a, b) => a - b)));
+  const toggleSeg = (key: "valueSegments" | "lifecycleSegments", k: string) => {
+    const cur = filters[key] ?? [];
+    apply({ [key]: cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k] });
+  };
 
   const exportXlsx = () => {
     setExporting(true);
@@ -56,16 +60,17 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
       setVisitData(va);
     });
   };
-  const setLens = (lens: Lens) => apply({ lens, crop: undefined, segment: undefined, spendTier: undefined, problem: undefined });
-  const clearAll = () => { setYears([]); apply({ storeId: undefined, zone: undefined, crop: undefined, pest: undefined, segment: undefined, spendTier: undefined, problem: undefined }); };
+  const setLens = (lens: Lens) => apply({ lens, crop: undefined, valueSegments: undefined, lifecycleSegments: undefined, spendTier: undefined, problem: undefined });
+  const clearAll = () => { setYears([]); apply({ storeId: undefined, zone: undefined, crop: undefined, pest: undefined, valueSegments: undefined, lifecycleSegments: undefined, spendTier: undefined, problem: undefined }); };
 
-  const openCell = (storeId: number | null, storeName: string, seg: string) => {
-    setCell({ storeId, storeName, seg }); setRows(null);
-    getWorkbenchCustomers(filters, storeId, seg).then(setRows);
+  const openCell = (storeId: number | null, storeName: string, dim: SegDim, seg: string) => {
+    setCell({ storeId, storeName, dim, seg }); setRows(null);
+    getWorkbenchCustomers(filters, storeId, dim, seg).then(setRows);
   };
 
   const cropOpts = filters.lens === "sales" ? facets.salesCrops : facets.visitCrops;
-  const activeFilterCount = [filters.storeId, filters.zone, filters.crop, filters.pest, filters.segment, filters.spendTier, filters.problem].filter((x) => x != null && x !== "").length + (years.length > 0 ? 1 : 0);
+  const activeFilterCount = [filters.storeId, filters.zone, filters.crop, filters.pest, filters.spendTier, filters.problem].filter((x) => x != null && x !== "").length
+    + (years.length > 0 ? 1 : 0) + (filters.valueSegments?.length ? 1 : 0) + (filters.lifecycleSegments?.length ? 1 : 0);
   const k = data.kpis;
   const vk = visitData?.kpis;
   const vd = (x: number | undefined) => (visitData ? n(x ?? 0) : "…");
@@ -105,8 +110,12 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
         <Sel value={filters.pest ?? ""} onChange={(v) => apply({ pest: v || undefined })} ph="All pests / diseases"
           options={facets.pests.map((p) => [p.pest, `${tagLabel(p.pest)} (${n(p.count)})`])} />
         {filters.lens === "sales" && (
-          <Sel value={filters.segment ?? ""} onChange={(v) => apply({ segment: v || undefined })} ph="All segments"
-            options={SEGMENT_COLUMNS.map((s) => [s, segMeta(s).label])} />
+          <>
+            <SegMultiSel label={`All ${VALUE_TITLE.toLowerCase()}s`} options={VALUE_SEGMENTS.map((s) => [s, segMeta(s).label])}
+              selected={filters.valueSegments ?? []} onToggle={(k) => toggleSeg("valueSegments", k)} onClear={() => apply({ valueSegments: undefined })} />
+            <SegMultiSel label={`All ${LIFECYCLE_TITLE.toLowerCase()}`} options={LIFECYCLE_SEGMENTS.map((s) => [s, segMeta(s).label])}
+              selected={filters.lifecycleSegments ?? []} onToggle={(k) => toggleSeg("lifecycleSegments", k)} onClear={() => apply({ lifecycleSegments: undefined })} />
+          </>
         )}
         {filters.lens === "sales" ? (
           <Sel value={filters.spendTier != null ? String(filters.spendTier) : ""} onChange={(v) => apply({ spendTier: v ? Number(v) : undefined })}
@@ -143,48 +152,11 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
           <BarCard title={data.secondaryTitle} bars={data.secondary} fmt={money} accent="#6A1B9A" />
         </div>
 
-        <div className={`${CARD} overflow-hidden`}>
-          <div className="flex items-center justify-between gap-2 border-b border-[#F0F0F0] px-4 py-2.5">
-            <div className="text-[13px] font-bold text-[#1A1C1A]">Store × Segment</div>
-            <button type="button" onClick={exportXlsx} disabled={exporting || data.matrix.rows.length === 0}
-              className="rounded-[8px] border border-[#2E7D32] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9] disabled:opacity-40">
-              {exporting ? "Exporting…" : "⬇ Export to Excel"}
-            </button>
-          </div>
-          <div className="overflow-x-auto">
-            <div className="min-w-[820px]">
-              <div className="grid grid-cols-[1.4fr_repeat(6,1fr)_0.8fr] border-b border-[#F0F0F0] bg-[#FAFAFA] px-4 py-2.5 text-[10.5px] font-semibold uppercase tracking-[0.4px] text-[#9E9E9E]">
-                <div>Store</div>
-                {SEGMENT_COLUMNS.map((s) => <div key={s} className="text-right" style={{ color: segMeta(s).color }}>{segMeta(s).label}</div>)}
-                <div className="text-right">Total</div>
-              </div>
-              {data.matrix.rows.length === 0 ? (
-                <div className="px-4 py-10 text-center text-[13px] text-[#9E9E9E]">No farmers match these filters.</div>
-              ) : (
-                <>
-                  <div className="grid grid-cols-[1.4fr_repeat(6,1fr)_0.8fr] border-b border-[#EEE] bg-[#F5FBF5] px-4 py-2.5 text-[12px] font-bold text-[#1A1C1A]">
-                    <div>All stores</div>
-                    {SEGMENT_COLUMNS.map((s) => <div key={s} className="text-right">{n(data.matrix.totals[s] ?? 0)}</div>)}
-                    <div className="text-right">{n(data.matrix.grandTotal)}</div>
-                  </div>
-                  {data.matrix.rows.map((r) => (
-                    <div key={String(r.storeId)} className="grid grid-cols-[1.4fr_repeat(6,1fr)_0.8fr] items-center border-b border-[#F8F8F8] px-4 py-2 text-[12px]">
-                      <div className="truncate font-semibold text-[#1A1C1A]" title={r.storeName}>{r.storeName}</div>
-                      {SEGMENT_COLUMNS.map((s) => {
-                        const c = r.counts[s] ?? 0;
-                        return <div key={s} className="text-right">{c > 0 ? (
-                          <button type="button" onClick={() => openCell(r.storeId, r.storeName, s)} className="font-semibold hover:underline" style={{ color: segMeta(s).color }}>{n(c)}</button>
-                        ) : <span className="text-[#DDD]">·</span>}</div>;
-                      })}
-                      <div className="text-right font-bold text-[#1A1C1A]">{n(r.total)}</div>
-                    </div>
-                  ))}
-                </>
-              )}
-            </div>
-          </div>
-          <div className="px-4 py-2 text-[11px] text-[#9E9E9E]">Click any count to see that store × segment farmer list. Segments are exclusive.</div>
-        </div>
+        <MatrixCard title={`${VALUE_TITLE} × Store`} matrix={data.valueMatrix} dim="value" onCell={openCell}
+          right={<button type="button" onClick={exportXlsx} disabled={exporting}
+            className="rounded-[8px] border border-[#2E7D32] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9] disabled:opacity-40">
+            {exporting ? "Exporting…" : "⬇ Export to Excel"}</button>} />
+        <MatrixCard title={`${LIFECYCLE_TITLE} × Store`} matrix={data.lifecycleMatrix} dim="lifecycle" onCell={openCell} />
       </div>
       ) : (
         <VisitBoard va={visitData} />
@@ -233,6 +205,80 @@ function Sel({ value, onChange, ph, options }: { value: string; onChange: (v: st
       <option value="">{ph}</option>
       {options.map((o) => { const [v, l] = Array.isArray(o) ? o : [o, o]; return <option key={v} value={v}>{l}</option>; })}
     </select>
+  );
+}
+
+/** Multi-select checkbox dropdown for a segment dimension (value or lifecycle). Native <details> popover. */
+function SegMultiSel({ label, options, selected, onToggle, onClear }: {
+  label: string; options: [string, string][]; selected: string[]; onToggle: (k: string) => void; onClear: () => void;
+}) {
+  const text = selected.length === 0 ? label : selected.length === 1 ? (options.find((o) => o[0] === selected[0])?.[1] ?? selected[0]) : `${selected.length} selected`;
+  return (
+    <details className="group relative">
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-lg border border-[#E0E0E0] bg-white px-2.5 py-2 text-[12.5px] text-[#424242]">
+        <span className={selected.length ? "font-semibold text-[#2E7D32]" : ""}>{text}</span>
+        <span className="text-[10px] text-[#9E9E9E] transition-transform group-open:rotate-180">▾</span>
+      </summary>
+      <div className="absolute left-0 z-30 mt-1 w-[190px] rounded-lg border border-[#E0E0E0] bg-white p-1 shadow-[0_6px_20px_rgba(0,0,0,0.12)]">
+        <button type="button" onClick={onClear}
+          className={`w-full rounded px-2 py-1.5 text-left text-[12.5px] font-semibold hover:bg-[#F5F7F5] ${selected.length === 0 ? "text-[#2E7D32]" : "text-[#616161]"}`}>{label}</button>
+        {options.map(([k, l]) => (
+          <label key={k} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[12.5px] text-[#424242] hover:bg-[#F5F7F5]">
+            <input type="checkbox" checked={selected.includes(k)} onChange={() => onToggle(k)} className="accent-[#2E7D32]" />
+            {l}
+          </label>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+/** A store×segment matrix card (used for both Value and Lifecycle — both have 3 columns). */
+const MATRIX_GRID = "grid grid-cols-[1.4fr_repeat(3,1fr)_0.8fr]";
+function MatrixCard({ title, matrix, dim, onCell, right }: {
+  title: string; matrix: Matrix; dim: SegDim; onCell: (storeId: number | null, storeName: string, dim: SegDim, seg: string) => void; right?: ReactNode;
+}) {
+  const cols = matrix.cols;
+  return (
+    <div className={`${CARD} overflow-hidden`}>
+      <div className="flex items-center justify-between gap-2 border-b border-[#F0F0F0] px-4 py-2.5">
+        <div className="text-[13px] font-bold text-[#1A1C1A]">{title}</div>
+        {right}
+      </div>
+      <div className="overflow-x-auto">
+        <div className="min-w-[560px]">
+          <div className={`${MATRIX_GRID} border-b border-[#F0F0F0] bg-[#FAFAFA] px-4 py-2.5 text-[10.5px] font-semibold uppercase tracking-[0.4px] text-[#9E9E9E]`}>
+            <div>Store</div>
+            {cols.map((s) => <div key={s} className="text-right" style={{ color: segMeta(s).color }}>{segMeta(s).label}</div>)}
+            <div className="text-right">Total</div>
+          </div>
+          {matrix.rows.length === 0 ? (
+            <div className="px-4 py-10 text-center text-[13px] text-[#9E9E9E]">No farmers match these filters.</div>
+          ) : (
+            <>
+              <div className={`${MATRIX_GRID} border-b border-[#EEE] bg-[#F5FBF5] px-4 py-2.5 text-[12px] font-bold text-[#1A1C1A]`}>
+                <div>All stores</div>
+                {cols.map((s) => <div key={s} className="text-right">{n(matrix.totals[s] ?? 0)}</div>)}
+                <div className="text-right">{n(matrix.grandTotal)}</div>
+              </div>
+              {matrix.rows.map((r) => (
+                <div key={String(r.storeId)} className={`${MATRIX_GRID} items-center border-b border-[#F8F8F8] px-4 py-2 text-[12px]`}>
+                  <div className="truncate font-semibold text-[#1A1C1A]" title={r.storeName}>{r.storeName}</div>
+                  {cols.map((s) => {
+                    const c = r.counts[s] ?? 0;
+                    return <div key={s} className="text-right">{c > 0 ? (
+                      <button type="button" onClick={() => onCell(r.storeId, r.storeName, dim, s)} className="font-semibold hover:underline" style={{ color: segMeta(s).color }}>{n(c)}</button>
+                    ) : <span className="text-[#DDD]">·</span>}</div>;
+                  })}
+                  <div className="text-right font-bold text-[#1A1C1A]">{n(r.total)}</div>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      </div>
+      <div className="px-4 py-2 text-[11px] text-[#9E9E9E]">Click any count to see that store × segment farmer list.</div>
+    </div>
   );
 }
 

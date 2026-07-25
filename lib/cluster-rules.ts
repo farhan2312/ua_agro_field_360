@@ -21,8 +21,10 @@ export interface ClusterCriteria {
   visitCrops?: string[]; // crops from field visits — match ANY
   visitProblem?: string; // farmer has a visit recording this problem
   segment?: string; // legacy display label (High Value…)
-  campaignSegment?: string; // single: HNI | AT_RISK | …
-  campaignSegments?: string[]; // multiple — match ANY
+  campaignSegment?: string; // legacy single collapsed: HNI | AT_RISK | …
+  campaignSegments?: string[]; // legacy multiple — match ANY
+  valueSegments?: string[]; // value tier(s): HNI | POTENTIAL_HNI | REGULAR — match ANY
+  lifecycleSegments?: string[]; // lifecycle stage(s): NEW | AT_RISK | LAPSED — match ANY
   leadStatus?: string; // display label
   category?: string; // product category purchased
   spendMin?: number; // p12mSpend >= (₹)
@@ -47,6 +49,8 @@ export function criteriaToWhere(c: ClusterCriteria): Prisma.FarmerWhereInput {
   if (c.salesCrops?.length) and.push({ salesCropTags: { hasSome: c.salesCrops } });
   if (c.visitCrops?.length) and.push({ visitCropTags: { hasSome: c.visitCrops } });
   if (c.visitProblem) and.push({ visits: { some: { currentProblem: { has: c.visitProblem } } } });
+  if (c.valueSegments?.length) and.push({ valueSegment: { in: c.valueSegments } });
+  if (c.lifecycleSegments?.length) and.push({ lifecycleSegment: { in: c.lifecycleSegments } });
   if (c.campaignSegments?.length) and.push({ campaignSegment: { in: c.campaignSegments } });
   else if (c.campaignSegment) and.push({ campaignSegment: c.campaignSegment });
   // Segment / lead labels FAIL CLOSED: an unknown label matches nothing rather than
@@ -102,6 +106,8 @@ export function describeCriteria(c: ClusterCriteria, storeNames?: Map<number, st
   if (c.zones?.length) parts.push(c.zones.length === 1 ? c.zones[0] : `${c.zones.length} regions`);
   else if (c.zone) parts.push(c.zone);
   if (c.district) parts.push(c.district);
+  if (c.valueSegments?.length) parts.push(c.valueSegments.map((s) => segMeta(s).label).join(" / "));
+  if (c.lifecycleSegments?.length) parts.push(c.lifecycleSegments.map((s) => segMeta(s).label).join(" / "));
   if (c.campaignSegments?.length) parts.push(c.campaignSegments.map((s) => segMeta(s).label).join(" / "));
   else if (c.campaignSegment) parts.push(segMeta(c.campaignSegment).label);
   if (c.segment) parts.push(c.segment);
