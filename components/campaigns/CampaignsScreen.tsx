@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Modal, ModalHeader } from "@/components/interactive";
 import { segMeta, fillTemplate, SEGMENT_COLUMNS } from "@/lib/campaign-segments";
+import { cropLabel } from "@/lib/crops";
 import { inr } from "@/lib/format";
 import {
   saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, getCampaignTracker, extendCampaign, getCampaignMembers, markCampaignMember, getCampaignAnalytics, exportCampaignAudienceXlsx,
@@ -192,7 +193,7 @@ function CommPlanTab({ templates }: { templates: CommTemplateVM[] }) {
 }
 
 /* ══════════════════ Campaigns + tracking (WF4) ══════════════════ */
-function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPlanNames, templates }: { campaigns: CampaignListItem[]; projects: ProjectVM[]; canManage: boolean; initialProjectId?: number; commPlanNames: string[]; templates: CommTemplateVM[] }) {
+function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPlanNames, templates, crops }: { campaigns: CampaignListItem[]; projects: ProjectVM[]; canManage: boolean; initialProjectId?: number; commPlanNames: string[]; templates: CommTemplateVM[]; crops: CropOption[] }) {
   // Chain: arriving via /campaigns?forProject=<id> opens the create form with that project preselected.
   const initialProject = initialProjectId != null ? projects.find((p) => p.id === initialProjectId) ?? null : null;
   const defaultProject = initialProject ?? projects[0] ?? null;
@@ -381,7 +382,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
                       </div>
                     </div>
                     {focusMode
-                      ? <FocusMode members={members} onChange={patchMember} onExit={() => setFocusMode(false)} onCurrent={setFocusCurrent} />
+                      ? <FocusMode members={members} crops={crops} onChange={patchMember} onExit={() => setFocusMode(false)} onCurrent={setFocusCurrent} />
                       : (() => {
                           // List view: un-contacted first, reached/unreachable sink to the bottom.
                           const sorted = [...members].sort((a, b) => rank(a) - rank(b));
@@ -392,7 +393,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
                           return (
                             <>
                               <div className="flex flex-col gap-2.5">
-                                {slice.map((m) => <MemberRow key={m.id} member={m} onChange={patchMember} />)}
+                                {slice.map((m) => <MemberRow key={m.id} member={m} crops={crops} onChange={patchMember} />)}
                               </div>
                               {pages > 1 && (
                                 <div className="mt-3 flex items-center justify-center gap-3">
@@ -560,6 +561,48 @@ function ApproachPicker({ value, onToggle, disabled }: { value: string[]; onTogg
   );
 }
 
+/* ── Interest response: Interested · Not interested · Wants another crop (+ crop) ── */
+export const RESPONSE_TILES: { key: string; label: string; color: string; bg: string }[] = [
+  { key: "INTERESTED", label: "Interested", color: "#1B5E20", bg: "#E8F5E9" },
+  { key: "NOT_INTERESTED", label: "Not interested", color: "#C62828", bg: "#FDECEA" },
+  { key: "OTHER_CROP", label: "Wants another crop", color: "#E65100", bg: "#FFF3E0" },
+];
+export function responseLabel(k: string | null): string { return RESPONSE_TILES.find((t) => t.key === k)?.label ?? ""; }
+/** reached = any channel OR any interest response — mirrors the server's derivation. */
+export function isReached(mediums: string[], response: string | null): boolean { return isApproach(mediums) || response != null; }
+
+/** The 3 response tiles + a crop dropdown that appears only for "Wants another crop". Single-select. */
+export function ResponsePicker({ value, crop, crops, onPick, onCrop, disabled, compact }: {
+  value: string | null; crop: string | null; crops: CropOption[]; onPick: (k: string | null) => void; onCrop: (c: string) => void; disabled?: boolean; compact?: boolean;
+}) {
+  const pad = compact ? "px-2.5 py-1 text-[11px]" : "px-3.5 py-1.5 text-[12.5px]";
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {!compact && <span className="text-[11px] font-semibold uppercase text-[#757575]">What did they say?</span>}
+      {RESPONSE_TILES.map((t) => { const on = value === t.key; return (
+        <button key={t.key} type="button" disabled={disabled} onClick={() => onPick(on ? null : t.key)}
+          className={`rounded-full border-[1.5px] font-semibold disabled:opacity-50 ${pad}`}
+          style={{ background: on ? t.bg : "#fff", color: on ? t.color : "#616161", borderColor: on ? t.color : "#DADADA" }}>{on ? "✓ " : ""}{t.label}</button>
+      ); })}
+      {value === "OTHER_CROP" && (
+        <select value={crop ?? ""} onChange={(e) => onCrop(e.target.value)} disabled={disabled}
+          className={`rounded-full border-[1.5px] border-[#E65100] bg-[#FFF8F2] font-semibold text-[#E65100] disabled:opacity-50 ${pad}`}>
+          <option value="">Which crop?…</option>
+          {crops.map((c) => <option key={c.crop} value={c.crop}>{cropLabel(c.crop)}</option>)}
+        </select>
+      )}
+    </div>
+  );
+}
+
+/** Small pill showing a member's recorded response (with the requested crop for "another crop"). */
+export function ResponseBadge({ member }: { member: CampaignMemberVM }) {
+  const t = RESPONSE_TILES.find((x) => x.key === member.response);
+  if (!t) return null;
+  const suffix = member.response === "OTHER_CROP" && member.responseCrop ? `: ${cropLabel(member.responseCrop)}` : "";
+  return <span className="rounded-full px-2.5 py-0.5 text-[10px] font-semibold" style={{ background: t.bg, color: t.color }}>{t.label}{suffix}</span>;
+}
+
 /** Reached (green) + unreachable (red) progress bar over the whole list. */
 export function OutreachProgress({ members }: { members: CampaignMemberVM[] }) {
   const total = members.length;
@@ -678,21 +721,51 @@ export function ScriptPanel({ scripts, member, className = "" }: { scripts: Comm
   );
 }
 
-function MemberRow({ member, onChange }: { member: CampaignMemberVM; onChange: (m: CampaignMemberVM) => void }) {
+/**
+ * Shared per-member outreach state (channels + interest response + note), used by all 3 surfaces.
+ * Keeps the two dimensions reconciled: a response clears Unreachable; Unreachable clears the response.
+ */
+export function useOutreach(member: CampaignMemberVM) {
   const [mediums, setMediums] = useState<string[]>(member.mediums);
   const [comment, setComment] = useState(member.comment ?? "");
+  const [response, setResponse] = useState<string | null>(member.response);
+  const [crop, setCrop] = useState<string | null>(member.responseCrop);
+
+  const toggleChannel = (k: string) => {
+    setMediums((cur) => toggleMedium(cur, k));
+    if (k === "UNREACHABLE") { setResponse(null); setCrop(null); } // can't be unreachable AND have a response
+  };
+  const pickResponse = (k: string | null) => {
+    setResponse(k);
+    if (k !== "OTHER_CROP") setCrop(null);
+    if (k) setMediums((cur) => cur.filter((m) => m !== "UNREACHABLE")); // a response ⇒ they were reached
+  };
+
+  const dirty = medKey(mediums) !== medKey(member.mediums) || comment !== (member.comment ?? "")
+    || response !== member.response || (crop ?? "") !== (member.responseCrop ?? "");
+  const cropMissing = response === "OTHER_CROP" && !crop;
+  const effMediums = response ? mediums.filter((m) => m !== "UNREACHABLE") : mediums;
+  const patch = { mediums, comment, response, responseCrop: crop };
+  const optimistic = (): CampaignMemberVM => ({
+    ...member, mediums: effMediums, comment: comment.trim() || null,
+    response, responseCrop: response === "OTHER_CROP" ? crop : null, reached: isReached(effMediums, response),
+  });
+  return { mediums, comment, response, crop, setComment, setCrop, toggleChannel, pickResponse, dirty, cropMissing, patch, optimistic };
+}
+
+function MemberRow({ member, crops, onChange }: { member: CampaignMemberVM; crops: CropOption[]; onChange: (m: CampaignMemberVM) => void }) {
+  const o = useOutreach(member);
   const [pending, start] = useTransition();
   const [saved, setSaved] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const dirty = medKey(mediums) !== medKey(member.mediums) || comment !== (member.comment ?? "");
   const st = statusOf(member);
-  const unreachable = mediums.includes("UNREACHABLE");
 
   const save = () => {
+    if (o.cropMissing) { setErr("Pick which crop they're interested in."); return; }
     setErr(null); setSaved(false);
     start(async () => {
-      const res = await markCampaignMember(member.id, { mediums, comment });
-      if (res.ok) { onChange({ ...member, reached: isApproach(mediums), mediums, comment: comment.trim() || null }); setSaved(true); }
+      const res = await markCampaignMember(member.id, o.patch);
+      if (res.ok) { onChange(o.optimistic()); setSaved(true); }
       else setErr(res.error ?? "Failed");
     });
   };
@@ -703,17 +776,19 @@ function MemberRow({ member, onChange }: { member: CampaignMemberVM; onChange: (
         <span className="text-[16px] font-bold text-[#1A1C1A]">{member.name}</span>
         <span className="rounded-full px-2.5 py-0.5 text-[10px] font-semibold" style={{ background: segMeta(member.segment).bg, color: segMeta(member.segment).color }}>{segMeta(member.segment).label}</span>
         <StatusBadge member={member} />
+        <ResponseBadge member={member} />
         <span className="text-[12px] text-[#9E9E9E]">{member.village ?? "—"}{member.store ? ` · ${member.store}` : ""}</span>
       </div>
       <div className="mb-3"><PhoneBlock mobile={member.mobile} /></div>
-      <div className="rounded-[12px] border border-[#EAEAEA] bg-[#FBFBFB] p-3">
-        <ApproachPicker value={mediums} onToggle={(k) => { setMediums((cur) => toggleMedium(cur, k)); setSaved(false); }} disabled={pending} />
-        <textarea value={comment} onChange={(e) => { setComment(e.target.value); setSaved(false); }} placeholder="Add a note (optional)…"
-          rows={2} className="mt-2 w-full resize-y rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" />
-        <div className="mt-2 flex items-center gap-2">
-          <button type="button" onClick={save} disabled={pending || !dirty}
+      <div className="flex flex-col gap-2.5 rounded-[12px] border border-[#EAEAEA] bg-[#FBFBFB] p-3">
+        <ResponsePicker value={o.response} crop={o.crop} crops={crops} onPick={o.pickResponse} onCrop={o.setCrop} disabled={pending} />
+        <ApproachPicker value={o.mediums} onToggle={o.toggleChannel} disabled={pending} />
+        <textarea value={o.comment} onChange={(e) => o.setComment(e.target.value)} placeholder="Add a note (optional)…"
+          rows={2} className="w-full resize-y rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" />
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={save} disabled={pending || !o.dirty}
             className="rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-bold text-white disabled:opacity-40">
-            {pending ? "Saving…" : saved && !dirty ? "Saved ✓" : unreachable ? "Save — mark unreachable" : mediums.length ? `Save — reached via ${mediumsLabel(mediums)}` : "Save"}
+            {pending ? "Saving…" : saved && !o.dirty ? "Saved ✓" : "Save"}
           </button>
           {err && <span className="text-[12px] font-semibold text-[#C62828]">{err}</span>}
         </div>
@@ -723,7 +798,7 @@ function MemberRow({ member, onChange }: { member: CampaignMemberVM; onChange: (
 }
 
 /* ── Focus mode: one farmer at a time (queue: head = current; skip requeues; back re-opens last) ── */
-function FocusMode({ members, onChange, onExit, onCurrent }: { members: CampaignMemberVM[]; onChange: (m: CampaignMemberVM) => void; onExit: () => void; onCurrent?: (m: CampaignMemberVM | null) => void }) {
+function FocusMode({ members, crops, onChange, onExit, onCurrent }: { members: CampaignMemberVM[]; crops: CropOption[]; onChange: (m: CampaignMemberVM) => void; onExit: () => void; onCurrent?: (m: CampaignMemberVM | null) => void }) {
   const [queue, setQueue] = useState<number[]>(() => members.filter((m) => statusOf(m) === "pending").map((m) => m.id));
   const [history, setHistory] = useState<number[]>([]);
   const currentId = queue[0];
@@ -739,7 +814,7 @@ function FocusMode({ members, onChange, onExit, onCurrent }: { members: Campaign
   return (
     <div className="mt-3">
       {member
-        ? <FocusCard key={member.id} member={member} onChange={onChange} onHandled={handled} onSkip={skip} onBack={history.length ? back : undefined} remaining={queue.length} />
+        ? <FocusCard key={member.id} member={member} crops={crops} onChange={onChange} onHandled={handled} onSkip={skip} onBack={history.length ? back : undefined} remaining={queue.length} />
         : (
           <div className="rounded-[18px] border-2 border-[#A5D6A7] bg-[#F6FFF4] p-10 text-center">
             <div className="text-[20px] font-bold text-[#1B5E20]">All done 🎉</div>
@@ -751,21 +826,22 @@ function FocusMode({ members, onChange, onExit, onCurrent }: { members: Campaign
   );
 }
 
-function FocusCard({ member, onChange, onHandled, onSkip, onBack, remaining }: {
-  member: CampaignMemberVM; onChange: (m: CampaignMemberVM) => void; onHandled: () => void; onSkip: () => void; onBack?: () => void; remaining: number;
+function FocusCard({ member, crops, onChange, onHandled, onSkip, onBack, remaining }: {
+  member: CampaignMemberVM; crops: CropOption[]; onChange: (m: CampaignMemberVM) => void; onHandled: () => void; onSkip: () => void; onBack?: () => void; remaining: number;
 }) {
-  const [mediums, setMediums] = useState<string[]>(member.mediums);
-  const [comment, setComment] = useState(member.comment ?? "");
+  const o = useOutreach(member);
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
-  const unreachable = mediums.includes("UNREACHABLE");
+  const unreachable = o.mediums.includes("UNREACHABLE");
+  const canCommit = o.mediums.length > 0 || o.response != null; // a channel OR a response = handled
 
   const commit = () => {
-    if (!mediums.length) return; // pick at least one approach (or Unreachable), else Skip
+    if (!canCommit) return;
+    if (o.cropMissing) { setErr("Pick which crop they're interested in."); return; }
     setErr(null);
     start(async () => {
-      const res = await markCampaignMember(member.id, { mediums, comment });
-      if (res.ok) { onChange({ ...member, reached: isApproach(mediums), mediums, comment: comment.trim() || null }); onHandled(); }
+      const res = await markCampaignMember(member.id, o.patch);
+      if (res.ok) { onChange(o.optimistic()); onHandled(); }
       else setErr(res.error ?? "Failed");
     });
   };
@@ -776,26 +852,28 @@ function FocusCard({ member, onChange, onHandled, onSkip, onBack, remaining }: {
         <span className="text-[22px] font-bold text-[#1A1C1A]">{member.name}</span>
         <span className="rounded-full px-2.5 py-0.5 text-[10.5px] font-semibold" style={{ background: segMeta(member.segment).bg, color: segMeta(member.segment).color }}>{segMeta(member.segment).label}</span>
         <StatusBadge member={member} />
+        <ResponseBadge member={member} />
         <span className="ml-auto rounded-full bg-[#F5F7F5] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#616161]">{remaining} left</span>
       </div>
       <div className="mb-3 text-[12.5px] text-[#9E9E9E]">{member.village ?? "—"}{member.store ? ` · ${member.store}` : ""}</div>
       <div className="mb-4"><PhoneBlock mobile={member.mobile} big /></div>
-      <div className="rounded-[12px] border border-[#EAEAEA] bg-[#FBFBFB] p-3.5">
-        <ApproachPicker value={mediums} onToggle={(k) => setMediums((cur) => toggleMedium(cur, k))} disabled={pending} />
-        <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Add a note (optional)…"
-          rows={2} className="mt-2.5 w-full resize-y rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" />
+      <div className="flex flex-col gap-3 rounded-[12px] border border-[#EAEAEA] bg-[#FBFBFB] p-3.5">
+        <ResponsePicker value={o.response} crop={o.crop} crops={crops} onPick={o.pickResponse} onCrop={o.setCrop} disabled={pending} />
+        <ApproachPicker value={o.mediums} onToggle={o.toggleChannel} disabled={pending} />
+        <textarea value={o.comment} onChange={(e) => o.setComment(e.target.value)} placeholder="Add a note (optional)…"
+          rows={2} className="w-full resize-y rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" />
       </div>
       {err && <div className="mt-2 text-[12px] font-semibold text-[#C62828]">{err}</div>}
       <div className="mt-4 flex items-center gap-2">
         {onBack && <button type="button" onClick={onBack} disabled={pending} className="rounded-[10px] border border-[#E0E0E0] px-4 py-2.5 text-[13px] font-semibold text-[#616161] disabled:opacity-40">← Back</button>}
         <button type="button" onClick={onSkip} disabled={pending} className="rounded-[10px] border border-[#E0E0E0] px-4 py-2.5 text-[13px] font-semibold text-[#616161] disabled:opacity-40">Skip →</button>
-        <button type="button" onClick={commit} disabled={pending || !mediums.length}
+        <button type="button" onClick={commit} disabled={pending || !canCommit}
           className="ml-auto rounded-[10px] px-6 py-2.5 text-[13.5px] font-bold text-white disabled:opacity-40"
           style={{ background: unreachable ? "#C62828" : "#2E7D32" }}>
           {pending ? "Saving…" : unreachable ? "Mark unreachable & next" : "Save & next"}
         </button>
       </div>
-      {!mediums.length && <div className="mt-2 text-right text-[11.5px] text-[#9E9E9E]">Pick how you reached them — one or more (or Unreachable), or Skip to come back later.</div>}
+      {!canCommit && <div className="mt-2 text-right text-[11.5px] text-[#9E9E9E]">Log their response and/or how you reached them — or Skip to come back later.</div>}
     </div>
   );
 }
@@ -1064,6 +1142,20 @@ function TrackerBody({ t }: { t: CampaignTracker }) {
           <Kpi label="Paying (contacted)" value={n(a.payingFarmers)} color="#1565C0" />
         </div>
         <div className="mt-2 text-[11px] text-[#9E9E9E]">A farmer can be reached by more than one approach, so the Call·WA·SMS·Visit counts can add up to more than “Reached”.</div>
+        {/* Interest response breakdown (of the reached farmers) */}
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[#F0F0F0] pt-3">
+          <span className="text-[11px] font-semibold uppercase text-[#757575]">Response</span>
+          <span className="rounded-full bg-[#E8F5E9] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#1B5E20]">Interested {n(t.reach.byResponse.interested)}</span>
+          <span className="rounded-full bg-[#FDECEA] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#C62828]">Not interested {n(t.reach.byResponse.notInterested)}</span>
+          <span className="rounded-full bg-[#FFF3E0] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#E65100]">Wants another crop {n(t.reach.byResponse.otherCrop)}</span>
+          {t.reach.byResponse.noResponse > 0 && <span className="rounded-full bg-[#F5F5F5] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#9E9E9E]">Not logged {n(t.reach.byResponse.noResponse)}</span>}
+        </div>
+        {t.reach.otherCrops.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-semibold uppercase text-[#757575]">Crops requested</span>
+            {t.reach.otherCrops.map((c) => <span key={c.crop} className="rounded-full border border-[#FFCC80] bg-[#FFF8F0] px-2 py-0.5 text-[11px] font-semibold text-[#E65100]">{cropLabel(c.crop)} · {n(c.count)}</span>)}
+          </div>
+        )}
       </div>
 
       <div className={`${CARD} p-4`}>
@@ -1110,8 +1202,8 @@ function TrackerBody({ t }: { t: CampaignTracker }) {
 }
 
 /* ══════════════════ Shell ══════════════════ */
-export function CampaignsScreen({ templates, campaigns, stores: _stores, projects, canManage, initialProjectId }: {
-  templates: CommTemplateVM[]; campaigns: CampaignListItem[]; stores: StoreLite[]; projects: ProjectVM[]; canManage: boolean; initialProjectId?: number;
+export function CampaignsScreen({ templates, campaigns, stores: _stores, projects, canManage, initialProjectId, crops = [] }: {
+  templates: CommTemplateVM[]; campaigns: CampaignListItem[]; stores: StoreLite[]; projects: ProjectVM[]; canManage: boolean; initialProjectId?: number; crops?: CropOption[];
 }) {
   const [tab, setTab] = useState<"comms" | "campaigns">("campaigns");
   // Officers/RMs get the scoped campaign view only; the comm-plan config is central.
@@ -1132,7 +1224,7 @@ export function CampaignsScreen({ templates, campaigns, stores: _stores, project
         </div>
       )}
       {tab === "comms" && canManage && <CommPlanTab templates={templates} />}
-      {tab === "campaigns" && <CampaignsTab campaigns={campaigns} projects={projects} canManage={canManage} initialProjectId={initialProjectId} commPlanNames={[...new Set(templates.map((t) => t.name).filter(Boolean))]} templates={templates} />}
+      {tab === "campaigns" && <CampaignsTab campaigns={campaigns} projects={projects} canManage={canManage} initialProjectId={initialProjectId} commPlanNames={[...new Set(templates.map((t) => t.name).filter(Boolean))]} templates={templates} crops={crops} />}
     </div>
   );
 }

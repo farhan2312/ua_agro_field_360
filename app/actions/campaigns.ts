@@ -431,6 +431,7 @@ export interface CampaignMemberVM {
   id: number; name: string; mobile: string | null; village: string | null; store: string | null;
   segment: string; reached: boolean; mediums: string[]; comment: string | null; reachedAt: string | null;
   reachedBy: string | null; reachedByCode: string | null;
+  response: string | null; responseCrop: string | null; // interest outcome + the crop when OTHER_CROP
 }
 export async function getCampaignMembers(campaignId: number, limit = 1000): Promise<CampaignMemberVM[]> {
   const scope = await memberScopeWhere();
@@ -438,7 +439,7 @@ export async function getCampaignMembers(campaignId: number, limit = 1000): Prom
   const members = await prisma.campaignMember.findMany({
     where: { campaignId, group: "TEST", ...(scope ?? {}) }, // officers/RMs contact only the TEST group
     take: limit, orderBy: { id: "asc" },
-    select: { id: true, farmerId: true, segment: true, reached: true, mediums: true, comment: true, reachedAt: true, reachedBy: true, reachedByCode: true, storeId: true },
+    select: { id: true, farmerId: true, segment: true, reached: true, mediums: true, comment: true, reachedAt: true, reachedBy: true, reachedByCode: true, storeId: true, response: true, responseCrop: true },
   });
   if (!members.length) return [];
   const [farmers, stores] = await Promise.all([
@@ -453,7 +454,7 @@ export async function getCampaignMembers(campaignId: number, limit = 1000): Prom
       id: m.id, name: f?.name ?? `Farmer #${m.farmerId}`, mobile: f?.mobile ?? null, village: f?.village ?? null,
       store: m.storeId != null ? sMap.get(m.storeId) ?? null : null,
       segment: m.segment, reached: m.reached, mediums: m.mediums, comment: m.comment, reachedAt: iso(m.reachedAt),
-      reachedBy: m.reachedBy, reachedByCode: m.reachedByCode,
+      reachedBy: m.reachedBy, reachedByCode: m.reachedByCode, response: m.response, responseCrop: m.responseCrop,
     };
   });
 }
@@ -592,22 +593,24 @@ export async function exportCampaignAudienceXlsx(campaignId: number, campaignNam
   return { ok: true, filename: `${safe} - audience.xlsx`, b64 };
 }
 
-const CONTACT_MEDIA = new Set(["CALL", "WHATSAPP", "SMS", "IN_PERSON"]); // an approach ⇒ reached
-const OUTCOMES = new Set([...CONTACT_MEDIA, "UNREACHABLE"]); // valid outcome values (UNREACHABLE = parked, not reached)
+const CONTACT_MEDIA = new Set(["CALL", "WHATSAPP", "SMS", "IN_PERSON"]); // a channel ⇒ reached
+const OUTCOMES = new Set([...CONTACT_MEDIA, "UNREACHABLE"]); // valid channel/outcome values (UNREACHABLE = parked, not reached)
+const RESPONSES = new Set(["INTERESTED", "NOT_INTERESTED", "OTHER_CROP"]); // interest outcome — any ⇒ reached
 
 /**
- * Officer/RM (or central) records an outreach outcome. `mediums` is a SET — one farmer can be
- * reached by several approaches (e.g. Call + WhatsApp):
- *   any of CALL|WHATSAPP|SMS|IN_PERSON → reached; [UNREACHABLE] alone → parked (done, not reached);
- *   [] / null → back to pending.
- * `reached` is derived from the set (never trusted from the client). Scope-guarded to own store/zone.
+ * Officer/RM (or central) records an outreach outcome:
+ *   - `mediums`: HOW they were reached — CALL|WHATSAPP|SMS|IN_PERSON (multi-select), or the exclusive
+ *     UNREACHABLE (couldn't contact).
+ *   - `response`: the INTEREST outcome — INTERESTED | NOT_INTERESTED | OTHER_CROP (+ `responseCrop` for the last).
+ * `reached` is DERIVED (never trusted from the client): any channel OR any interest response ⇒ reached.
+ * A response and UNREACHABLE are contradictory — recording one clears the other. Scope-guarded to own store/zone.
  */
 export async function markCampaignMember(
   memberId: number,
-  patch: { mediums?: string[] | null; comment?: string | null },
+  patch: { mediums?: string[] | null; comment?: string | null; response?: string | null; responseCrop?: string | null },
 ): Promise<{ ok: boolean; error?: string }> {
   const { role, storeId, zone } = await getScope();
-  const member = await prisma.campaignMember.findUnique({ where: { id: memberId }, select: { storeId: true, zone: true, group: true } });
+  const member = await prisma.campaignMember.findUnique({ where: { id: memberId }, select: { storeId: true, zone: true, group: true, mediums: true, response: true } });
   if (!member) return { ok: false, error: "Member not found." };
   // Officers/RMs may only touch their own store's / region's members; central/sysadmin may touch any.
   if (role === "officer") { if (storeId == null || member.storeId !== storeId) return { ok: false, error: "This farmer isn't in your store." }; }
@@ -616,17 +619,49 @@ export async function markCampaignMember(
   if (member.group !== "TEST") return { ok: false, error: "This farmer is a control holdout — not contacted." };
 
   const data: Prisma.CampaignMemberUpdateInput = {};
+  let effMediums = member.mediums;
+  let effResponse: string | null = member.response;
+  let outcomeTouched = false;
+
   if (patch.mediums !== undefined) {
     // Normalise to a validated, de-duplicated set — the client may send anything.
     const meds = [...new Set((patch.mediums ?? []).map((m) => String(m).trim().toUpperCase()).filter(Boolean))];
     if (meds.some((m) => !OUTCOMES.has(m))) return { ok: false, error: "Pick Call, WhatsApp, SMS, In-person or Unreachable." };
-    // "Unreachable" is an outcome, not an approach — it can't be combined with one.
-    if (meds.includes("UNREACHABLE") && meds.length > 1) return { ok: false, error: "Unreachable can't be combined with an approach." };
-    const reached = meds.some((m) => CONTACT_MEDIA.has(m)); // UNREACHABLE / empty ⇒ not reached
-    const recorded = meds.length > 0;
-    data.mediums = meds;
+    if (meds.includes("UNREACHABLE") && meds.length > 1) return { ok: false, error: "Unreachable can't be combined with a channel." };
+    effMediums = meds; outcomeTouched = true;
+  }
+  if (patch.response !== undefined) {
+    const resp = patch.response ? String(patch.response).trim().toUpperCase() : null;
+    if (resp && !RESPONSES.has(resp)) return { ok: false, error: "Pick Interested, Not interested, or Other crop." };
+    effResponse = resp; outcomeTouched = true;
+    if (resp === "OTHER_CROP") {
+      const crop = (patch.responseCrop ?? "").trim().toLowerCase();
+      if (!crop) return { ok: false, error: "Pick which crop they're interested in." };
+      data.responseCrop = crop;
+    } else {
+      data.responseCrop = null; // crop only meaningful for OTHER_CROP
+    }
+  } else if (patch.responseCrop !== undefined && member.response === "OTHER_CROP") {
+    // Crop changed while staying on OTHER_CROP.
+    const crop = (patch.responseCrop ?? "").trim().toLowerCase();
+    if (!crop) return { ok: false, error: "Pick which crop they're interested in." };
+    data.responseCrop = crop;
+  }
+
+  if (outcomeTouched) {
+    // Reconcile the two dimensions: a real response means contact was made (drop UNREACHABLE);
+    // marking UNREACHABLE means no conversation (drop any response).
+    if (effResponse && RESPONSES.has(effResponse)) effMediums = effMediums.filter((m) => m !== "UNREACHABLE");
+    if (effMediums.includes("UNREACHABLE")) effResponse = null;
+
+    data.mediums = effMediums;
+    data.response = effResponse;
+    if (!effResponse) data.responseCrop = null;
+
+    const reached = effMediums.some((m) => CONTACT_MEDIA.has(m)) || effResponse != null;
+    const recorded = effMediums.length > 0 || effResponse != null;
     data.reached = reached;
-    data.reachedAt = recorded ? new Date() : null; // when the outcome (reach OR unreachable) was recorded
+    data.reachedAt = recorded ? new Date() : null; // when the outcome was recorded
     const actor = await getActor(); // audit: the ACTUAL logged-in user, never the impersonated persona
     data.reachedBy = recorded ? actor.name : null;
     data.reachedByCode = recorded ? actor.code : null;
@@ -689,7 +724,12 @@ async function matchedSpendByFarmer(pf: ProductFilter, farmerIds: number[], star
   return out;
 }
 
-export interface CampaignReach { testTotal: number; reached: number; byApproach: { CALL: number; WHATSAPP: number; SMS: number; IN_PERSON: number; unspecified: number } }
+export interface CampaignReach {
+  testTotal: number; reached: number;
+  byApproach: { CALL: number; WHATSAPP: number; SMS: number; IN_PERSON: number; unspecified: number };
+  byResponse: { interested: number; notInterested: number; otherCrop: number; noResponse: number };
+  otherCrops: { crop: string; count: number }[]; // crops requested via "interested in another crop"
+}
 export interface CampaignAttribution {
   basisLabel: string; crops: string[]; categories: string[]; all: boolean; noCatalogMatch: boolean;
   windowStart: string; windowEnd: string;
@@ -732,7 +772,7 @@ export async function getCampaignTracker(campaignId: number): Promise<CampaignTr
   const start = camp.startDate;
   const end = new Date(camp.endDate); end.setDate(end.getDate() + 30); // +30-day grace tail
 
-  const members = await prisma.campaignMember.findMany({ where: { campaignId }, select: { farmerId: true, segment: true, group: true, reached: true, mediums: true } });
+  const members = await prisma.campaignMember.findMany({ where: { campaignId }, select: { farmerId: true, segment: true, group: true, reached: true, mediums: true, response: true, responseCrop: true } });
   const test = members.filter((m) => m.group === "TEST");
   const reachedMembers = test.filter((m) => m.reached);
   // Approaches are multi-select, so a farmer reached by Call AND WhatsApp counts under both:
@@ -744,6 +784,16 @@ export async function getCampaignTracker(campaignId: number): Promise<CampaignTr
     if (keys.length === 0) byApproach.unspecified++;
     else for (const k of keys) byApproach[k]++;
   }
+  // Interest response breakdown over the reached TEST farmers + the "other crop" requests.
+  const byResponse = { interested: 0, notInterested: 0, otherCrop: 0, noResponse: 0 };
+  const otherCropTally = new Map<string, number>();
+  for (const m of reachedMembers) {
+    if (m.response === "INTERESTED") byResponse.interested++;
+    else if (m.response === "NOT_INTERESTED") byResponse.notInterested++;
+    else if (m.response === "OTHER_CROP") { byResponse.otherCrop++; if (m.responseCrop) otherCropTally.set(m.responseCrop, (otherCropTally.get(m.responseCrop) ?? 0) + 1); }
+    else byResponse.noResponse++;
+  }
+  const otherCrops = [...otherCropTally.entries()].sort((a, b) => b[1] - a[1]).map(([crop, count]) => ({ crop, count }));
 
   // Matched spend per farmer for ALL members (uplift needs the control baseline); total spend for reached test (context).
   const allIds = [...new Set(members.map((m) => m.farmerId))];
@@ -788,7 +838,7 @@ export async function getCampaignTracker(campaignId: number): Promise<CampaignTr
     : [pf.crops.length ? `Crop: ${pf.crops.map(cropLabel).join(", ")}` : "", pf.categories.length ? `Category: ${pf.categories.join(", ")}` : ""].filter(Boolean).join(" · ");
 
   return {
-    reach: { testTotal: test.length, reached: reachedMembers.length, byApproach },
+    reach: { testTotal: test.length, reached: reachedMembers.length, byApproach, byResponse, otherCrops },
     attribution: {
       basisLabel, crops: pf.crops, categories: pf.categories, all: pf.all, noCatalogMatch,
       windowStart: iso(start)!, windowEnd: iso(end)!,

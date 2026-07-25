@@ -372,6 +372,8 @@ model CampaignMember {
   reachedBy     String? // audit: ACTUAL logged-in user's name who recorded the outcome
   reachedByCode String? // audit: their User.employeeCode (e.g. "UA123")
   comment       String? // optional free-text note from the officer/RM about the contact
+  response      String? // interest outcome: INTERESTED | NOT_INTERESTED | OTHER_CROP (null = not asked). Any of these ⇒ reached.
+  responseCrop  String? // crop key when response = OTHER_CROP (from the global crop list)
 
   @@unique([campaignId, farmerId])
   @@index([campaignId])

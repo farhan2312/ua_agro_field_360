@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { getRole } from "@/lib/session";
 import { canAccess } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
-import { listCampaigns, getCampaignMembers } from "@/app/actions/campaigns";
+import { listCampaigns, getCampaignMembers, getCropOptions } from "@/app/actions/campaigns";
 import { OutreachMatrix } from "@/components/campaigns/OutreachMatrix";
 import type { CommTemplateVM } from "@/components/campaigns/CampaignsScreen";
 
@@ -21,7 +21,10 @@ export default async function OutreachMatrixPage({ params }: { params: { id: str
   const campaign = camps.find((c) => c.id === id);
   if (!campaign) notFound();
 
-  const members = await getCampaignMembers(id); // scoped, TEST group only
+  const [members, crops] = await Promise.all([
+    getCampaignMembers(id), // scoped, TEST group only
+    getCropOptions(), // crop list for the "wants another crop" dropdown
+  ]);
 
   // The comm-plan scripts tagged to this campaign (by name) — the outreach left panel.
   let scripts: CommTemplateVM[] = [];
@@ -37,5 +40,5 @@ export default async function OutreachMatrixPage({ params }: { params: { id: str
     }));
   }
 
-  return <OutreachMatrix campaign={campaign} initial={members} scripts={scripts} />;
+  return <OutreachMatrix campaign={campaign} initial={members} scripts={scripts} crops={crops} />;
 }
