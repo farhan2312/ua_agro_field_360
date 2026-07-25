@@ -157,7 +157,10 @@ model Farmer {
 
   // ── CRM segmentation (precomputed by scripts/compute-segments.ts, monthly) ──
   segmentTags       String[]  @default([]) // regular, loyal, at_risk, lapsed, new, hni, potential_hni
-  campaignSegment   String? // exclusive: HNI|POTENTIAL_HNI|REGULAR|AT_RISK|NEW|LAPSED|OTHER
+  campaignSegment   String? // LEGACY exclusive collapse: HNI|POTENTIAL_HNI|REGULAR|AT_RISK|NEW|LAPSED|OTHER (kept for back-compat)
+  valueSegment      String? // value tier (by p12mSpend): HNI(≥12k) | POTENTIAL_HNI(8–12k) | REGULAR(else)
+  lifecycleSegment  String? // recency (months since last purchase): NEW(<5) | AT_RISK(5–12) | LAPSED(≥12 or never)
+  lastPurchaseAt    DateTime? // most recent Sale.soldAt (drives lifecycleSegment)
   cropTags          String[]  @default([]) // union of sales + visit crops (used by crop filters)
   salesCropTags     String[]  @default([]) // crops from the monthly sales upload (Crops column + item-code Target Crops)
   visitCropTags     String[]  @default([]) // crops recorded during field visits
@@ -181,6 +184,8 @@ model Farmer {
   @@index([mobile]) // exact-match lookup during New Visit intake/edit
   @@index([source]) // DEMO/REAL filters (clusters, users, map)
   @@index([campaignSegment])
+  @@index([valueSegment])
+  @@index([lifecycleSegment])
   @@index([cropTags], type: Gin)
   @@index([salesCropTags], type: Gin)
   @@index([visitCropTags], type: Gin)

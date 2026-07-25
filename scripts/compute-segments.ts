@@ -10,11 +10,13 @@
  */
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
+import { valueSegmentOf, lifecycleSegmentOf, VALUE_HNI_MIN, VALUE_POTENTIAL_MIN } from "../lib/campaign-segments";
 
 const prisma = new PrismaClient();
 
-const HNI_MIN = 12000;
-const POTENTIAL_MIN = 10000;
+const HNI_MIN = VALUE_HNI_MIN;        // ₹12k
+const POTENTIAL_MIN = VALUE_POTENTIAL_MIN; // ₹8k (was ₹10k)
+const MS_PER_MONTH = 1000 * 60 * 60 * 24 * 30.4375;
 
 const ASOF = process.env.SEGMENT_ASOF ? new Date(`${process.env.SEGMENT_ASOF}T23:59:59Z`) : new Date();
 const minusM = (d: Date, n: number) => { const x = new Date(d); x.setMonth(x.getMonth() - n); return x; };
@@ -22,7 +24,7 @@ const P6 = minusM(ASOF, 6), P12 = minusM(ASOF, 12), P24 = minusM(ASOF, 24);
 
 interface Agg {
   p6: boolean; p712: boolean; p1324: boolean;
-  earliest: Date | null; spend12: number;
+  earliest: Date | null; latest: Date | null; spend12: number;
   maizeItem: string | null; maizeAt: Date | null;
   potatoItem: string | null; potatoAt: Date | null;
 }
@@ -39,7 +41,7 @@ async function main() {
   const agg = new Map<number, Agg>();
   const getA = (id: number): Agg => {
     let a = agg.get(id);
-    if (!a) { a = { p6: false, p712: false, p1324: false, earliest: null, spend12: 0, maizeItem: null, maizeAt: null, potatoItem: null, potatoAt: null }; agg.set(id, a); }
+    if (!a) { a = { p6: false, p712: false, p1324: false, earliest: null, latest: null, spend12: 0, maizeItem: null, maizeAt: null, potatoItem: null, potatoAt: null }; agg.set(id, a); }
     return a;
   };
 
@@ -58,6 +60,7 @@ async function main() {
       const dt = s.soldAt as Date;
       const a = getA(s.farmerId);
       if (!a.earliest || dt < a.earliest) a.earliest = dt;
+      if (!a.latest || dt > a.latest) a.latest = dt;
       if (dt > P6) a.p6 = true;
       else if (dt > P12) a.p712 = true;
       else if (dt > P24) a.p1324 = true;
@@ -79,6 +82,8 @@ async function main() {
 
   // ── Compute + build bulk-update rows ──
   const segCounts: Record<string, number> = {};
+  const valueCounts: Record<string, number> = {};
+  const lifecycleCounts: Record<string, number> = {};
   let maizeCount = 0, potatoCount = 0;
   const rows: string[] = [];
   for (const [id, a] of agg) {
@@ -109,14 +114,21 @@ async function main() {
     else if (lapsed) seg = "LAPSED";
     segCounts[seg] = (segCounts[seg] ?? 0) + 1;
 
+    // ── The two split dimensions ──
+    const valueSeg = valueSegmentOf(a.spend12); // HNI | POTENTIAL_HNI | REGULAR
+    const monthsSince = a.latest ? Math.floor((ASOF.getTime() - a.latest.getTime()) / MS_PER_MONTH) : null;
+    const lifecycleSeg = lifecycleSegmentOf(monthsSince); // NEW | AT_RISK | LAPSED (never ⇒ LAPSED)
+    valueCounts[valueSeg] = (valueCounts[valueSeg] ?? 0) + 1;
+    lifecycleCounts[lifecycleSeg] = (lifecycleCounts[lifecycleSeg] ?? 0) + 1;
+
     const crops: string[] = [];
     if (a.maizeItem) { crops.push("maize"); maizeCount++; }
     if (a.potatoItem) { crops.push("potato"); potatoCount++; }
 
-    const gap = potential ? HNI_MIN - a.spend12 : null;
+    const gap = valueSeg === "POTENTIAL_HNI" ? HNI_MIN - a.spend12 : null;
 
     rows.push(
-      `(${id}::int, ${txtArr(tags)}, ${q(seg)}::text, ${txtArr(crops)}, ${int(a.spend12)}, ${int(gap)}, ` +
+      `(${id}::int, ${txtArr(tags)}, ${q(seg)}::text, ${q(valueSeg)}::text, ${q(lifecycleSeg)}::text, ${ts(a.latest)}, ${txtArr(crops)}, ${int(a.spend12)}, ${int(gap)}, ` +
       `${txt(a.maizeItem)}, ${ts(a.maizeAt)}, ${txt(a.potatoItem)}, ${ts(a.potatoAt)})`,
     );
   }
@@ -128,18 +140,27 @@ async function main() {
     const slice = rows.slice(i, i + CHUNK);
     const sql =
       `UPDATE "Farmer" AS f SET ` +
-      `"segmentTags"=v.tags, "campaignSegment"=v.seg, "cropTags"=v.crops, ` +
+      `"segmentTags"=v.tags, "campaignSegment"=v.seg, "valueSegment"=v.vseg, "lifecycleSegment"=v.lseg, "lastPurchaseAt"=v.lastat, "cropTags"=v.crops, ` +
       `"p12mSpend"=v.spend, "hniGap"=v.gap, ` +
       `"lastMaizeItem"=v.mitem, "lastMaizeAt"=v.mat, "lastPotatoItem"=v.pitem, "lastPotatoAt"=v.pat, ` +
       `"segmentComputedAt"=now() ` +
-      `FROM (VALUES ${slice.join(",")}) AS v(id, tags, seg, crops, spend, gap, mitem, mat, pitem, pat) ` +
+      `FROM (VALUES ${slice.join(",")}) AS v(id, tags, seg, vseg, lseg, lastat, crops, spend, gap, mitem, mat, pitem, pat) ` +
       `WHERE f.id = v.id;`;
     updated += await prisma.$executeRawUnsafe(sql);
     process.stdout.write(`\r  farmers updated: ${updated}/${rows.length}`);
   }
   process.stdout.write("\n");
 
-  console.log("Campaign segments:", JSON.stringify(segCounts));
+  // REAL farmers with no dated sales → default value=REGULAR, lifecycle=LAPSED (never purchased).
+  const filled = await prisma.$executeRawUnsafe(
+    `UPDATE "Farmer" SET "valueSegment"=COALESCE("valueSegment",'REGULAR'), "lifecycleSegment"=COALESCE("lifecycleSegment",'LAPSED')
+     WHERE "source"='REAL' AND ("valueSegment" IS NULL OR "lifecycleSegment" IS NULL)`,
+  );
+
+  console.log("Legacy campaign segments:", JSON.stringify(segCounts));
+  console.log("Value segments:", JSON.stringify(valueCounts));
+  console.log("Lifecycle segments:", JSON.stringify(lifecycleCounts));
+  console.log(`No-sale REAL farmers defaulted (Regular/Lapsed): ${filled}`);
   console.log(`Crop tags — maize: ${maizeCount}, potato: ${potatoCount}`);
   await prisma.$disconnect();
 }

@@ -28,8 +28,42 @@ export function segMeta(seg: string | null | undefined): SegMeta {
   return (seg && SEGMENT_META[seg]) || SEGMENT_META.OTHER;
 }
 
-/** Display order for matrix columns / filters (value tiers first, then lifecycle). */
+/** Display order for the LEGACY combined matrix columns / filters (value tiers first, then lifecycle). */
 export const SEGMENT_COLUMNS: string[] = ["HNI", "POTENTIAL_HNI", "REGULAR", "AT_RISK", "NEW", "LAPSED"];
+
+/* ── The two independent dimensions the single segment was split into ── */
+/** Value tier — by P12M spend. HNI ≥ ₹12k · Potential HNI ₹8k–<12k · Regular = the rest. */
+export const VALUE_SEGMENTS = ["HNI", "POTENTIAL_HNI", "REGULAR"] as const;
+export type ValueSegment = (typeof VALUE_SEGMENTS)[number];
+export const VALUE_HNI_MIN = 12000;
+export const VALUE_POTENTIAL_MIN = 8000;
+
+/** Lifecycle — by months since the farmer's last purchase. New <5 · At Risk 5–<12 · Lapsed ≥12 (or never). */
+export const LIFECYCLE_SEGMENTS = ["NEW", "AT_RISK", "LAPSED"] as const;
+export type LifecycleSegment = (typeof LIFECYCLE_SEGMENTS)[number];
+export const LIFECYCLE_NEW_MAX_MONTHS = 5;   // < 5 months → New
+export const LIFECYCLE_LAPSED_MIN_MONTHS = 12; // ≥ 12 months (or never) → Lapsed; between → At Risk
+
+/** Human title for the lifecycle dimension (user-chosen). */
+export const LIFECYCLE_TITLE = "Lifecycle";
+export const VALUE_TITLE = "Value segment";
+
+/** Meta (label/color/bg) for a value or lifecycle key — reuses SEGMENT_META. */
+export const valueMeta = (k: string) => segMeta(k);
+export const lifecycleMeta = (k: string) => segMeta(k);
+
+/** Compute the value tier from P12M spend. */
+export function valueSegmentOf(spend: number | null | undefined): ValueSegment {
+  const s = spend ?? 0;
+  return s >= VALUE_HNI_MIN ? "HNI" : s >= VALUE_POTENTIAL_MIN ? "POTENTIAL_HNI" : "REGULAR";
+}
+/** Compute the lifecycle stage from whole months since the last purchase (null/never ⇒ Lapsed). */
+export function lifecycleSegmentOf(monthsSinceLast: number | null | undefined): LifecycleSegment {
+  if (monthsSinceLast == null) return "LAPSED";
+  if (monthsSinceLast < LIFECYCLE_NEW_MAX_MONTHS) return "NEW";
+  if (monthsSinceLast < LIFECYCLE_LAPSED_MIN_MONTHS) return "AT_RISK";
+  return "LAPSED";
+}
 
 export const CROP_GROUPS = [
   { key: "maize", label: "Maize" },
