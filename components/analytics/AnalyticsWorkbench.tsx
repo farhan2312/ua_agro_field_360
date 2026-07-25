@@ -32,13 +32,13 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
   const [exporting, setExporting] = useState(false);
   const [treeBy, setTreeBy] = useState<"value" | "lifecycle">("value"); // KPI cross-tab primary dimension
   const years = filters.fyStarts ?? []; // selected FY start years — drives the whole sales analysis
-  const toggleFy = (y: number) => {
-    const cur = filters.fyStarts ?? [];
-    apply({ fyStarts: cur.includes(y) ? cur.filter((x) => x !== y) : [...cur, y].sort((a, b) => a - b) });
+  const toggleStr = (key: "zones" | "crops" | "pests" | "problems" | "valueSegments" | "lifecycleSegments", v: string) => {
+    const cur = (filters[key] as string[] | undefined) ?? [];
+    apply({ [key]: cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v] } as Partial<WbFilters>);
   };
-  const toggleSeg = (key: "valueSegments" | "lifecycleSegments", k: string) => {
-    const cur = filters[key] ?? [];
-    apply({ [key]: cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k] });
+  const toggleInt = (key: "storeIds" | "spendTiers" | "fyStarts", v: number) => {
+    const cur = (filters[key] as number[] | undefined) ?? [];
+    apply({ [key]: cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v].sort((a, b) => a - b) } as Partial<WbFilters>);
   };
   // Close any open <details> filter popover when clicking outside it.
   useEffect(() => {
@@ -72,8 +72,8 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
       setVisitData(va);
     });
   };
-  const setLens = (lens: Lens) => apply({ lens, crop: undefined, valueSegments: undefined, lifecycleSegments: undefined, spendTier: undefined, problem: undefined });
-  const clearAll = () => apply({ storeId: undefined, zone: undefined, crop: undefined, pest: undefined, valueSegments: undefined, lifecycleSegments: undefined, spendTier: undefined, problem: undefined, fyStarts: undefined });
+  const setLens = (lens: Lens) => apply({ lens, crops: undefined, valueSegments: undefined, lifecycleSegments: undefined, spendTiers: undefined, problems: undefined });
+  const clearAll = () => apply({ storeIds: undefined, zones: undefined, crops: undefined, pests: undefined, valueSegments: undefined, lifecycleSegments: undefined, spendTiers: undefined, problems: undefined, fyStarts: undefined });
 
   const openCell = (storeId: number | null, storeName: string, dim: SegDim, seg: string) => {
     setCell({ storeId, storeName, dim, seg }); setRows(null);
@@ -81,8 +81,10 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
   };
 
   const cropOpts = filters.lens === "sales" ? facets.salesCrops : facets.visitCrops;
-  const activeFilterCount = [filters.storeId, filters.zone, filters.crop, filters.pest, filters.spendTier, filters.problem].filter((x) => x != null && x !== "").length
-    + (years.length > 0 ? 1 : 0) + (filters.valueSegments?.length ? 1 : 0) + (filters.lifecycleSegments?.length ? 1 : 0);
+  const activeFilterCount = [
+    filters.storeIds, filters.zones, filters.crops, filters.pests,
+    filters.valueSegments, filters.lifecycleSegments, filters.spendTiers, filters.problems, filters.fyStarts,
+  ].filter((a) => a && a.length).length;
   const k = data.kpis;
   const vk = visitData?.kpis;
   const vd = (x: number | undefined) => (visitData ? n(x ?? 0) : "…");
@@ -108,33 +110,34 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
         </div>
       </div>
 
-      {/* Filter bar */}
+      {/* Filter bar — every filter is a uniform-width multi-select (alphabetical options). */}
       <div className={`${CARD} mb-3 flex flex-wrap items-center gap-2 p-3`}>
         <span className="text-[11px] font-bold uppercase tracking-[0.5px] text-[#9E9E9E]">{filters.lens === "sales" ? "Sales filters" : "Visit filters"}:</span>
-        <Sel value={filters.storeId != null ? String(filters.storeId) : ""} onChange={(v) => apply({ storeId: v ? Number(v) : undefined })}
-          ph="All stores" options={facets.stores.map((s) => [String(s.id), s.name])} />
-        <Sel value={filters.zone ?? ""} onChange={(v) => apply({ zone: v || undefined })} ph="All zones" options={facets.zones} />
-        <Sel value={filters.crop ?? ""} onChange={(v) => apply({ crop: v || undefined })} ph="All crops"
-          options={cropOpts.map((c) => [c.crop, `${cropLabel(c.crop)} (${n(c.count)})`])} />
-        <Sel value={filters.pest ?? ""} onChange={(v) => apply({ pest: v || undefined })} ph="All pests / diseases"
-          options={facets.pests.map((p) => [p.pest, `${tagLabel(p.pest)} (${n(p.count)})`])} />
+        <MultiSel ph="All stores" options={facets.stores.map((s) => [String(s.id), s.name])}
+          selected={(filters.storeIds ?? []).map(String)} onToggle={(v) => toggleInt("storeIds", Number(v))} onClear={() => apply({ storeIds: undefined })} />
+        <MultiSel ph="All zones" options={facets.zones.map((z) => [z, z])}
+          selected={filters.zones ?? []} onToggle={(v) => toggleStr("zones", v)} onClear={() => apply({ zones: undefined })} />
+        <MultiSel ph="All crops" options={cropOpts.map((c) => [c.crop, `${cropLabel(c.crop)} (${n(c.count)})`])}
+          selected={filters.crops ?? []} onToggle={(v) => toggleStr("crops", v)} onClear={() => apply({ crops: undefined })} />
+        <MultiSel ph="All pests" options={facets.pests.map((p) => [p.pest, `${tagLabel(p.pest)} (${n(p.count)})`])}
+          selected={filters.pests ?? []} onToggle={(v) => toggleStr("pests", v)} onClear={() => apply({ pests: undefined })} />
         {filters.lens === "sales" && (
           <>
-            <SegMultiSel label={`All ${VALUE_TITLE.toLowerCase()}s`} options={VALUE_SEGMENTS.map((s) => [s, segMeta(s).label])}
-              selected={filters.valueSegments ?? []} onToggle={(k) => toggleSeg("valueSegments", k)} onClear={() => apply({ valueSegments: undefined })} />
-            <SegMultiSel label={`All ${LIFECYCLE_TITLE.toLowerCase()}`} options={LIFECYCLE_SEGMENTS.map((s) => [s, segMeta(s).label])}
-              selected={filters.lifecycleSegments ?? []} onToggle={(k) => toggleSeg("lifecycleSegments", k)} onClear={() => apply({ lifecycleSegments: undefined })} />
+            <MultiSel ph={`All ${VALUE_TITLE.toLowerCase()}s`} options={VALUE_SEGMENTS.map((s) => [s, segMeta(s).label])}
+              selected={filters.valueSegments ?? []} onToggle={(v) => toggleStr("valueSegments", v)} onClear={() => apply({ valueSegments: undefined })} />
+            <MultiSel ph={`All ${LIFECYCLE_TITLE.toLowerCase()}`} options={LIFECYCLE_SEGMENTS.map((s) => [s, segMeta(s).label])}
+              selected={filters.lifecycleSegments ?? []} onToggle={(v) => toggleStr("lifecycleSegments", v)} onClear={() => apply({ lifecycleSegments: undefined })} />
+            <MultiSel ph="Any spend" options={facets.spendTiers.map((t, i) => [String(i), t])}
+              selected={(filters.spendTiers ?? []).map(String)} onToggle={(v) => toggleInt("spendTiers", Number(v))} onClear={() => apply({ spendTiers: undefined })} />
+            {facets.years.length > 0 && (
+              <MultiSel ph="All FYs" accent="#1565C0" options={facets.years.map((y) => [String(y), fyLabel(y)])}
+                selected={years.map(String)} onToggle={(v) => toggleInt("fyStarts", Number(v))} onClear={() => apply({ fyStarts: undefined })} />
+            )}
           </>
         )}
-        {filters.lens === "sales" ? (
-          <Sel value={filters.spendTier != null ? String(filters.spendTier) : ""} onChange={(v) => apply({ spendTier: v ? Number(v) : undefined })}
-            ph="Any spend" options={facets.spendTiers.map((t, i) => [String(i), t])} />
-        ) : (
-          <Sel value={filters.problem ?? ""} onChange={(v) => apply({ problem: v || undefined })} ph="Any problem"
-            options={facets.problems.map((p) => [p.problem, `${p.problem} (${n(p.count)})`])} />
-        )}
-        {filters.lens === "sales" && facets.years.length > 0 && (
-          <YearMultiSel years={facets.years} selected={years} onToggle={toggleFy} onClear={() => apply({ fyStarts: undefined })} />
+        {filters.lens === "visit" && (
+          <MultiSel ph="Any problem" options={facets.problems.map((p) => [p.problem, `${p.problem} (${n(p.count)})`])}
+            selected={filters.problems ?? []} onToggle={(v) => toggleStr("problems", v)} onClear={() => apply({ problems: undefined })} />
         )}
         {activeFilterCount > 0 && <button type="button" onClick={clearAll} className="text-[12px] font-semibold text-[#C62828] hover:underline">Clear ({activeFilterCount})</button>}
       </div>
@@ -163,7 +166,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
       {/* Sales board — trend, charts, matrix. The Visit lens gets its own board built purely from visit data. */}
       {filters.lens === "sales" ? (
       <div className="flex flex-col gap-[14px]">
-        <CropTrendCard crop={filters.crop} years={years} />
+        <CropTrendCard crops={filters.crops ?? []} years={years} />
 
         <div className="grid grid-cols-1 gap-[14px] lg:grid-cols-2">
           <DonutCard title={`${VALUE_TITLE} share`} slices={data.valueDist} />
@@ -219,33 +222,29 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
   );
 }
 
-function Sel({ value, onChange, ph, options }: { value: string; onChange: (v: string) => void; ph: string; options: (string | [string, string])[] }) {
-  return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} className="rounded-lg border border-[#E0E0E0] bg-white px-2.5 py-2 text-[12.5px] text-[#424242]">
-      <option value="">{ph}</option>
-      {options.map((o) => { const [v, l] = Array.isArray(o) ? o : [o, o]; return <option key={v} value={v}>{l}</option>; })}
-    </select>
-  );
-}
-
-/** Multi-select checkbox dropdown for a segment dimension (value or lifecycle). Native <details> popover. */
-function SegMultiSel({ label, options, selected, onToggle, onClear }: {
-  label: string; options: [string, string][]; selected: string[]; onToggle: (k: string) => void; onClear: () => void;
+/**
+ * Uniform multi-select checkbox dropdown used for EVERY analytics filter — same fixed width so
+ * the bar reads cleanly. Native <details> popover (closed on outside click by the parent listener).
+ * `ph` doubles as the "all" placeholder and the reset button label. Options are pre-sorted server-side.
+ */
+function MultiSel({ ph, options, selected, onToggle, onClear, accent = "#2E7D32" }: {
+  ph: string; options: [string, string][]; selected: string[]; onToggle: (v: string) => void; onClear: () => void; accent?: string;
 }) {
-  const text = selected.length === 0 ? label : selected.length === 1 ? (options.find((o) => o[0] === selected[0])?.[1] ?? selected[0]) : `${selected.length} selected`;
+  const text = selected.length === 0 ? ph : selected.length === 1 ? (options.find((o) => o[0] === selected[0])?.[1] ?? selected[0]) : `${selected.length} selected`;
   return (
     <details className="group relative">
-      <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-lg border border-[#E0E0E0] bg-white px-2.5 py-2 text-[12.5px] text-[#424242]">
-        <span className={selected.length ? "font-semibold text-[#2E7D32]" : ""}>{text}</span>
-        <span className="text-[10px] text-[#9E9E9E] transition-transform group-open:rotate-180">▾</span>
+      <summary className="flex w-[150px] cursor-pointer list-none items-center justify-between gap-1.5 rounded-lg border border-[#E0E0E0] bg-white px-2.5 py-2 text-[12.5px] text-[#424242]">
+        <span className={`truncate ${selected.length ? "font-semibold" : ""}`} style={selected.length ? { color: accent } : undefined}>{text}</span>
+        <span className="shrink-0 text-[10px] text-[#9E9E9E] transition-transform group-open:rotate-180">▾</span>
       </summary>
-      <div className="absolute left-0 z-30 mt-1 w-[190px] rounded-lg border border-[#E0E0E0] bg-white p-1 shadow-[0_6px_20px_rgba(0,0,0,0.12)]">
+      <div className="absolute left-0 z-30 mt-1 max-h-[280px] w-[220px] overflow-y-auto rounded-lg border border-[#E0E0E0] bg-white p-1 shadow-[0_6px_20px_rgba(0,0,0,0.12)]">
         <button type="button" onClick={onClear}
-          className={`w-full rounded px-2 py-1.5 text-left text-[12.5px] font-semibold hover:bg-[#F5F7F5] ${selected.length === 0 ? "text-[#2E7D32]" : "text-[#616161]"}`}>{label}</button>
-        {options.map(([k, l]) => (
-          <label key={k} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[12.5px] text-[#424242] hover:bg-[#F5F7F5]">
-            <input type="checkbox" checked={selected.includes(k)} onChange={() => onToggle(k)} className="accent-[#2E7D32]" />
-            {l}
+          className={`w-full rounded px-2 py-1.5 text-left text-[12.5px] font-semibold hover:bg-[#F5F7F5] ${selected.length === 0 ? "" : "text-[#616161]"}`}
+          style={selected.length === 0 ? { color: accent } : undefined}>{ph}</button>
+        {options.map(([v, l]) => (
+          <label key={v} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[12.5px] text-[#424242] hover:bg-[#F5F7F5]">
+            <input type="checkbox" checked={selected.includes(v)} onChange={() => onToggle(v)} style={{ accentColor: accent }} />
+            <span className="truncate" title={l}>{l}</span>
           </label>
         ))}
       </div>
@@ -344,29 +343,6 @@ function MergedMatrixCard({ matrix, valueCols, lifecycleCols, onCell, right }: {
   );
 }
 
-/** Multi-select financial-year filter (checkbox dropdown; empty = all FYs). Native <details> for a JS-free popover. */
-function YearMultiSel({ years, selected, onToggle, onClear }: { years: number[]; selected: number[]; onToggle: (y: number) => void; onClear: () => void }) {
-  const label = selected.length === 0 ? "All FYs" : selected.length === 1 ? fyLabel(selected[0]) : `${selected.length} FYs`;
-  return (
-    <details className="group relative">
-      <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-lg border border-[#E0E0E0] bg-white px-2.5 py-2 text-[12.5px] text-[#424242]">
-        <span className={selected.length ? "font-semibold text-[#1565C0]" : ""}>{label}</span>
-        <span className="text-[10px] text-[#9E9E9E] transition-transform group-open:rotate-180">▾</span>
-      </summary>
-      <div className="absolute left-0 z-30 mt-1 w-[140px] rounded-lg border border-[#E0E0E0] bg-white p-1 shadow-[0_6px_20px_rgba(0,0,0,0.12)]">
-        <button type="button" onClick={onClear}
-          className={`w-full rounded px-2 py-1.5 text-left text-[12.5px] font-semibold hover:bg-[#F5F7F5] ${selected.length === 0 ? "text-[#1565C0]" : "text-[#616161]"}`}>All FYs</button>
-        {years.map((y) => (
-          <label key={y} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[12.5px] text-[#424242] hover:bg-[#F5F7F5]">
-            <input type="checkbox" checked={selected.includes(y)} onChange={() => onToggle(y)} className="accent-[#1565C0]" />
-            {fyLabel(y)}
-          </label>
-        ))}
-      </div>
-    </details>
-  );
-}
-
 function BarCard({ title, bars, fmt, accent = "#2E7D32" }: { title: string; bars: WbBar[]; fmt: (x: number) => string; accent?: string }) {
   const max = Math.max(1, ...bars.map((b) => b.value));
   const shown = bars.filter((b) => b.value > 0);
@@ -457,16 +433,17 @@ function HistogramCard({ title, bars, accent = "#1565C0" }: { title: string; bar
 /** Monthly purchase trend for one crop, coloured by cropping season (uses the per-line crop tags). */
 const SEASON_COLOR: Record<CropTrendPoint["season"], string> = { Kharif: "#2E7D32", Rabi: "#1565C0", Zaid: "#F9A825" };
 
-/** Driven by the main crop + year filters above — no dropdown of its own. No crop → all crops; no year → all years. */
-function CropTrendCard({ crop, years }: { crop?: string; years: number[] }) {
+/** Driven by the main crop + FY filters above — no dropdown of its own. No crop → all crops; no FY → all years. */
+function CropTrendCard({ crops, years }: { crops: string[]; years: number[] }) {
   const [points, setPoints] = useState<CropTrendPoint[] | null>(null);
   const [loading, start] = useTransition();
+  const cropKey = crops.join(","); // stable dep for the effect
 
   useEffect(() => {
     setPoints(null);
-    start(async () => setPoints(await getCropTrend(crop ?? "")));
+    start(async () => setPoints(await getCropTrend(crops)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [crop]);
+  }, [cropKey]);
 
   const all = points ?? [];
   const pts = years.length ? all.filter((p) => years.includes(fyStartOfYm(p.ym))) : all;
@@ -478,7 +455,7 @@ function CropTrendCard({ crop, years }: { crop?: string; years: number[] }) {
     <div className={`${CARD} p-4`}>
       <div className="mb-1 flex flex-wrap items-center gap-2.5">
         <div className="text-[13px] font-bold text-[#1A1C1A]">Crop purchase trend</div>
-        <span className="rounded-full bg-[#E8F5E9] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#2E7D32]">{crop ? cropLabel(crop) : "All crops"}</span>
+        <span className="rounded-full bg-[#E8F5E9] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#2E7D32]">{crops.length ? crops.map(cropLabel).join(", ") : "All crops"}</span>
         <span className="rounded-full bg-[#E3F2FD] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#1565C0]">{years.length ? years.map(fyLabel).join(", ") : "All FYs"}</span>
         {loading && <span className="text-[11.5px] text-[#9E9E9E]">Loading…</span>}
         <div className="ml-auto flex flex-wrap items-center gap-3 text-[11px] font-medium text-[#616161]">
@@ -492,7 +469,7 @@ function CropTrendCard({ crop, years }: { crop?: string; years: number[] }) {
         </div>
       </div>
       <div className="mb-3 text-[11px] text-[#9E9E9E]">
-        Monthly ₹ of {crop ? `${cropLabel(crop)}-tagged` : "all"} sale lines · seasons: Kharif Jun–Oct · Rabi Nov–Mar · Zaid Apr–May
+        Monthly ₹ of {crops.length ? `${crops.map(cropLabel).join(", ")}-tagged` : "all"} sale lines · seasons: Kharif Jun–Oct · Rabi Nov–Mar · Zaid Apr–May
       </div>
       {points == null ? (
         <div className="py-10 text-center text-[12.5px] text-[#9E9E9E]">Loading…</div>

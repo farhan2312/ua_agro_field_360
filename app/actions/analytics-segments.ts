@@ -16,15 +16,15 @@ export type Lens = "sales" | "visit";
 
 export interface WbFilters {
   lens: Lens;
-  storeId?: number | null;
-  zone?: string;
-  crop?: string; // matched against sales or visit crops depending on lens
-  pest?: string; // Target Pest/Disease/Weed (item-code derived) — farmer attribute, both lenses
-  valueSegments?: string[]; // value tier(s): HNI | POTENTIAL_HNI | REGULAR (multi-select, FY-dynamic in sales lens)
-  lifecycleSegments?: string[]; // lifecycle stage(s): NEW | AT_RISK | LAPSED (multi-select, FY-dynamic in sales lens)
-  spendTier?: number | null; // index into SPEND_TIERS — FY spend (sales lens)
-  fyStarts?: number[]; // selected financial-year start years (Apr Y→Mar Y+1); drives the sales-lens segmentation
-  problem?: string; // visit lens
+  storeIds?: number[];       // stores — match ANY
+  zones?: string[];          // regions — match ANY
+  crops?: string[];          // crops (sales or visit depending on lens) — match ANY (array overlap)
+  pests?: string[];          // Target Pests/Diseases/Weeds — match ANY (array overlap)
+  valueSegments?: string[];  // value tier(s): HNI | POTENTIAL_HNI | REGULAR (FY-dynamic in sales lens)
+  lifecycleSegments?: string[]; // lifecycle stage(s): NEW | AT_RISK | LAPSED (FY-dynamic in sales lens)
+  spendTiers?: number[];     // indices into SPEND_TIERS — FY spend, match ANY range
+  fyStarts?: number[];       // selected financial-year start years (Apr Y→Mar Y+1); drives the sales segmentation
+  problems?: string[];       // visit lens — match ANY
 }
 
 const num = (x: unknown) => (x == null ? 0 : Number(x));
@@ -32,18 +32,29 @@ const shortStore = (s: string) => s.replace(/\s*\(.*?\)\s*/g, "").trim() || s;
 
 /* ── dynamic WHERE builder (safe: column names are literals, values parameterized) ── */
 const col = (alias: string, name: string) => Prisma.raw(alias ? `${alias}."${name}"` : `"${name}"`);
+/** OR-of-ranges for the selected spend tiers, against a numeric column/expression. */
+function spendTierOr(tiers: number[] | undefined, expr: Prisma.Sql): Prisma.Sql | null {
+  if (!tiers?.length) return null;
+  const ors = tiers.map((i) => SPEND_TIERS[i]).filter(Boolean).map((t) => {
+    const parts: Prisma.Sql[] = [];
+    if (t.min != null) parts.push(Prisma.sql`${expr} >= ${t.min}`);
+    if (t.max != null) parts.push(Prisma.sql`${expr} < ${t.max}`);
+    return parts.length ? Prisma.sql`(${Prisma.join(parts, " AND ")})` : Prisma.sql`TRUE`;
+  });
+  return ors.length ? Prisma.sql`(${Prisma.join(ors, " OR ")})` : null;
+}
 /** Static farmer attributes only — source/store/zone/crop/pest (+ visit problem). NOT value/lifecycle/spend. */
 function staticConds(f: WbFilters, alias = ""): Prisma.Sql[] {
   const c: Prisma.Sql[] = [Prisma.sql`${col(alias, "source")} = 'REAL'`];
-  if (f.storeId != null) c.push(Prisma.sql`${col(alias, "storeId")} = ${f.storeId}`);
-  if (f.zone) c.push(Prisma.sql`${col(alias, "zone")} = ${f.zone}`);
-  if (f.crop) {
+  if (f.storeIds?.length) c.push(Prisma.sql`${col(alias, "storeId")} = ANY(${f.storeIds})`);
+  if (f.zones?.length) c.push(Prisma.sql`${col(alias, "zone")} = ANY(${f.zones})`);
+  if (f.crops?.length) {
     const cc = f.lens === "sales" ? "salesCropTags" : "visitCropTags";
-    c.push(Prisma.sql`${col(alias, cc)} @> ARRAY[${f.crop}]::text[]`); // @> uses the GIN index
+    c.push(Prisma.sql`${col(alias, cc)} && ${f.crops}::text[]`); // array overlap — uses the GIN index
   }
-  if (f.pest) c.push(Prisma.sql`${col(alias, "pestTags")} @> ARRAY[${f.pest}]::text[]`);
-  if (f.lens === "visit" && f.problem) {
-    c.push(Prisma.sql`EXISTS (SELECT 1 FROM "Visit" v WHERE v."farmerId" = ${col(alias, "id")} AND ${f.problem} = ANY(v."currentProblem"))`);
+  if (f.pests?.length) c.push(Prisma.sql`${col(alias, "pestTags")} && ${f.pests}::text[]`);
+  if (f.lens === "visit" && f.problems?.length) {
+    c.push(Prisma.sql`EXISTS (SELECT 1 FROM "Visit" v WHERE v."farmerId" = ${col(alias, "id")} AND v."currentProblem" && ${f.problems}::text[])`);
   }
   return c;
 }
@@ -52,11 +63,7 @@ function farmerConds(f: WbFilters, alias = ""): Prisma.Sql[] {
   const c = staticConds(f, alias);
   if (f.valueSegments?.length) c.push(Prisma.sql`${col(alias, "valueSegment")} = ANY(${f.valueSegments})`);
   if (f.lifecycleSegments?.length) c.push(Prisma.sql`${col(alias, "lifecycleSegment")} = ANY(${f.lifecycleSegments})`);
-  if (f.lens === "sales" && f.spendTier != null && SPEND_TIERS[f.spendTier]) {
-    const t = SPEND_TIERS[f.spendTier];
-    if (t.min != null) c.push(Prisma.sql`${col(alias, "p12mSpend")} >= ${t.min}`);
-    if (t.max != null) c.push(Prisma.sql`${col(alias, "p12mSpend")} < ${t.max}`);
-  }
+  if (f.lens === "sales") { const s = spendTierOr(f.spendTiers, col(alias, "p12mSpend")); if (s) c.push(s); }
   return c;
 }
 
@@ -96,11 +103,7 @@ function tierFilter(f: WbFilters): Prisma.Sql {
   const c: Prisma.Sql[] = [Prisma.sql`TRUE`];
   if (f.valueSegments?.length) c.push(Prisma.sql`vseg = ANY(${f.valueSegments})`);
   if (f.lifecycleSegments?.length) c.push(Prisma.sql`lseg = ANY(${f.lifecycleSegments})`);
-  if (f.spendTier != null && SPEND_TIERS[f.spendTier]) {
-    const t = SPEND_TIERS[f.spendTier];
-    if (t.min != null) c.push(Prisma.sql`spend >= ${t.min}`);
-    if (t.max != null) c.push(Prisma.sql`spend < ${t.max}`);
-  }
+  const s = spendTierOr(f.spendTiers, Prisma.sql`spend`); if (s) c.push(s);
   return Prisma.join(c, " AND ");
 }
 const whereOf = (f: WbFilters, alias = "") => Prisma.sql`WHERE ${Prisma.join(farmerConds(f, alias), " AND ")}`;
@@ -113,9 +116,9 @@ const whereOf = (f: WbFilters, alias = "") => Prisma.sql`WHERE ${Prisma.join(far
  */
 async function scopeFilters(f: WbFilters): Promise<WbFilters | "none"> {
   const { role, storeId, zone } = await getScope();
-  if (role === "officer") return storeId == null ? "none" : { ...f, storeId, zone: undefined };
-  // RM: force their zone; a client storeId outside that zone simply yields no rows (zone AND store).
-  if (role === "regional") return zone == null ? "none" : { ...f, zone };
+  if (role === "officer") return storeId == null ? "none" : { ...f, storeIds: [storeId], zones: undefined };
+  // RM: force their zone; a client store outside that zone simply yields no rows (zone AND store).
+  if (role === "regional") return zone == null ? "none" : { ...f, zones: [zone] };
   return f; // central / sysadmin
 }
 
@@ -167,13 +170,14 @@ export async function getWorkbenchFacets(): Promise<WbFacets> {
     prisma.$queryRaw<{ y: number }[]>(Prisma.sql`SELECT DISTINCT (EXTRACT(YEAR FROM sl."soldAt")::int - CASE WHEN EXTRACT(MONTH FROM sl."soldAt") < 4 THEN 1 ELSE 0 END) y FROM "SaleLine" sl WHERE sl."soldAt" IS NOT NULL ${slScope} ORDER BY 1`),
   ]);
   const zones = isRM ? (zone != null ? [zone] : []) : isOfficer ? [] : zoneRows.map((z) => z.zone!).filter(Boolean);
+  const abc = (a: string, b: string) => a.localeCompare(b); // filter option lists sorted A→Z for scan-ability
   return {
-    stores: stores.map((s) => ({ id: s.id, name: shortStore(s.name) })),
-    zones,
-    salesCrops: sc.map((r) => ({ crop: r.crop, count: num(r.n) })),
-    visitCrops: vc.map((r) => ({ crop: r.crop, count: num(r.n) })),
-    pests: pt.map((r) => ({ pest: r.pest, count: num(r.n) })),
-    problems: pr.map((r) => ({ problem: r.problem, count: num(r.n) })),
+    stores: stores.map((s) => ({ id: s.id, name: shortStore(s.name) })).sort((a, b) => abc(a.name, b.name)),
+    zones: [...zones].sort(abc),
+    salesCrops: sc.map((r) => ({ crop: r.crop, count: num(r.n) })).sort((a, b) => abc(cropLabel(a.crop), cropLabel(b.crop))),
+    visitCrops: vc.map((r) => ({ crop: r.crop, count: num(r.n) })).sort((a, b) => abc(cropLabel(a.crop), cropLabel(b.crop))),
+    pests: pt.map((r) => ({ pest: r.pest, count: num(r.n) })).sort((a, b) => abc(tagLabel(a.pest), tagLabel(b.pest))),
+    problems: pr.map((r) => ({ problem: r.problem, count: num(r.n) })).sort((a, b) => abc(a.problem, b.problem)),
     spendTiers: SPEND_TIERS.map((t) => t.label),
     years: yr.map((r) => num(r.y)).filter(Boolean),
   };
@@ -451,7 +455,7 @@ export interface WbCustomer { id: number; name: string; mobile: string | null; v
 export type SegDim = "value" | "lifecycle";
 export async function getWorkbenchCustomers(f: WbFilters, storeId: number | null, dim: SegDim, seg: string, limit = 400): Promise<WbCustomer[]> {
   // Scope LAST (after applying the clicked cell's store) so an officer/RM can't drill into a foreign store.
-  const scoped = await scopeFilters({ ...f, storeId: storeId ?? undefined });
+  const scoped = await scopeFilters({ ...f, storeIds: storeId != null ? [storeId] : undefined });
   if (scoped === "none") return [];
   const cte = tiersCte(scoped), tf = tierFilter(scoped);
   const dimCond = dim === "value" ? Prisma.sql`t.vseg = ${seg}` : Prisma.sql`t.lseg = ${seg}`;
@@ -540,8 +544,8 @@ export interface CropTrendPoint {
 }
 
 /** Monthly purchase trend (SaleLine), role-scoped. No crop → every crop's sale lines combined. */
-export async function getCropTrend(crop: string): Promise<CropTrendPoint[]> {
-  const safe = (crop || "").toLowerCase().replace(/[^a-z_]/g, "");
+export async function getCropTrend(crops: string[]): Promise<CropTrendPoint[]> {
+  const safe = (crops ?? []).map((c) => (c || "").toLowerCase().replace(/[^a-z_]/g, "")).filter(Boolean);
   const { role, storeId, zone } = await getScope();
   const scopeSql: Prisma.Sql =
     role === "officer"
@@ -551,7 +555,7 @@ export async function getCropTrend(crop: string): Promise<CropTrendPoint[]> {
           ? Prisma.sql`AND EXISTS (SELECT 1 FROM "Store" st WHERE st.id = sl."storeId" AND st."zone" = ${zone})`
           : Prisma.sql`AND false`
         : Prisma.empty;
-  const cropCond = safe ? Prisma.sql`sl."cropTag" = ${safe} AND ` : Prisma.empty;
+  const cropCond = safe.length ? Prisma.sql`sl."cropTag" = ANY(${safe}) AND ` : Prisma.empty;
   const rows = await prisma.$queryRaw<{ ym: string; rev: number; lines: number }[]>(Prisma.sql`
     SELECT to_char(date_trunc('month', sl."soldAt"), 'YYYY-MM') ym,
            COALESCE(SUM(sl."totalPrice"), 0)::float rev, COUNT(*)::int lines
@@ -581,16 +585,16 @@ export async function saveWorkbenchSegment(f: WbFilters, name: string): Promise<
   const scoped = await scopeFilters(f);
   if (scoped === "none") return { ok: false, error: "No store or region is assigned to your account." };
   f = scoped; // saved segment inherits the officer's store / RM's region
-  const tier = f.lens === "sales" && f.spendTier != null ? SPEND_TIERS[f.spendTier] : undefined;
+  const tier = f.lens === "sales" && f.spendTiers?.length ? SPEND_TIERS[f.spendTiers[0]] : undefined;
   const criteria: ClusterCriteria = {
-    storeIds: f.storeId != null ? [f.storeId] : undefined,
-    zone: f.zone || undefined,
+    storeIds: f.storeIds?.length ? f.storeIds : undefined,
+    zones: f.zones?.length ? f.zones : undefined,
     valueSegments: f.valueSegments?.length ? f.valueSegments : undefined,
     lifecycleSegments: f.lifecycleSegments?.length ? f.lifecycleSegments : undefined,
-    salesCrops: f.lens === "sales" && f.crop ? [f.crop] : undefined,
-    visitCrops: f.lens === "visit" && f.crop ? [f.crop] : undefined,
-    pestTags: f.pest ? [f.pest] : undefined,
-    visitProblem: f.lens === "visit" ? f.problem || undefined : undefined,
+    salesCrops: f.lens === "sales" && f.crops?.length ? f.crops : undefined,
+    visitCrops: f.lens === "visit" && f.crops?.length ? f.crops : undefined,
+    pestTags: f.pests?.length ? f.pests : undefined,
+    visitProblem: f.lens === "visit" && f.problems?.length ? f.problems[0] : undefined,
     spendMin: tier?.min, spendMax: tier?.max,
   };
   return createClusterFromCriteria({ name, criteria, origin: "analytics", mode: "dynamic" });
