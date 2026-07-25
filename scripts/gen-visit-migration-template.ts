@@ -36,6 +36,8 @@ const MODE = ["Field", "Store"];
 const GREEN = "FF1B5E20", RED = "FFB71C1C", HDR_TXT = "FFFFFFFF";
 const thin = { style: "thin" as const, color: { argb: "FFBDBDBD" } };
 const border = { top: thin, left: thin, bottom: thin, right: thin };
+// exceljs' TS types omit worksheet.dataValidations (present at runtime) — narrow accessor.
+const dvOf = (ws: ExcelJS.Worksheet) => (ws as unknown as { dataValidations: { add: (range: string, rule: object) => void } }).dataValidations;
 
 async function main() {
   const stores = (await prisma.store.findMany({ select: { name: true }, orderBy: { name: "asc" } })).map((s) => s.name);
@@ -108,14 +110,14 @@ async function main() {
 
     if (c.kind === "list" || c.kind === "yesno") {
       const formula = c.kind === "yesno" ? yesnoRange : putList(c.header.replace(/[^A-Za-z]/g, ""), c.list!);
-      ws.dataValidations.add(range, {
+      dvOf(ws).add(range, {
         type: "list", allowBlank: !c.required, formulae: [formula],
         showErrorMessage: true, errorStyle: "error", errorTitle: "Not in list",
         error: `Please pick a value from the ${c.header} dropdown.`,
       });
     } else if (c.kind === "phone") {
       ws.getColumn(idx).numFmt = "@"; // text so long digit strings aren't mangled
-      ws.dataValidations.add(range, {
+      dvOf(ws).add(range, {
         type: "custom", allowBlank: !c.required, formulae: [`AND(ISNUMBER(--${letter}2),LEN(${letter}2)=10)`],
         showErrorMessage: true, errorStyle: "error", errorTitle: "Invalid mobile",
         error: "Enter a 10-digit mobile number — digits only, no spaces or +91.",
