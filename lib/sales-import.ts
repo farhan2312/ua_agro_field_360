@@ -7,6 +7,7 @@
  * own bills and never touches unrelated history.
  */
 import { prisma } from "@/lib/prisma";
+import { cleanCrop } from "@/scripts/crop-lib";
 
 export interface ImportSummary {
   lineItems: number;
@@ -79,6 +80,8 @@ interface Bill {
   order: string; total: number; itemNames: string[]; itemCodes: string[]; category: string | null;
   dateIso: string | null; dateStr: string; mobile: string | null;
   store: string; name: string; village: string; fy: string;
+  // Per-line crop context: AE "Crops" cell cleaned (null if blank/0/N/A) + the line's item code.
+  lines: { code: string; crop: string | null }[];
 }
 
 const q = (s: string) => `'${String(s).replace(/'/g, "''")}'`;
@@ -98,7 +101,8 @@ export async function importSalesMatrix(rows: string[][], _uploadedBy: string): 
   const iOrder = col("Order No"), iItem = col("Item Name"), iCat = col("MainCategory"),
     iTotal = col("Total"), iDate = col("BillDate"), iMobile = col("Cus Mobile"),
     iStore = col("Retailer Name"), iName = col("Cus Name"), iVillage = col("Cus Village"),
-    iFy = col("Financial Year"), iCode = col("Item Code"); // Item Code → crop/pest auto-mapping
+    iFy = col("Financial Year"), iCode = col("Item Code"), // Item Code → crop/pest auto-mapping
+    iCrops = col("Crops"); // AE column — per-line crop; wins over the catalogue when present
 
   const missing = [
     ["Order No", iOrder], ["Total", iTotal], ["BillDate", iDate], ["Cus Mobile", iMobile],
@@ -121,7 +125,7 @@ export async function importSalesMatrix(rows: string[][], _uploadedBy: string): 
         dateIso: toIso(String(row[iDate] ?? "")), dateStr: String(row[iDate] ?? "").trim(),
         mobile: normMobile(String(row[iMobile] ?? "")), store: String(row[iStore] ?? "").trim(),
         name: String(row[iName] ?? "").trim(), village: String(row[iVillage] ?? "").trim(),
-        fy: String(row[iFy] ?? "").trim(),
+        fy: String(row[iFy] ?? "").trim(), lines: [],
       };
       bills.set(order, b);
     }
@@ -130,6 +134,9 @@ export async function importSalesMatrix(rows: string[][], _uploadedBy: string): 
     if (item) b.itemNames.push(item);
     const code = iCode >= 0 ? String(row[iCode] ?? "").trim() : "";
     if (code) b.itemCodes.push(code);
+    // Per-line crop: AE "Crops" cell (cleaned to a canonical key, null if blank/0/junk).
+    const crop = iCrops >= 0 ? cleanCrop(String(row[iCrops] ?? "")) : null;
+    if (code || crop) b.lines.push({ code, crop });
   }
   const billArr = [...bills.values()];
   if (!billArr.length) throw new Error("No invoice rows found (is the 'Order No' column populated?).");
@@ -181,7 +188,10 @@ export async function importSalesMatrix(rows: string[][], _uploadedBy: string): 
   let matched = 0, skipped = 0;
   let minIso: string | null = null, maxIso: string | null = null;
   const saleData: Record<string, unknown>[] = [];
-  const codesByFarmer = new Map<number, Set<string>>(); // farmerId → item codes purchased (this file)
+  const codesByFarmer = new Map<number, Set<string>>();       // farmerId → all item codes purchased (pests + crop fallback)
+  const directCropsByFarmer = new Map<number, Set<string>>(); // farmerId → AE crops (a line's Crops cell)
+  const fallbackCodesByFarmer = new Map<number, Set<string>>(); // farmerId → codes of lines with no AE crop (catalogue fallback)
+  const addTo = (m: Map<number, Set<string>>, id: number, v: string) => (m.get(id) ?? m.set(id, new Set()).get(id)!).add(v);
   for (const b of billArr) {
     if (!b.mobile) { skipped++; continue; }
     const farmerId = mobileToId.get(b.mobile);
@@ -190,6 +200,11 @@ export async function importSalesMatrix(rows: string[][], _uploadedBy: string): 
     if (b.itemCodes.length) {
       const set = codesByFarmer.get(farmerId) ?? codesByFarmer.set(farmerId, new Set()).get(farmerId)!;
       for (const c of b.itemCodes) set.add(c);
+    }
+    // Crop tagging is AE-first: a line's Crops cell wins; lines without one fall back to the catalogue.
+    for (const ln of b.lines) {
+      if (ln.crop) addTo(directCropsByFarmer, farmerId, ln.crop);
+      else if (ln.code) addTo(fallbackCodesByFarmer, farmerId, ln.code);
     }
     if (b.dateIso) {
       if (!minIso || b.dateIso < minIso) minIso = b.dateIso;
@@ -216,15 +231,15 @@ export async function importSalesMatrix(rows: string[][], _uploadedBy: string): 
     prisma.sale.createMany({ data: s as never, skipDuplicates: true }).then((r) => r.count),
   );
 
-  // ── Auto-map purchased Item Codes → Target Crops + Target Pests, enrich the farmer ──
-  // Every code in the file is looked up in the inventory master (Product.itemCode); each
-  // farmer's crop/pest tags are UNION-ed with the crops/pests of what they bought. Additive:
-  // a correction re-upload adds new tags but never retracts old ones (matches the "has ever
-  // bought" semantics of the existing crop base).
+  // ── Enrich each farmer's crop + pest tags from what they bought ──
+  // CROPS are AE-first: a sale line's "Crops" cell (col AE) wins; lines without one fall back to the
+  // line's Product.targetCrops (inventory-master catalogue). PESTS always come from the catalogue
+  // (Product.targetPests keyed by Item Code) — the sales file has no pest column. Additive union:
+  // a re-upload adds new tags but never retracts old ones ("has ever bought" semantics).
   const allCodes = [...new Set([...codesByFarmer.values()].flatMap((s) => [...s]))];
+  const codeMap = new Map<string, { crops: string[]; pests: string[] }>();
   let itemCodesMatched = 0, farmersTagged = 0;
   if (allCodes.length) {
-    const codeMap = new Map<string, { crops: string[]; pests: string[] }>();
     await chunk(allCodes, 5000, async (s) => {
       const prods = await prisma.product.findMany({
         where: { itemCode: { in: s } },
@@ -234,26 +249,28 @@ export async function importSalesMatrix(rows: string[][], _uploadedBy: string): 
       return prods.length;
     });
     itemCodesMatched = codeMap.size;
+  }
 
-    // Union crops+pests per affected farmer.
-    const valueRows: string[] = [];
-    for (const [farmerId, codes] of codesByFarmer) {
-      const crops = new Set<string>(), pests = new Set<string>();
-      for (const c of codes) { const m = codeMap.get(c); if (!m) continue; m.crops.forEach((x) => crops.add(x)); m.pests.forEach((x) => pests.add(x)); }
-      if (!crops.size && !pests.size) continue;
-      valueRows.push(`(${farmerId}::int, ${pgArr([...crops].sort())}, ${pgArr([...pests].sort())})`);
-    }
-    farmersTagged = valueRows.length;
-    // Bulk in-place union (existing || new, distinct) so we never read-then-write per farmer.
-    for (let i = 0; i < valueRows.length; i += 1000) {
-      const slice = valueRows.slice(i, i + 1000);
-      await prisma.$executeRawUnsafe(
-        `UPDATE "Farmer" f SET
-           "cropTags"      = ARRAY(SELECT DISTINCT e FROM unnest(f."cropTags"      || v.crops) e ORDER BY e),
-           "salesCropTags" = ARRAY(SELECT DISTINCT e FROM unnest(f."salesCropTags" || v.crops) e ORDER BY e),
-           "pestTags"      = ARRAY(SELECT DISTINCT e FROM unnest(f."pestTags"      || v.pests) e ORDER BY e)
-         FROM (VALUES ${slice.join(",")}) AS v(id, crops, pests) WHERE f.id = v.id`);
-    }
+  const affected = new Set<number>([...codesByFarmer.keys(), ...directCropsByFarmer.keys(), ...fallbackCodesByFarmer.keys()]);
+  const valueRows: string[] = [];
+  for (const farmerId of affected) {
+    const crops = new Set<string>(directCropsByFarmer.get(farmerId) ?? []); // AE crops
+    for (const c of fallbackCodesByFarmer.get(farmerId) ?? []) codeMap.get(c)?.crops.forEach((x) => crops.add(x)); // catalogue fallback
+    const pests = new Set<string>();
+    for (const c of codesByFarmer.get(farmerId) ?? []) codeMap.get(c)?.pests.forEach((x) => pests.add(x)); // catalogue pests
+    if (!crops.size && !pests.size) continue;
+    valueRows.push(`(${farmerId}::int, ${pgArr([...crops].sort())}, ${pgArr([...pests].sort())})`);
+  }
+  farmersTagged = valueRows.length;
+  // Bulk in-place union (existing || new, distinct) so we never read-then-write per farmer.
+  for (let i = 0; i < valueRows.length; i += 1000) {
+    const slice = valueRows.slice(i, i + 1000);
+    await prisma.$executeRawUnsafe(
+      `UPDATE "Farmer" f SET
+         "cropTags"      = ARRAY(SELECT DISTINCT e FROM unnest(f."cropTags"      || v.crops) e ORDER BY e),
+         "salesCropTags" = ARRAY(SELECT DISTINCT e FROM unnest(f."salesCropTags" || v.crops) e ORDER BY e),
+         "pestTags"      = ARRAY(SELECT DISTINCT e FROM unnest(f."pestTags"      || v.pests) e ORDER BY e)
+       FROM (VALUES ${slice.join(",")}) AS v(id, crops, pests) WHERE f.id = v.id`);
   }
 
   return {
