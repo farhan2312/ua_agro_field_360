@@ -2,7 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
-import { SEGMENT_COLUMNS, segMeta, VALUE_SEGMENTS, LIFECYCLE_SEGMENTS } from "@/lib/campaign-segments";
+import { segMeta, VALUE_SEGMENTS, LIFECYCLE_SEGMENTS, VALUE_HNI_MIN, VALUE_POTENTIAL_MIN, LIFECYCLE_NEW_MAX_MONTHS, LIFECYCLE_LAPSED_MIN_MONTHS } from "@/lib/campaign-segments";
 import { inr } from "@/lib/format";
 import { cropLabel } from "@/lib/crops";
 import { tagLabel } from "@/lib/crop-pest";
@@ -20,9 +20,10 @@ export interface WbFilters {
   zone?: string;
   crop?: string; // matched against sales or visit crops depending on lens
   pest?: string; // Target Pest/Disease/Weed (item-code derived) — farmer attribute, both lenses
-  valueSegments?: string[]; // value tier(s): HNI | POTENTIAL_HNI | REGULAR (multi-select)
-  lifecycleSegments?: string[]; // lifecycle stage(s): NEW | AT_RISK | LAPSED (multi-select)
-  spendTier?: number | null; // index into SPEND_TIERS (sales lens)
+  valueSegments?: string[]; // value tier(s): HNI | POTENTIAL_HNI | REGULAR (multi-select, FY-dynamic in sales lens)
+  lifecycleSegments?: string[]; // lifecycle stage(s): NEW | AT_RISK | LAPSED (multi-select, FY-dynamic in sales lens)
+  spendTier?: number | null; // index into SPEND_TIERS — FY spend (sales lens)
+  fyStarts?: number[]; // selected financial-year start years (Apr Y→Mar Y+1); drives the sales-lens segmentation
   problem?: string; // visit lens
 }
 
@@ -31,31 +32,76 @@ const shortStore = (s: string) => s.replace(/\s*\(.*?\)\s*/g, "").trim() || s;
 
 /* ── dynamic WHERE builder (safe: column names are literals, values parameterized) ── */
 const col = (alias: string, name: string) => Prisma.raw(alias ? `${alias}."${name}"` : `"${name}"`);
-function farmerConds(f: WbFilters, alias = ""): Prisma.Sql[] {
+/** Static farmer attributes only — source/store/zone/crop/pest (+ visit problem). NOT value/lifecycle/spend. */
+function staticConds(f: WbFilters, alias = ""): Prisma.Sql[] {
   const c: Prisma.Sql[] = [Prisma.sql`${col(alias, "source")} = 'REAL'`];
   if (f.storeId != null) c.push(Prisma.sql`${col(alias, "storeId")} = ${f.storeId}`);
   if (f.zone) c.push(Prisma.sql`${col(alias, "zone")} = ${f.zone}`);
-  if (f.valueSegments?.length) c.push(Prisma.sql`${col(alias, "valueSegment")} = ANY(${f.valueSegments})`);
-  if (f.lifecycleSegments?.length) c.push(Prisma.sql`${col(alias, "lifecycleSegment")} = ANY(${f.lifecycleSegments})`);
   if (f.crop) {
     const cc = f.lens === "sales" ? "salesCropTags" : "visitCropTags";
-    // Array-contains (@>) so the GIN index on the crop column is actually used.
-    c.push(Prisma.sql`${col(alias, cc)} @> ARRAY[${f.crop}]::text[]`);
+    c.push(Prisma.sql`${col(alias, cc)} @> ARRAY[${f.crop}]::text[]`); // @> uses the GIN index
   }
-  // Pests are a farmer attribute (item-code derived) — applies to both lenses. @> uses the GIN index.
   if (f.pest) c.push(Prisma.sql`${col(alias, "pestTags")} @> ARRAY[${f.pest}]::text[]`);
-  if (f.lens === "sales" && f.spendTier != null && SPEND_TIERS[f.spendTier]) {
-    const t = SPEND_TIERS[f.spendTier];
-    // No COALESCE: null-spend farmers are excluded from every tier, matching the saved
-    // segment's criteria (p12mSpend gte/lt) and the "No spend" distribution bucket.
-    if (t.min != null) c.push(Prisma.sql`${col(alias, "p12mSpend")} >= ${t.min}`);
-    if (t.max != null) c.push(Prisma.sql`${col(alias, "p12mSpend")} < ${t.max}`);
-  }
   if (f.lens === "visit" && f.problem) {
-    // Qualify the correlation to the OUTER farmer via `alias`; a bare "id" would bind to Visit.id.
     c.push(Prisma.sql`EXISTS (SELECT 1 FROM "Visit" v WHERE v."farmerId" = ${col(alias, "id")} AND ${f.problem} = ANY(v."currentProblem"))`);
   }
   return c;
+}
+/** Static conds + the precomputed value/lifecycle/spend columns (used by the visit lens + facets). */
+function farmerConds(f: WbFilters, alias = ""): Prisma.Sql[] {
+  const c = staticConds(f, alias);
+  if (f.valueSegments?.length) c.push(Prisma.sql`${col(alias, "valueSegment")} = ANY(${f.valueSegments})`);
+  if (f.lifecycleSegments?.length) c.push(Prisma.sql`${col(alias, "lifecycleSegment")} = ANY(${f.lifecycleSegments})`);
+  if (f.lens === "sales" && f.spendTier != null && SPEND_TIERS[f.spendTier]) {
+    const t = SPEND_TIERS[f.spendTier];
+    if (t.min != null) c.push(Prisma.sql`${col(alias, "p12mSpend")} >= ${t.min}`);
+    if (t.max != null) c.push(Prisma.sql`${col(alias, "p12mSpend")} < ${t.max}`);
+  }
+  return c;
+}
+
+/* ── FY-dynamic sales segmentation (value/lifecycle computed live from Sale within the selected FY) ── */
+/** FY window (spend filter) + as-of date (lifecycle cutoff) for the Sale alias `s`. */
+function fyBounds(fyStarts: number[]): { windowSql: Prisma.Sql; asOfSql: Prisma.Sql } {
+  if (!fyStarts.length) return { windowSql: Prisma.sql`TRUE`, asOfSql: Prisma.sql`now()` };
+  const maxY = Math.max(...fyStarts);
+  const asOfSql = Prisma.sql`${`${maxY + 1}-04-01`}::timestamptz`;
+  const ors = fyStarts.map((y) => Prisma.sql`(s."soldAt" >= ${`${y}-04-01`}::timestamptz AND s."soldAt" < ${`${y + 1}-04-01`}::timestamptz)`);
+  return { windowSql: Prisma.sql`(${Prisma.join(ors, " OR ")})`, asOfSql };
+}
+/** The scoped→agg→tiers CTE: per-farmer FY spend + last purchase → live value/lifecycle tier. */
+function tiersCte(f: WbFilters): Prisma.Sql {
+  const { windowSql, asOfSql } = fyBounds(f.fyStarts ?? []);
+  const where = Prisma.sql`WHERE ${Prisma.join(staticConds(f, "f"), " AND ")}`;
+  const newM = Prisma.raw(String(LIFECYCLE_NEW_MAX_MONTHS)), lapsedM = Prisma.raw(String(LIFECYCLE_LAPSED_MIN_MONTHS));
+  return Prisma.sql`
+    scoped AS (SELECT f.id, f."storeId", f."zone" FROM "Farmer" f ${where}),
+    agg AS (
+      SELECT sc.id, sc."storeId", sc."zone",
+        COALESCE(SUM(s."amountNum") FILTER (WHERE ${windowSql}), 0)::bigint spend,
+        MAX(s."soldAt") FILTER (WHERE s."soldAt" < ${asOfSql}) last_at
+      FROM scoped sc LEFT JOIN "Sale" s ON s."farmerId" = sc.id AND s.source = 'REAL' AND s."soldAt" IS NOT NULL
+      GROUP BY 1, 2, 3),
+    tiers AS (
+      SELECT id, "storeId", "zone", spend,
+        CASE WHEN spend >= ${VALUE_HNI_MIN} THEN 'HNI' WHEN spend >= ${VALUE_POTENTIAL_MIN} THEN 'POTENTIAL_HNI' ELSE 'REGULAR' END vseg,
+        CASE WHEN last_at IS NULL THEN 'LAPSED'
+          WHEN last_at > ${asOfSql} - interval '${newM} months' THEN 'NEW'
+          WHEN last_at > ${asOfSql} - interval '${lapsedM} months' THEN 'AT_RISK'
+          ELSE 'LAPSED' END lseg
+      FROM agg)`;
+}
+/** Dynamic filter on the tiers CTE — value/lifecycle/FY-spend selections. */
+function tierFilter(f: WbFilters): Prisma.Sql {
+  const c: Prisma.Sql[] = [Prisma.sql`TRUE`];
+  if (f.valueSegments?.length) c.push(Prisma.sql`vseg = ANY(${f.valueSegments})`);
+  if (f.lifecycleSegments?.length) c.push(Prisma.sql`lseg = ANY(${f.lifecycleSegments})`);
+  if (f.spendTier != null && SPEND_TIERS[f.spendTier]) {
+    const t = SPEND_TIERS[f.spendTier];
+    if (t.min != null) c.push(Prisma.sql`spend >= ${t.min}`);
+    if (t.max != null) c.push(Prisma.sql`spend < ${t.max}`);
+  }
+  return Prisma.join(c, " AND ");
 }
 const whereOf = (f: WbFilters, alias = "") => Prisma.sql`WHERE ${Prisma.join(farmerConds(f, alias), " AND ")}`;
 
@@ -134,133 +180,111 @@ export async function getWorkbenchFacets(): Promise<WbFacets> {
 }
 
 /* ── The workbench data for the current filter ── */
-export interface WbKpis { farmers: number; hni: number; potentialHni: number; atRisk: number; lapsed: number; spend: number; visits: number }
-export interface MatrixRow { storeId: number | null; storeName: string; counts: Record<string, number>; total: number }
-export interface Matrix { cols: string[]; rows: MatrixRow[]; totals: Record<string, number>; grandTotal: number }
+export interface WbKpis { farmers: number; spend: number; visits: number }
 export interface WbBar { label: string; value: number; color?: string }
+/** One store row of the merged Value + Lifecycle table (both count-sets sum to `total`). */
+export interface MergedRow { storeId: number | null; storeName: string; value: Record<string, number>; lifecycle: Record<string, number>; total: number }
+export interface MergedMatrix { rows: MergedRow[]; valueTotals: Record<string, number>; lifecycleTotals: Record<string, number>; grandTotal: number }
+export interface TreeCell { value: string; lifecycle: string; count: number }
 export interface WbData {
   kpis: WbKpis;
-  valueMatrix: Matrix;     // store × value tier (HNI/Potential/Regular)
-  lifecycleMatrix: Matrix; // store × lifecycle (New/At Risk/Lapsed)
-  segmentDist: WbBar[];
+  valueCols: string[]; lifecycleCols: string[];
+  matrix: MergedMatrix;      // one merged Store × (Value | Lifecycle) table
+  tree: TreeCell[];          // 9 Value×Lifecycle counts (the KPI cross-tab)
+  valueDist: WbBar[];        // donut: value share
+  lifecycleDist: WbBar[];    // donut: lifecycle share
   cropBreakdown: WbBar[];
-  extra: WbBar[]; // sales: spend-tier dist ; visit: problem dist
+  extra: WbBar[]; // sales: FY spend-tier dist ; visit: problem dist
   extraTitle: string;
-  secondary: WbBar[]; // sales: top zones by spend ; visit: officer activity
+  secondary: WbBar[]; // sales: top zones by FY spend ; visit: officer activity
   secondaryTitle: string;
 }
 
-const emptyMatrix = (cols: string[]): Matrix => ({ cols, rows: [], totals: {}, grandTotal: 0 });
 const EMPTY_WB: WbData = {
-  kpis: { farmers: 0, hni: 0, potentialHni: 0, atRisk: 0, lapsed: 0, spend: 0, visits: 0 },
-  valueMatrix: emptyMatrix([...VALUE_SEGMENTS]), lifecycleMatrix: emptyMatrix([...LIFECYCLE_SEGMENTS]),
-  segmentDist: [], cropBreakdown: [], extra: [], extraTitle: "", secondary: [], secondaryTitle: "",
+  kpis: { farmers: 0, spend: 0, visits: 0 },
+  valueCols: [...VALUE_SEGMENTS], lifecycleCols: [...LIFECYCLE_SEGMENTS],
+  matrix: { rows: [], valueTotals: {}, lifecycleTotals: {}, grandTotal: 0 },
+  tree: [], valueDist: [], lifecycleDist: [], cropBreakdown: [], extra: [], extraTitle: "", secondary: [], secondaryTitle: "",
 };
-
-/** Build a store×segment matrix from grouped {storeId, seg, n} rows for the given column keys. */
-function buildMatrix(grouped: { storeId: number | null; seg: string; n: number }[], cols: string[], nameById: Map<number, string>): Matrix {
-  const byStore = new Map<number | null, Record<string, number>>();
-  const totals: Record<string, number> = {};
-  for (const g of grouped) {
-    if (!cols.includes(g.seg)) continue;
-    const m = byStore.get(g.storeId) ?? {};
-    m[g.seg] = num(g.n); byStore.set(g.storeId, m);
-    totals[g.seg] = (totals[g.seg] ?? 0) + num(g.n);
-  }
-  const rows: MatrixRow[] = [...byStore.entries()].map(([storeId, counts]) => ({
-    storeId, storeName: storeId == null ? "Unassigned" : nameById.get(storeId) ?? `Store #${storeId}`,
-    counts, total: cols.reduce((s, k) => s + (counts[k] ?? 0), 0),
-  })).sort((a, b) => b.total - a.total).slice(0, 100);
-  const grandTotal = cols.reduce((s, k) => s + (totals[k] ?? 0), 0);
-  return { cols, rows, totals, grandTotal };
-}
 
 export async function getWorkbench(f: WbFilters): Promise<WbData> {
   const scoped = await scopeFilters(f);
   if (scoped === "none") return EMPTY_WB; // scoped user with no store/region → nothing to show
   f = scoped;
-  // Alias the outer Farmer as `f` everywhere so the visit-problem EXISTS correlates to Farmer.id
-  // (a bare "id" would bind to Visit.id and collapse the visit lens to ~0).
-  const whereF = whereOf(f, "f");
+  const stores = await prisma.store.findMany({ select: { id: true, name: true } });
+  const nameById = new Map(stores.map((s) => [s.id, shortStore(s.name)]));
 
-  const [kpiRows, valueMatrixRows, lifecycleMatrixRows, segRows, cropRows, stores] = await Promise.all([
-    prisma.$queryRaw<{ total: number; hni: number; phni: number; atrisk: number; lapsed: number; spend: number }[]>(Prisma.sql`
-      SELECT COUNT(*)::int total,
-        COUNT(*) FILTER (WHERE f."valueSegment"='HNI')::int hni,
-        COUNT(*) FILTER (WHERE f."valueSegment"='POTENTIAL_HNI')::int phni,
-        COUNT(*) FILTER (WHERE f."lifecycleSegment"='AT_RISK')::int atrisk,
-        COUNT(*) FILTER (WHERE f."lifecycleSegment"='LAPSED')::int lapsed,
-        COALESCE(SUM(f."p12mSpend"),0)::float spend
-      FROM "Farmer" f ${whereF}`),
-    prisma.$queryRaw<{ storeId: number | null; seg: string; n: number }[]>(Prisma.sql`
-      SELECT f."storeId" AS "storeId", f."valueSegment" seg, COUNT(*)::int n FROM "Farmer" f ${whereF}
-      AND f."valueSegment" IS NOT NULL GROUP BY 1, 2`),
-    prisma.$queryRaw<{ storeId: number | null; seg: string; n: number }[]>(Prisma.sql`
-      SELECT f."storeId" AS "storeId", f."lifecycleSegment" seg, COUNT(*)::int n FROM "Farmer" f ${whereF}
-      AND f."lifecycleSegment" IS NOT NULL GROUP BY 1, 2`),
-    prisma.$queryRaw<{ seg: string; n: number }[]>(Prisma.sql`
-      SELECT f."campaignSegment" seg, COUNT(*)::int n FROM "Farmer" f ${whereF}
-      AND f."campaignSegment" IS NOT NULL GROUP BY 1`),
-    prisma.$queryRaw<{ crop: string; n: number }[]>(Prisma.sql`
-      SELECT unnest(${col("f", f.lens === "sales" ? "salesCropTags" : "visitCropTags")}) crop, COUNT(*)::int n
-      FROM "Farmer" f ${whereF} GROUP BY 1 ORDER BY 2 DESC LIMIT 12`),
-    prisma.store.findMany({ select: { id: true, name: true } }),
-  ]);
-
-  // Visits count only matters in the visit lens (avoids a wasted Visit join on every sales filter).
-  let visits = 0;
+  // ── Visit lens: purely field-visit data (no FY segmentation). ──
   if (f.lens === "visit") {
-    const vr = await prisma.$queryRaw<{ n: number }[]>(Prisma.sql`SELECT COUNT(*)::int n FROM "Visit" v JOIN "Farmer" f ON f.id = v."farmerId" ${whereF}`);
-    visits = num(vr[0]?.n);
-  }
-
-  // Lens-specific charts.
-  let extra: WbBar[] = [], secondary: WbBar[] = [], extraTitle = "", secondaryTitle = "";
-  if (f.lens === "sales") {
-    const [spendRows, zoneRows] = await Promise.all([
-      prisma.$queryRaw<{ bucket: string; n: number }[]>(Prisma.sql`
-        SELECT CASE WHEN f."p12mSpend">=12000 THEN 'HNI ₹12K+'
-          WHEN f."p12mSpend">=10000 THEN '₹10–12K' WHEN f."p12mSpend">=5000 THEN '₹5–10K'
-          WHEN f."p12mSpend">=2500 THEN '₹2.5–5K' WHEN f."p12mSpend">0 THEN '< ₹2.5K' ELSE 'No spend' END bucket,
-          COUNT(*)::int n FROM "Farmer" f ${whereF} GROUP BY 1`),
-      prisma.$queryRaw<{ zone: string; spend: number }[]>(Prisma.sql`
-        SELECT f."zone" AS zone, COALESCE(SUM(f."p12mSpend"),0)::float spend FROM "Farmer" f ${whereF}
-        AND f."zone" IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10`),
-    ]);
-    const order = ["HNI ₹12K+", "₹10–12K", "₹5–10K", "₹2.5–5K", "< ₹2.5K", "No spend"];
-    extra = spendRows.map((r) => ({ label: r.bucket, value: num(r.n) })).sort((a, b) => order.indexOf(a.label) - order.indexOf(b.label));
-    extraTitle = "Spend tiers (P12M)";
-    secondary = zoneRows.map((r) => ({ label: r.zone, value: num(r.spend) }));
-    secondaryTitle = "Top zones by P12M spend";
-  } else {
-    const [probRows, offRows] = await Promise.all([
+    const whereF = whereOf(f, "f");
+    const [cntRows, vr, cropRows, probRows, offRows] = await Promise.all([
+      prisma.$queryRaw<{ n: number }[]>(Prisma.sql`SELECT COUNT(*)::int n FROM "Farmer" f ${whereF}`),
+      prisma.$queryRaw<{ n: number }[]>(Prisma.sql`SELECT COUNT(*)::int n FROM "Visit" v JOIN "Farmer" f ON f.id = v."farmerId" ${whereF}`),
+      prisma.$queryRaw<{ crop: string; n: number }[]>(Prisma.sql`SELECT unnest(f."visitCropTags") crop, COUNT(*)::int n FROM "Farmer" f ${whereF} GROUP BY 1 ORDER BY 2 DESC LIMIT 12`),
       prisma.$queryRaw<{ problem: string; n: number }[]>(Prisma.sql`
-        SELECT unnest(v."currentProblem") problem, COUNT(DISTINCT v."farmerId")::int n
-        FROM "Visit" v JOIN "Farmer" f ON f.id=v."farmerId" ${whereF}
+        SELECT unnest(v."currentProblem") problem, COUNT(DISTINCT v."farmerId")::int n FROM "Visit" v JOIN "Farmer" f ON f.id=v."farmerId" ${whereF}
         AND array_length(v."currentProblem",1) > 0 GROUP BY 1 ORDER BY 2 DESC LIMIT 12`),
       prisma.$queryRaw<{ officer: string; n: number }[]>(Prisma.sql`
-        SELECT v."officerName" officer, COUNT(*)::int n
-        FROM "Visit" v JOIN "Farmer" f ON f.id=v."farmerId" ${whereF}
+        SELECT v."officerName" officer, COUNT(*)::int n FROM "Visit" v JOIN "Farmer" f ON f.id=v."farmerId" ${whereF}
         AND v."officerName" IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10`),
     ]);
-    extra = probRows.map((r) => ({ label: r.problem, value: num(r.n) }));
-    extraTitle = "Field problems (farmers)";
-    secondary = offRows.map((r) => ({ label: r.officer, value: num(r.n) }));
-    secondaryTitle = "Officer visit activity";
+    return {
+      kpis: { farmers: num(cntRows[0]?.n), spend: 0, visits: num(vr[0]?.n) },
+      valueCols: [...VALUE_SEGMENTS], lifecycleCols: [...LIFECYCLE_SEGMENTS],
+      matrix: { rows: [], valueTotals: {}, lifecycleTotals: {}, grandTotal: 0 }, tree: [], valueDist: [], lifecycleDist: [],
+      cropBreakdown: cropRows.map((r) => ({ label: r.crop, value: num(r.n) })),
+      extra: probRows.map((r) => ({ label: r.problem, value: num(r.n) })), extraTitle: "Field problems (farmers)",
+      secondary: offRows.map((r) => ({ label: r.officer, value: num(r.n) })), secondaryTitle: "Officer visit activity",
+    };
   }
 
-  const nameById = new Map(stores.map((s) => [s.id, shortStore(s.name)]));
-  const valueMatrix = buildMatrix(valueMatrixRows, [...VALUE_SEGMENTS], nameById);
-  const lifecycleMatrix = buildMatrix(lifecycleMatrixRows, [...LIFECYCLE_SEGMENTS], nameById);
+  // ── Sales lens: FY-dynamic value×lifecycle (tiers computed live from Sale within the selected FY). ──
+  const cte = tiersCte(f), tf = tierFilter(f);
+  const [cross, histRows, zoneRows, cropRows] = await Promise.all([
+    prisma.$queryRaw<{ storeId: number | null; vseg: string; lseg: string; n: number; spendsum: bigint }[]>(Prisma.sql`
+      WITH ${cte} SELECT "storeId", vseg, lseg, COUNT(*)::int n, COALESCE(SUM(spend),0)::bigint spendsum FROM tiers WHERE ${tf} GROUP BY 1,2,3`),
+    prisma.$queryRaw<{ bucket: string; n: number }[]>(Prisma.sql`
+      WITH ${cte} SELECT CASE WHEN spend>=12000 THEN 'HNI ₹12K+' WHEN spend>=10000 THEN '₹10–12K' WHEN spend>=5000 THEN '₹5–10K'
+        WHEN spend>=2500 THEN '₹2.5–5K' WHEN spend>0 THEN '< ₹2.5K' ELSE 'No spend' END bucket, COUNT(*)::int n FROM tiers WHERE ${tf} GROUP BY 1`),
+    prisma.$queryRaw<{ zone: string; spend: bigint }[]>(Prisma.sql`
+      WITH ${cte} SELECT "zone" AS zone, COALESCE(SUM(spend),0)::bigint spend FROM tiers WHERE ${tf} AND "zone" IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10`),
+    prisma.$queryRaw<{ crop: string; n: number }[]>(Prisma.sql`
+      WITH ${cte} SELECT unnest(f."salesCropTags") crop, COUNT(*)::int n FROM tiers t JOIN "Farmer" f ON f.id=t.id WHERE ${tf} GROUP BY 1 ORDER BY 2 DESC LIMIT 12`),
+  ]);
 
-  const k = kpiRows[0] ?? { total: 0, hni: 0, phni: 0, atrisk: 0, lapsed: 0, spend: 0 };
-  const segMap = new Map(segRows.map((r) => [r.seg, num(r.n)]));
+  const byStore = new Map<number | null, { value: Record<string, number>; lifecycle: Record<string, number>; total: number }>();
+  const valueTotals: Record<string, number> = {}, lifecycleTotals: Record<string, number> = {};
+  const treeMap = new Map<string, number>();
+  let farmers = 0, spendTotal = 0;
+  for (const r of cross) {
+    const cnt = num(r.n);
+    const st = byStore.get(r.storeId) ?? { value: {}, lifecycle: {}, total: 0 };
+    st.value[r.vseg] = (st.value[r.vseg] ?? 0) + cnt;
+    st.lifecycle[r.lseg] = (st.lifecycle[r.lseg] ?? 0) + cnt;
+    st.total += cnt; byStore.set(r.storeId, st);
+    valueTotals[r.vseg] = (valueTotals[r.vseg] ?? 0) + cnt;
+    lifecycleTotals[r.lseg] = (lifecycleTotals[r.lseg] ?? 0) + cnt;
+    treeMap.set(`${r.vseg}|${r.lseg}`, (treeMap.get(`${r.vseg}|${r.lseg}`) ?? 0) + cnt);
+    farmers += cnt; spendTotal += Number(r.spendsum);
+  }
+  const rows: MergedRow[] = [...byStore.entries()].map(([storeId, s]) => ({
+    storeId, storeName: storeId == null ? "Unassigned" : nameById.get(storeId) ?? `Store #${storeId}`,
+    value: s.value, lifecycle: s.lifecycle, total: s.total,
+  })).sort((a, b) => b.total - a.total).slice(0, 100);
+  const tree = VALUE_SEGMENTS.flatMap((v) => LIFECYCLE_SEGMENTS.map((l) => ({ value: v, lifecycle: l, count: treeMap.get(`${v}|${l}`) ?? 0 })));
+  const order = ["HNI ₹12K+", "₹10–12K", "₹5–10K", "₹2.5–5K", "< ₹2.5K", "No spend"];
+
   return {
-    kpis: { farmers: num(k.total), hni: num(k.hni), potentialHni: num(k.phni), atRisk: num(k.atrisk), lapsed: num(k.lapsed), spend: num(k.spend), visits },
-    valueMatrix, lifecycleMatrix,
-    segmentDist: SEGMENT_COLUMNS.map((s) => ({ label: segMeta(s).label, value: segMap.get(s) ?? 0, color: segMeta(s).color })),
+    kpis: { farmers, spend: spendTotal, visits: 0 },
+    valueCols: [...VALUE_SEGMENTS], lifecycleCols: [...LIFECYCLE_SEGMENTS],
+    matrix: { rows, valueTotals, lifecycleTotals, grandTotal: farmers },
+    tree,
+    valueDist: VALUE_SEGMENTS.map((s) => ({ label: segMeta(s).label, value: valueTotals[s] ?? 0, color: segMeta(s).color })),
+    lifecycleDist: LIFECYCLE_SEGMENTS.map((s) => ({ label: segMeta(s).label, value: lifecycleTotals[s] ?? 0, color: segMeta(s).color })),
     cropBreakdown: cropRows.map((r) => ({ label: r.crop, value: num(r.n) })),
-    extra, extraTitle, secondary, secondaryTitle,
+    extra: histRows.map((r) => ({ label: r.bucket, value: num(r.n) })).sort((a, b) => order.indexOf(a.label) - order.indexOf(b.label)),
+    extraTitle: "Spend tiers (FY)",
+    secondary: zoneRows.map((r) => ({ label: r.zone, value: Number(r.spend) })), secondaryTitle: "Top zones by FY spend",
   };
 }
 
@@ -427,18 +451,20 @@ export interface WbCustomer { id: number; name: string; mobile: string | null; v
 export type SegDim = "value" | "lifecycle";
 export async function getWorkbenchCustomers(f: WbFilters, storeId: number | null, dim: SegDim, seg: string, limit = 400): Promise<WbCustomer[]> {
   // Scope LAST (after applying the clicked cell's store) so an officer/RM can't drill into a foreign store.
-  const cell = dim === "value" ? { valueSegments: [seg] } : { lifecycleSegments: [seg] };
-  const scoped = await scopeFilters({ ...f, ...cell, storeId: storeId ?? undefined });
+  const scoped = await scopeFilters({ ...f, storeId: storeId ?? undefined });
   if (scoped === "none") return [];
-  const conds = farmerConds(scoped, "f"); // alias f so the visit-problem EXISTS correlates to Farmer.id
-  if (storeId == null && scoped.storeId == null) conds.push(Prisma.sql`f."storeId" IS NULL`);
-  const rows = await prisma.$queryRaw<{ id: number; name: string; mobile: string | null; village: string | null; spend: number | null; vseg: string | null; lseg: string | null; salesc: string[]; visitc: string[] }[]>(Prisma.sql`
-    SELECT f.id, f.name, f.mobile, f.village, f."p12mSpend" spend, f."valueSegment" vseg, f."lifecycleSegment" lseg, f."salesCropTags" salesc, f."visitCropTags" visitc
-    FROM "Farmer" f WHERE ${Prisma.join(conds, " AND ")}
-    ORDER BY f."p12mSpend" DESC NULLS LAST LIMIT ${limit}`);
+  const cte = tiersCte(scoped), tf = tierFilter(scoped);
+  const dimCond = dim === "value" ? Prisma.sql`t.vseg = ${seg}` : Prisma.sql`t.lseg = ${seg}`;
+  const storeCond = storeId == null ? Prisma.sql`t."storeId" IS NULL` : Prisma.sql`t."storeId" = ${storeId}`;
+  const rows = await prisma.$queryRaw<{ id: number; name: string; mobile: string | null; village: string | null; spend: bigint; vseg: string | null; lseg: string | null; salesc: string[]; visitc: string[] }[]>(Prisma.sql`
+    WITH ${cte}
+    SELECT f.id, f.name, f.mobile, f.village, t.spend, t.vseg, t.lseg, f."salesCropTags" salesc, f."visitCropTags" visitc
+    FROM tiers t JOIN "Farmer" f ON f.id = t.id
+    WHERE ${tf} AND ${storeCond} AND ${dimCond}
+    ORDER BY t.spend DESC NULLS LAST LIMIT ${limit}`);
   return rows.map((r) => ({
     id: r.id, name: r.name, mobile: r.mobile, village: r.village,
-    spend: r.spend != null ? inr(r.spend) : "—",
+    spend: r.spend != null ? inr(Number(r.spend)) : "—",
     segment: [r.vseg, r.lseg].filter(Boolean).map((s) => segMeta(s!).label).join(" · ") || "—",
     salesCrops: r.salesc ?? [], visitCrops: r.visitc ?? [],
   }));
@@ -450,51 +476,53 @@ const FARMER_EXPORT_CAP = 200000; // covers the whole REAL farmer base; the note
 export async function exportWorkbookXlsx(f: WbFilters): Promise<{ ok: boolean; filename?: string; b64?: string; error?: string }> {
   const scoped = await scopeFilters(f);
   if (scoped === "none") return { ok: false, error: "No store or region is assigned to your account." };
-  const whereF = whereOf(scoped, "f");
+  const cte = tiersCte(scoped), tf = tierFilter(scoped);
 
-  const [valueRows, lifecycleRows, stores, farmerRows] = await Promise.all([
-    prisma.$queryRaw<{ storeId: number | null; seg: string; n: number }[]>(Prisma.sql`
-      SELECT f."storeId" AS "storeId", f."valueSegment" seg, COUNT(*)::int n FROM "Farmer" f ${whereF}
-      AND f."valueSegment" IS NOT NULL GROUP BY 1, 2`),
-    prisma.$queryRaw<{ storeId: number | null; seg: string; n: number }[]>(Prisma.sql`
-      SELECT f."storeId" AS "storeId", f."lifecycleSegment" seg, COUNT(*)::int n FROM "Farmer" f ${whereF}
-      AND f."lifecycleSegment" IS NOT NULL GROUP BY 1, 2`),
+  const [cross, stores, farmerRows] = await Promise.all([
+    prisma.$queryRaw<{ storeId: number | null; vseg: string; lseg: string; n: number }[]>(Prisma.sql`
+      WITH ${cte} SELECT "storeId", vseg, lseg, COUNT(*)::int n FROM tiers WHERE ${tf} GROUP BY 1,2,3`),
     prisma.store.findMany({ select: { id: true, name: true } }),
-    prisma.$queryRaw<{ name: string; mobile: string | null; village: string | null; zone: string | null; storeId: number | null; vseg: string | null; lseg: string | null; spend: number | null; salesc: string[]; visitc: string[]; pests: string[] }[]>(Prisma.sql`
-      SELECT f.name, f.mobile, f.village, f."zone" AS zone, f."storeId" AS "storeId", f."valueSegment" vseg, f."lifecycleSegment" lseg,
-        f."p12mSpend" spend, f."salesCropTags" salesc, f."visitCropTags" visitc, f."pestTags" pests
-      FROM "Farmer" f ${whereF} ORDER BY f."p12mSpend" DESC NULLS LAST LIMIT ${FARMER_EXPORT_CAP}`),
+    prisma.$queryRaw<{ name: string; mobile: string | null; village: string | null; zone: string | null; storeId: number | null; vseg: string | null; lseg: string | null; spend: bigint; salesc: string[]; visitc: string[]; pests: string[] }[]>(Prisma.sql`
+      WITH ${cte} SELECT f.name, f.mobile, f.village, f."zone" AS zone, t."storeId" AS "storeId", t.vseg, t.lseg, t.spend,
+        f."salesCropTags" salesc, f."visitCropTags" visitc, f."pestTags" pests
+      FROM tiers t JOIN "Farmer" f ON f.id=t.id WHERE ${tf} ORDER BY t.spend DESC NULLS LAST LIMIT ${FARMER_EXPORT_CAP}`),
   ]);
 
   const nameById = new Map(stores.map((s) => [s.id, shortStore(s.name)]));
+  const V = [...VALUE_SEGMENTS], L = [...LIFECYCLE_SEGMENTS];
+  const byStore = new Map<number | null, { value: Record<string, number>; lifecycle: Record<string, number>; total: number }>();
+  const valueTotals: Record<string, number> = {}, lifecycleTotals: Record<string, number> = {};
+  let grand = 0;
+  for (const r of cross) {
+    const cnt = num(r.n);
+    const st = byStore.get(r.storeId) ?? { value: {}, lifecycle: {}, total: 0 };
+    st.value[r.vseg] = (st.value[r.vseg] ?? 0) + cnt; st.lifecycle[r.lseg] = (st.lifecycle[r.lseg] ?? 0) + cnt; st.total += cnt;
+    byStore.set(r.storeId, st);
+    valueTotals[r.vseg] = (valueTotals[r.vseg] ?? 0) + cnt; lifecycleTotals[r.lseg] = (lifecycleTotals[r.lseg] ?? 0) + cnt; grand += cnt;
+  }
+  const rows = [...byStore.entries()].map(([storeId, s]) => ({
+    storeName: storeId == null ? "Unassigned" : nameById.get(storeId) ?? `Store #${storeId}`, ...s,
+  })).sort((a, b) => b.total - a.total).slice(0, 100);
 
-  // A store×segment sheet (top 100 stores by total, All-stores summary row) for one dimension.
-  const matrixSheet = (grouped: { storeId: number | null; seg: string; n: number }[], cols: string[]): (string | number)[][] => {
-    const m = buildMatrix(grouped, cols, nameById);
-    return [
-      ["Store", ...cols.map((s) => segMeta(s).label), "Total"],
-      ["All stores", ...cols.map((s) => m.totals[s] ?? 0), m.grandTotal],
-      ...m.rows.map((r) => [r.storeName, ...cols.map((s) => r.counts[s] ?? 0), r.total]),
-    ];
-  };
-  const valueSheet = matrixSheet(valueRows, [...VALUE_SEGMENTS]);
-  const lifecycleSheet = matrixSheet(lifecycleRows, [...LIFECYCLE_SEGMENTS]);
-
+  const mergedSheet: (string | number)[][] = [
+    ["Store", ...V.map((s) => segMeta(s).label), "Segment Total", ...L.map((s) => segMeta(s).label), "Any Spend Total"],
+    ["All stores", ...V.map((s) => valueTotals[s] ?? 0), grand, ...L.map((s) => lifecycleTotals[s] ?? 0), grand],
+    ...rows.map((r) => [r.storeName, ...V.map((s) => r.value[s] ?? 0), r.total, ...L.map((s) => r.lifecycle[s] ?? 0), r.total]),
+  ];
   const farmerSheet: (string | number)[][] = [
-    ["Farmer", "Mobile", "Store", "Region", "Village", "Value segment", "Lifecycle", "P12M Spend (₹)", "Sales crops", "Visit crops", "Target pests / diseases"],
+    ["Farmer", "Mobile", "Store", "Region", "Village", "Value segment", "Lifecycle", "FY Spend (₹)", "Sales crops", "Visit crops", "Target pests / diseases"],
     ...farmerRows.map((r) => [
       r.name, r.mobile ?? "", r.storeId != null ? nameById.get(r.storeId) ?? "" : "", r.zone ?? "", r.village ?? "",
-      r.vseg ? segMeta(r.vseg).label : "—", r.lseg ? segMeta(r.lseg).label : "—", r.spend ?? 0,
+      r.vseg ? segMeta(r.vseg).label : "—", r.lseg ? segMeta(r.lseg).label : "—", Number(r.spend ?? 0),
       (r.salesc ?? []).map(cropLabel).join(", "), (r.visitc ?? []).map(cropLabel).join(", "), (r.pests ?? []).map(tagLabel).join(", "),
     ]),
   ];
   if (farmerRows.length >= FARMER_EXPORT_CAP) {
-    farmerSheet.push([`Note: list capped at ${FARMER_EXPORT_CAP.toLocaleString("en-IN")} farmers (by P12M spend). Narrow the filters for a complete set.`]);
+    farmerSheet.push([`Note: list capped at ${FARMER_EXPORT_CAP.toLocaleString("en-IN")} farmers (by FY spend). Narrow the filters for a complete set.`]);
   }
 
   const b64 = buildWorkbookB64([
-    { name: "Value x Store", rows: valueSheet },
-    { name: "Lifecycle x Store", rows: lifecycleSheet },
+    { name: "Value + Lifecycle x Store", rows: mergedSheet },
     { name: "Farmers", rows: farmerSheet },
   ]);
   const today = new Date().toISOString().slice(0, 10);

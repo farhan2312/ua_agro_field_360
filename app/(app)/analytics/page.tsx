@@ -12,10 +12,10 @@ import { ScopedDashboard, UnassignedDashboard, type ScopedDashboardData } from "
 export const dynamic = "force-dynamic";
 
 const EMPTY: WbData = {
-  kpis: { farmers: 0, hni: 0, potentialHni: 0, atRisk: 0, lapsed: 0, spend: 0, visits: 0 },
-  valueMatrix: { cols: [...VALUE_SEGMENTS], rows: [], totals: {}, grandTotal: 0 },
-  lifecycleMatrix: { cols: [...LIFECYCLE_SEGMENTS], rows: [], totals: {}, grandTotal: 0 },
-  segmentDist: [], cropBreakdown: [], extra: [], extraTitle: "", secondary: [], secondaryTitle: "",
+  kpis: { farmers: 0, spend: 0, visits: 0 },
+  valueCols: [...VALUE_SEGMENTS], lifecycleCols: [...LIFECYCLE_SEGMENTS],
+  matrix: { rows: [], valueTotals: {}, lifecycleTotals: {}, grandTotal: 0 },
+  tree: [], valueDist: [], lifecycleDist: [], cropBreakdown: [], extra: [], extraTitle: "", secondary: [], secondaryTitle: "",
 };
 
 /**

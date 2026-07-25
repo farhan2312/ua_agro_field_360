@@ -9,7 +9,7 @@ import { tagLabel } from "@/lib/crop-pest";
 import {
   getWorkbench, getWorkbenchCustomers, saveWorkbenchSegment, getCropTrend, getVisitAnalytics, exportWorkbookXlsx,
   type Lens, type WbFilters, type WbData, type WbFacets, type WbBar, type WbCustomer, type CropTrendPoint,
-  type VisitAnalytics, type VisitMonth, type VisitAdoption, type VisitStoreRow, type Matrix, type SegDim,
+  type VisitAnalytics, type VisitMonth, type VisitAdoption, type VisitStoreRow, type MergedMatrix, type TreeCell, type SegDim,
 } from "@/app/actions/analytics-segments";
 import { downloadB64 } from "@/lib/download";
 
@@ -30,12 +30,24 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
   const [rows, setRows] = useState<WbCustomer[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [years, setYears] = useState<number[]>([]); // crop-trend year filter (client-side; [] = all years)
-  const toggleYear = (y: number) => setYears((prev) => (prev.includes(y) ? prev.filter((x) => x !== y) : [...prev, y].sort((a, b) => a - b)));
+  const [treeBy, setTreeBy] = useState<"value" | "lifecycle">("value"); // KPI cross-tab primary dimension
+  const years = filters.fyStarts ?? []; // selected FY start years — drives the whole sales analysis
+  const toggleFy = (y: number) => {
+    const cur = filters.fyStarts ?? [];
+    apply({ fyStarts: cur.includes(y) ? cur.filter((x) => x !== y) : [...cur, y].sort((a, b) => a - b) });
+  };
   const toggleSeg = (key: "valueSegments" | "lifecycleSegments", k: string) => {
     const cur = filters[key] ?? [];
     apply({ [key]: cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k] });
   };
+  // Close any open <details> filter popover when clicking outside it.
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      document.querySelectorAll("details[open]").forEach((d) => { if (!d.contains(e.target as Node)) (d as HTMLDetailsElement).open = false; });
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, []);
 
   const exportXlsx = () => {
     setExporting(true);
@@ -61,7 +73,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
     });
   };
   const setLens = (lens: Lens) => apply({ lens, crop: undefined, valueSegments: undefined, lifecycleSegments: undefined, spendTier: undefined, problem: undefined });
-  const clearAll = () => { setYears([]); apply({ storeId: undefined, zone: undefined, crop: undefined, pest: undefined, valueSegments: undefined, lifecycleSegments: undefined, spendTier: undefined, problem: undefined }); };
+  const clearAll = () => apply({ storeId: undefined, zone: undefined, crop: undefined, pest: undefined, valueSegments: undefined, lifecycleSegments: undefined, spendTier: undefined, problem: undefined, fyStarts: undefined });
 
   const openCell = (storeId: number | null, storeName: string, dim: SegDim, seg: string) => {
     setCell({ storeId, storeName, dim, seg }); setRows(null);
@@ -74,10 +86,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
   const k = data.kpis;
   const vk = visitData?.kpis;
   const vd = (x: number | undefined) => (visitData ? n(x ?? 0) : "…");
-  // Visit lens shows ONLY what the field team collected — no sales-derived numbers.
-  const KPIS: [string, string][] = filters.lens === "sales"
-    ? [["Farmers", n(k.farmers)], ["HNI", n(k.hni)], ["Potential HNI", n(k.potentialHni)], ["At-Risk", n(k.atRisk)], ["Lapsed", n(k.lapsed)], ["P12M spend", money(k.spend)]]
-    : [["Visits", vd(vk?.visits)], ["Farmers visited", vd(vk?.farmers)], ["Villages", vd(vk?.villages)], ["Officers", vd(vk?.officers)], ["Field GPS", visitData ? `${vk?.fieldPct ?? 0}%` : "…"], ["Photos", vd(vk?.photos)]];
+  const VISIT_KPIS: [string, string][] = [["Visits", vd(vk?.visits)], ["Farmers visited", vd(vk?.farmers)], ["Villages", vd(vk?.villages)], ["Officers", vd(vk?.officers)], ["Field GPS", visitData ? `${vk?.fieldPct ?? 0}%` : "…"], ["Photos", vd(vk?.photos)]];
 
   return (
     <div className="animate-[fadeUp_0.4s_ease-out]">
@@ -125,20 +134,31 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
             options={facets.problems.map((p) => [p.problem, `${p.problem} (${n(p.count)})`])} />
         )}
         {filters.lens === "sales" && facets.years.length > 0 && (
-          <YearMultiSel years={facets.years} selected={years} onToggle={toggleYear} onClear={() => setYears([])} />
+          <YearMultiSel years={facets.years} selected={years} onToggle={toggleFy} onClear={() => apply({ fyStarts: undefined })} />
         )}
         {activeFilterCount > 0 && <button type="button" onClick={clearAll} className="text-[12px] font-semibold text-[#C62828] hover:underline">Clear ({activeFilterCount})</button>}
       </div>
 
-      {/* KPIs */}
-      <div className="mb-3 grid grid-cols-2 gap-[12px] sm:grid-cols-3 lg:grid-cols-6">
-        {KPIS.map(([label, val]) => (
-          <div key={label} className={`${CARD} p-3.5`}>
-            <div className="text-[10.5px] font-bold uppercase tracking-[0.3px] text-[#9E9E9E]">{label}</div>
-            <div className="mt-1 text-[19px] font-bold text-[#1A1C1A]">{val}</div>
+      {/* KPIs — sales: Total farmers + Value×Lifecycle cross-tab tree (flippable). Visit: the field metrics. */}
+      {filters.lens === "sales" ? (
+        <div className="mb-3 grid grid-cols-1 gap-[14px] lg:grid-cols-[220px_1fr]">
+          <div className={`${CARD} flex flex-col justify-center p-4`}>
+            <div className="text-[10.5px] font-bold uppercase tracking-[0.3px] text-[#9E9E9E]">Total farmers</div>
+            <div className="mt-1 text-[28px] font-bold text-[#1A1C1A]">{n(k.farmers)}</div>
+            <div className="mt-0.5 text-[11.5px] text-[#9E9E9E]">FY spend · {money(k.spend)}</div>
           </div>
-        ))}
-      </div>
+          <SegTree tree={data.tree} by={treeBy} onFlip={() => setTreeBy((b) => (b === "value" ? "lifecycle" : "value"))} />
+        </div>
+      ) : (
+        <div className="mb-3 grid grid-cols-2 gap-[12px] sm:grid-cols-3 lg:grid-cols-6">
+          {VISIT_KPIS.map(([label, val]) => (
+            <div key={label} className={`${CARD} p-3.5`}>
+              <div className="text-[10.5px] font-bold uppercase tracking-[0.3px] text-[#9E9E9E]">{label}</div>
+              <div className="mt-1 text-[19px] font-bold text-[#1A1C1A]">{val}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Sales board — trend, charts, matrix. The Visit lens gets its own board built purely from visit data. */}
       {filters.lens === "sales" ? (
@@ -146,17 +166,17 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
         <CropTrendCard crop={filters.crop} years={years} />
 
         <div className="grid grid-cols-1 gap-[14px] lg:grid-cols-2">
-          <DonutCard title="Segment share" slices={data.segmentDist} />
-          <HistogramCard title="Spend tiers (P12M) — farmer histogram" bars={data.extra} />
-          <BarCard title="Sales-crop breakdown (farmers)" bars={data.cropBreakdown.map((b) => ({ ...b, label: cropLabel(b.label) }))} fmt={n} accent="#F9A825" />
+          <DonutCard title={`${VALUE_TITLE} share`} slices={data.valueDist} />
+          <DonutCard title={`${LIFECYCLE_TITLE} share`} slices={data.lifecycleDist} />
+          <HistogramCard title="Spend tiers (FY) — farmer histogram" bars={data.extra} />
           <BarCard title={data.secondaryTitle} bars={data.secondary} fmt={money} accent="#6A1B9A" />
         </div>
+        <BarCard title="Sales-crop breakdown (farmers)" bars={data.cropBreakdown.map((b) => ({ ...b, label: cropLabel(b.label) }))} fmt={n} accent="#F9A825" />
 
-        <MatrixCard title={`${VALUE_TITLE} × Store`} matrix={data.valueMatrix} dim="value" onCell={openCell}
+        <MergedMatrixCard matrix={data.matrix} valueCols={data.valueCols} lifecycleCols={data.lifecycleCols} onCell={openCell}
           right={<button type="button" onClick={exportXlsx} disabled={exporting}
             className="rounded-[8px] border border-[#2E7D32] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9] disabled:opacity-40">
             {exporting ? "Exporting…" : "⬇ Export to Excel"}</button>} />
-        <MatrixCard title={`${LIFECYCLE_TITLE} × Store`} matrix={data.lifecycleMatrix} dim="lifecycle" onCell={openCell} />
       </div>
       ) : (
         <VisitBoard va={visitData} />
@@ -233,43 +253,85 @@ function SegMultiSel({ label, options, selected, onToggle, onClear }: {
   );
 }
 
-/** A store×segment matrix card (used for both Value and Lifecycle — both have 3 columns). */
-const MATRIX_GRID = "grid grid-cols-[1.4fr_repeat(3,1fr)_0.8fr]";
-function MatrixCard({ title, matrix, dim, onCell, right }: {
-  title: string; matrix: Matrix; dim: SegDim; onCell: (storeId: number | null, storeName: string, dim: SegDim, seg: string) => void; right?: ReactNode;
+/** KPI cross-tab tree — 3 value groups each split by lifecycle (or flipped). */
+function SegTree({ tree, by, onFlip }: { tree: TreeCell[]; by: "value" | "lifecycle"; onFlip: () => void }) {
+  const primaries = by === "value" ? [...VALUE_SEGMENTS] : [...LIFECYCLE_SEGMENTS];
+  const secondaries = by === "value" ? [...LIFECYCLE_SEGMENTS] : [...VALUE_SEGMENTS];
+  const cellOf = (p: string, s: string) => {
+    const c = tree.find((t) => (by === "value" ? t.value === p && t.lifecycle === s : t.lifecycle === p && t.value === s));
+    return c?.count ?? 0;
+  };
+  return (
+    <div className={`${CARD} p-3`}>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-[12px] font-bold text-[#1A1C1A]">{by === "value" ? `${VALUE_TITLE} → ${LIFECYCLE_TITLE}` : `${LIFECYCLE_TITLE} → ${VALUE_TITLE}`}</div>
+        <button type="button" onClick={onFlip} className="rounded-full border border-[#E0E0E0] px-3 py-1 text-[11px] font-semibold text-[#616161] hover:bg-[#F5F7F5]">⇄ Flip</button>
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        {primaries.map((p) => {
+          const total = secondaries.reduce((a, s) => a + cellOf(p, s), 0);
+          return (
+            <div key={p} className="rounded-[10px] border border-[#EEE] p-2.5">
+              <div className="flex items-baseline justify-between">
+                <span className="text-[12px] font-bold" style={{ color: segMeta(p).color }}>{segMeta(p).label}</span>
+                <span className="text-[15px] font-bold text-[#1A1C1A]">{n(total)}</span>
+              </div>
+              <div className="mt-1.5 flex flex-col gap-1">
+                {secondaries.map((s) => (
+                  <div key={s} className="flex items-center justify-between text-[11px]">
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: segMeta(s).color }} />{segMeta(s).label}</span>
+                    <span className="font-semibold text-[#424242]">{n(cellOf(p, s))}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** The merged Store × (Value | Lifecycle) table with two sub-totals. */
+const MERGED_GRID = "grid grid-cols-[1.4fr_repeat(3,0.85fr)_0.9fr_repeat(3,0.85fr)_0.9fr]";
+function MergedMatrixCard({ matrix, valueCols, lifecycleCols, onCell, right }: {
+  matrix: MergedMatrix; valueCols: string[]; lifecycleCols: string[];
+  onCell: (storeId: number | null, storeName: string, dim: SegDim, seg: string) => void; right?: ReactNode;
 }) {
-  const cols = matrix.cols;
+  const cellBtn = (storeId: number | null, storeName: string, dim: SegDim, seg: string, c: number) =>
+    c > 0 ? <button type="button" onClick={() => onCell(storeId, storeName, dim, seg)} className="font-semibold hover:underline" style={{ color: segMeta(seg).color }}>{n(c)}</button> : <span className="text-[#DDD]">·</span>;
   return (
     <div className={`${CARD} overflow-hidden`}>
       <div className="flex items-center justify-between gap-2 border-b border-[#F0F0F0] px-4 py-2.5">
-        <div className="text-[13px] font-bold text-[#1A1C1A]">{title}</div>
+        <div className="text-[13px] font-bold text-[#1A1C1A]">Store × {VALUE_TITLE} + {LIFECYCLE_TITLE}</div>
         {right}
       </div>
       <div className="overflow-x-auto">
-        <div className="min-w-[560px]">
-          <div className={`${MATRIX_GRID} border-b border-[#F0F0F0] bg-[#FAFAFA] px-4 py-2.5 text-[10.5px] font-semibold uppercase tracking-[0.4px] text-[#9E9E9E]`}>
+        <div className="min-w-[900px]">
+          <div className={`${MERGED_GRID} border-b border-[#F0F0F0] bg-[#FAFAFA] px-4 py-2.5 text-[10.5px] font-semibold uppercase tracking-[0.4px] text-[#9E9E9E]`}>
             <div>Store</div>
-            {cols.map((s) => <div key={s} className="text-right" style={{ color: segMeta(s).color }}>{segMeta(s).label}</div>)}
-            <div className="text-right">Total</div>
+            {valueCols.map((s) => <div key={s} className="text-right" style={{ color: segMeta(s).color }}>{segMeta(s).label}</div>)}
+            <div className="text-right text-[#1A1C1A]">Segment Total</div>
+            {lifecycleCols.map((s) => <div key={s} className="text-right" style={{ color: segMeta(s).color }}>{segMeta(s).label}</div>)}
+            <div className="text-right text-[#1A1C1A]">Any Spend Total</div>
           </div>
           {matrix.rows.length === 0 ? (
             <div className="px-4 py-10 text-center text-[13px] text-[#9E9E9E]">No farmers match these filters.</div>
           ) : (
             <>
-              <div className={`${MATRIX_GRID} border-b border-[#EEE] bg-[#F5FBF5] px-4 py-2.5 text-[12px] font-bold text-[#1A1C1A]`}>
+              <div className={`${MERGED_GRID} border-b border-[#EEE] bg-[#F5FBF5] px-4 py-2.5 text-[12px] font-bold text-[#1A1C1A]`}>
                 <div>All stores</div>
-                {cols.map((s) => <div key={s} className="text-right">{n(matrix.totals[s] ?? 0)}</div>)}
+                {valueCols.map((s) => <div key={s} className="text-right">{n(matrix.valueTotals[s] ?? 0)}</div>)}
+                <div className="text-right">{n(matrix.grandTotal)}</div>
+                {lifecycleCols.map((s) => <div key={s} className="text-right">{n(matrix.lifecycleTotals[s] ?? 0)}</div>)}
                 <div className="text-right">{n(matrix.grandTotal)}</div>
               </div>
               {matrix.rows.map((r) => (
-                <div key={String(r.storeId)} className={`${MATRIX_GRID} items-center border-b border-[#F8F8F8] px-4 py-2 text-[12px]`}>
+                <div key={String(r.storeId)} className={`${MERGED_GRID} items-center border-b border-[#F8F8F8] px-4 py-2 text-[12px]`}>
                   <div className="truncate font-semibold text-[#1A1C1A]" title={r.storeName}>{r.storeName}</div>
-                  {cols.map((s) => {
-                    const c = r.counts[s] ?? 0;
-                    return <div key={s} className="text-right">{c > 0 ? (
-                      <button type="button" onClick={() => onCell(r.storeId, r.storeName, dim, s)} className="font-semibold hover:underline" style={{ color: segMeta(s).color }}>{n(c)}</button>
-                    ) : <span className="text-[#DDD]">·</span>}</div>;
-                  })}
+                  {valueCols.map((s) => <div key={s} className="text-right">{cellBtn(r.storeId, r.storeName, "value", s, r.value[s] ?? 0)}</div>)}
+                  <div className="text-right font-bold text-[#1A1C1A]">{n(r.total)}</div>
+                  {lifecycleCols.map((s) => <div key={s} className="text-right">{cellBtn(r.storeId, r.storeName, "lifecycle", s, r.lifecycle[s] ?? 0)}</div>)}
                   <div className="text-right font-bold text-[#1A1C1A]">{n(r.total)}</div>
                 </div>
               ))}
@@ -277,7 +339,7 @@ function MatrixCard({ title, matrix, dim, onCell, right }: {
           )}
         </div>
       </div>
-      <div className="px-4 py-2 text-[11px] text-[#9E9E9E]">Click any count to see that store × segment farmer list.</div>
+      <div className="px-4 py-2 text-[11px] text-[#9E9E9E]">Both totals equal the store's farmer count. Click any count to drill into that farmer list. Value/lifecycle are computed on the selected FY's sales.</div>
     </div>
   );
 }
