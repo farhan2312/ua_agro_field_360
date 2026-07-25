@@ -17,6 +17,10 @@ const CARD = "rounded-[14px] border border-black/[0.04] bg-white shadow-[0_1px_3
 const n = (x: number) => Math.round(x).toLocaleString("en-IN");
 const money = (x: number) => (x >= 1e7 ? `₹${(x / 1e7).toFixed(2)} Cr` : x >= 1e5 ? `₹${(x / 1e5).toFixed(1)} L` : `₹${n(x)}`);
 
+// Indian financial year: Apr Y → Mar Y+1, identified by its start year Y (Jan–Mar fall in the previous FY).
+const fyStartOfYm = (ym: string) => { const [y, m] = ym.split("-").map(Number); return m >= 4 ? y : y - 1; };
+const fyLabel = (y: number) => `FY ${y}–${String((y + 1) % 100).padStart(2, "0")}`; // FY 2024–25
+
 export function AnalyticsWorkbench({ initial, facets, canChain = false }: { initial: WbData; facets: WbFacets; canChain?: boolean }) {
   const [filters, setFilters] = useState<WbFilters>({ lens: "sales" });
   const [data, setData] = useState(initial);
@@ -232,9 +236,9 @@ function Sel({ value, onChange, ph, options }: { value: string; onChange: (v: st
   );
 }
 
-/** Multi-select year filter (checkbox dropdown; empty = all years). Native <details> for a JS-free popover. */
+/** Multi-select financial-year filter (checkbox dropdown; empty = all FYs). Native <details> for a JS-free popover. */
 function YearMultiSel({ years, selected, onToggle, onClear }: { years: number[]; selected: number[]; onToggle: (y: number) => void; onClear: () => void }) {
-  const label = selected.length === 0 ? "All years" : selected.length === 1 ? String(selected[0]) : `${selected.length} years`;
+  const label = selected.length === 0 ? "All FYs" : selected.length === 1 ? fyLabel(selected[0]) : `${selected.length} FYs`;
   return (
     <details className="group relative">
       <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-lg border border-[#E0E0E0] bg-white px-2.5 py-2 text-[12.5px] text-[#424242]">
@@ -243,11 +247,11 @@ function YearMultiSel({ years, selected, onToggle, onClear }: { years: number[];
       </summary>
       <div className="absolute left-0 z-30 mt-1 w-[140px] rounded-lg border border-[#E0E0E0] bg-white p-1 shadow-[0_6px_20px_rgba(0,0,0,0.12)]">
         <button type="button" onClick={onClear}
-          className={`w-full rounded px-2 py-1.5 text-left text-[12.5px] font-semibold hover:bg-[#F5F7F5] ${selected.length === 0 ? "text-[#1565C0]" : "text-[#616161]"}`}>All years</button>
+          className={`w-full rounded px-2 py-1.5 text-left text-[12.5px] font-semibold hover:bg-[#F5F7F5] ${selected.length === 0 ? "text-[#1565C0]" : "text-[#616161]"}`}>All FYs</button>
         {years.map((y) => (
           <label key={y} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[12.5px] text-[#424242] hover:bg-[#F5F7F5]">
             <input type="checkbox" checked={selected.includes(y)} onChange={() => onToggle(y)} className="accent-[#1565C0]" />
-            {y}
+            {fyLabel(y)}
           </label>
         ))}
       </div>
@@ -357,7 +361,7 @@ function CropTrendCard({ crop, years }: { crop?: string; years: number[] }) {
   }, [crop]);
 
   const all = points ?? [];
-  const pts = years.length ? all.filter((p) => years.includes(p.year)) : all;
+  const pts = years.length ? all.filter((p) => years.includes(fyStartOfYm(p.ym))) : all;
   const max = Math.max(1, ...pts.map((p) => p.revenue));
   const totalRev = pts.reduce((a, p) => a + p.revenue, 0);
   const seasonTotals = pts.reduce((m, p) => { m[p.season] = (m[p.season] ?? 0) + p.revenue; return m; }, {} as Record<string, number>);
@@ -367,7 +371,7 @@ function CropTrendCard({ crop, years }: { crop?: string; years: number[] }) {
       <div className="mb-1 flex flex-wrap items-center gap-2.5">
         <div className="text-[13px] font-bold text-[#1A1C1A]">Crop purchase trend</div>
         <span className="rounded-full bg-[#E8F5E9] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#2E7D32]">{crop ? cropLabel(crop) : "All crops"}</span>
-        <span className="rounded-full bg-[#E3F2FD] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#1565C0]">{years.length ? years.join(", ") : "All years"}</span>
+        <span className="rounded-full bg-[#E3F2FD] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#1565C0]">{years.length ? years.map(fyLabel).join(", ") : "All FYs"}</span>
         {loading && <span className="text-[11.5px] text-[#9E9E9E]">Loading…</span>}
         <div className="ml-auto flex flex-wrap items-center gap-3 text-[11px] font-medium text-[#616161]">
           {(["Kharif", "Rabi", "Zaid"] as const).map((s) => (

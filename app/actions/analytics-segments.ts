@@ -80,7 +80,7 @@ export interface WbFacets {
   pests: { pest: string; count: number }[]; // item-code derived, both lenses
   problems: { problem: string; count: number }[];
   spendTiers: string[];
-  years: number[]; // distinct sale years (for the crop-trend year filter), role-scoped
+  years: number[]; // distinct financial-year start years (Apr–Mar) for the crop-trend FY filter, role-scoped
 }
 export async function getWorkbenchFacets(): Promise<WbFacets> {
   const { role, storeId, zone } = await getScope();
@@ -115,7 +115,8 @@ export async function getWorkbenchFacets(): Promise<WbFacets> {
     prisma.$queryRaw<{ crop: string; n: number }[]>(Prisma.sql`SELECT unnest("visitCropTags") crop, COUNT(*)::int n FROM "Farmer" WHERE source='REAL' AND ${fScope} GROUP BY 1 ORDER BY 2 DESC`),
     prisma.$queryRaw<{ pest: string; n: number }[]>(Prisma.sql`SELECT unnest("pestTags") pest, COUNT(*)::int n FROM "Farmer" WHERE source='REAL' AND ${fScope} GROUP BY 1 ORDER BY 2 DESC LIMIT 200`),
     prisma.$queryRaw<{ problem: string; n: number }[]>(Prisma.sql`SELECT unnest(v."currentProblem") problem, COUNT(*)::int n FROM "Visit" v JOIN "Farmer" f ON f.id = v."farmerId" WHERE array_length(v."currentProblem",1) > 0 AND ${vScope} GROUP BY 1 ORDER BY 2 DESC LIMIT 40`),
-    prisma.$queryRaw<{ y: number }[]>(Prisma.sql`SELECT DISTINCT EXTRACT(YEAR FROM sl."soldAt")::int y FROM "SaleLine" sl WHERE sl."soldAt" IS NOT NULL ${slScope} ORDER BY 1`),
+    // Distinct financial-year START years (Apr–Mar): Jan–Mar count toward the previous FY.
+    prisma.$queryRaw<{ y: number }[]>(Prisma.sql`SELECT DISTINCT (EXTRACT(YEAR FROM sl."soldAt")::int - CASE WHEN EXTRACT(MONTH FROM sl."soldAt") < 4 THEN 1 ELSE 0 END) y FROM "SaleLine" sl WHERE sl."soldAt" IS NOT NULL ${slScope} ORDER BY 1`),
   ]);
   const zones = isRM ? (zone != null ? [zone] : []) : isOfficer ? [] : zoneRows.map((z) => z.zone!).filter(Boolean);
   return {
