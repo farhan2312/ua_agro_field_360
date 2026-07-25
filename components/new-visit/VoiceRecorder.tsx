@@ -79,6 +79,7 @@ export function VoiceRecorder({
   // Auto-stop at the cap.
   useEffect(() => {
     if (recording && elapsed >= MAX_SECONDS) stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recording, elapsed]);
 
   // Track mount; stop recording + release the mic on unmount.

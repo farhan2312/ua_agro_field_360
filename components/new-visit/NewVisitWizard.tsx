@@ -301,6 +301,7 @@ export function NewVisitWizard({
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
     );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.visitMode]);
 
   const visitReasonStar = visitReasonRequired ? " *" : "";
