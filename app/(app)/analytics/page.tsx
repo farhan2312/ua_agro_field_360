@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 const EMPTY: WbData = {
   kpis: { farmers: 0, spend: 0, visits: 0 },
   valueCols: [...VALUE_SEGMENTS], lifecycleCols: [...LIFECYCLE_SEGMENTS],
-  matrix: { rows: [], valueTotals: {}, lifecycleTotals: {}, grandTotal: 0 },
+  matrix: { rows: [], valueTotals: {}, lifecycleTotals: {}, grandCross: {}, grandTotal: 0 },
   tree: [], valueDist: [], lifecycleDist: [], cropBreakdown: [], extra: [], extraTitle: "", secondary: [], secondaryTitle: "",
 };
 

@@ -187,8 +187,17 @@ export async function getWorkbenchFacets(): Promise<WbFacets> {
 export interface WbKpis { farmers: number; spend: number; visits: number }
 export interface WbBar { label: string; value: number; color?: string }
 /** One store row of the merged Value + Lifecycle table (both count-sets sum to `total`). */
-export interface MergedRow { storeId: number | null; storeName: string; value: Record<string, number>; lifecycle: Record<string, number>; total: number }
-export interface MergedMatrix { rows: MergedRow[]; valueTotals: Record<string, number>; lifecycleTotals: Record<string, number>; grandTotal: number }
+export interface MergedRow {
+  storeId: number | null; storeName: string;
+  value: Record<string, number>; lifecycle: Record<string, number>;
+  cross: Record<string, Record<string, number>>; // value → lifecycle → count (the full 3×3 per store)
+  total: number;
+}
+export interface MergedMatrix {
+  rows: MergedRow[]; valueTotals: Record<string, number>; lifecycleTotals: Record<string, number>;
+  grandCross: Record<string, Record<string, number>>; // all-stores 3×3 (the KPI-tree cross)
+  grandTotal: number;
+}
 export interface TreeCell { value: string; lifecycle: string; count: number }
 export interface WbData {
   kpis: WbKpis;
@@ -207,7 +216,7 @@ export interface WbData {
 const EMPTY_WB: WbData = {
   kpis: { farmers: 0, spend: 0, visits: 0 },
   valueCols: [...VALUE_SEGMENTS], lifecycleCols: [...LIFECYCLE_SEGMENTS],
-  matrix: { rows: [], valueTotals: {}, lifecycleTotals: {}, grandTotal: 0 },
+  matrix: { rows: [], valueTotals: {}, lifecycleTotals: {}, grandCross: {}, grandTotal: 0 },
   tree: [], valueDist: [], lifecycleDist: [], cropBreakdown: [], extra: [], extraTitle: "", secondary: [], secondaryTitle: "",
 };
 
@@ -235,7 +244,7 @@ export async function getWorkbench(f: WbFilters): Promise<WbData> {
     return {
       kpis: { farmers: num(cntRows[0]?.n), spend: 0, visits: num(vr[0]?.n) },
       valueCols: [...VALUE_SEGMENTS], lifecycleCols: [...LIFECYCLE_SEGMENTS],
-      matrix: { rows: [], valueTotals: {}, lifecycleTotals: {}, grandTotal: 0 }, tree: [], valueDist: [], lifecycleDist: [],
+      matrix: { rows: [], valueTotals: {}, lifecycleTotals: {}, grandCross: {}, grandTotal: 0 }, tree: [], valueDist: [], lifecycleDist: [],
       cropBreakdown: cropRows.map((r) => ({ label: r.crop, value: num(r.n) })),
       extra: probRows.map((r) => ({ label: r.problem, value: num(r.n) })), extraTitle: "Field problems (farmers)",
       secondary: offRows.map((r) => ({ label: r.officer, value: num(r.n) })), secondaryTitle: "Officer visit activity",
@@ -256,15 +265,16 @@ export async function getWorkbench(f: WbFilters): Promise<WbData> {
       WITH ${cte} SELECT unnest(f."salesCropTags") crop, COUNT(*)::int n FROM tiers t JOIN "Farmer" f ON f.id=t.id WHERE ${tf} GROUP BY 1 ORDER BY 2 DESC LIMIT 12`),
   ]);
 
-  const byStore = new Map<number | null, { value: Record<string, number>; lifecycle: Record<string, number>; total: number }>();
+  const byStore = new Map<number | null, { value: Record<string, number>; lifecycle: Record<string, number>; cross: Record<string, Record<string, number>>; total: number }>();
   const valueTotals: Record<string, number> = {}, lifecycleTotals: Record<string, number> = {};
   const treeMap = new Map<string, number>();
   let farmers = 0, spendTotal = 0;
   for (const r of cross) {
     const cnt = num(r.n);
-    const st = byStore.get(r.storeId) ?? { value: {}, lifecycle: {}, total: 0 };
+    const st = byStore.get(r.storeId) ?? { value: {}, lifecycle: {}, cross: {}, total: 0 };
     st.value[r.vseg] = (st.value[r.vseg] ?? 0) + cnt;
     st.lifecycle[r.lseg] = (st.lifecycle[r.lseg] ?? 0) + cnt;
+    (st.cross[r.vseg] ??= {})[r.lseg] = (st.cross[r.vseg]?.[r.lseg] ?? 0) + cnt;
     st.total += cnt; byStore.set(r.storeId, st);
     valueTotals[r.vseg] = (valueTotals[r.vseg] ?? 0) + cnt;
     lifecycleTotals[r.lseg] = (lifecycleTotals[r.lseg] ?? 0) + cnt;
@@ -273,15 +283,17 @@ export async function getWorkbench(f: WbFilters): Promise<WbData> {
   }
   const rows: MergedRow[] = [...byStore.entries()].map(([storeId, s]) => ({
     storeId, storeName: storeId == null ? "Unassigned" : nameById.get(storeId) ?? `Store #${storeId}`,
-    value: s.value, lifecycle: s.lifecycle, total: s.total,
+    value: s.value, lifecycle: s.lifecycle, cross: s.cross, total: s.total,
   })).sort((a, b) => b.total - a.total).slice(0, 100);
   const tree = VALUE_SEGMENTS.flatMap((v) => LIFECYCLE_SEGMENTS.map((l) => ({ value: v, lifecycle: l, count: treeMap.get(`${v}|${l}`) ?? 0 })));
+  const grandCross: Record<string, Record<string, number>> = {};
+  for (const v of VALUE_SEGMENTS) for (const l of LIFECYCLE_SEGMENTS) (grandCross[v] ??= {})[l] = treeMap.get(`${v}|${l}`) ?? 0;
   const order = ["HNI ₹12K+", "₹10–12K", "₹5–10K", "₹2.5–5K", "< ₹2.5K", "No spend"];
 
   return {
     kpis: { farmers, spend: spendTotal, visits: 0 },
     valueCols: [...VALUE_SEGMENTS], lifecycleCols: [...LIFECYCLE_SEGMENTS],
-    matrix: { rows, valueTotals, lifecycleTotals, grandTotal: farmers },
+    matrix: { rows, valueTotals, lifecycleTotals, grandCross, grandTotal: farmers },
     tree,
     valueDist: VALUE_SEGMENTS.map((s) => ({ label: segMeta(s).label, value: valueTotals[s] ?? 0, color: segMeta(s).color })),
     lifecycleDist: LIFECYCLE_SEGMENTS.map((s) => ({ label: segMeta(s).label, value: lifecycleTotals[s] ?? 0, color: segMeta(s).color })),
@@ -453,12 +465,15 @@ export async function getVisitAnalytics(f: WbFilters): Promise<VisitAnalytics> {
 /* ── Drill: farmers in a matrix cell (respects the active filters) ── */
 export interface WbCustomer { id: number; name: string; mobile: string | null; village: string | null; spend: string; segment: string; salesCrops: string[]; visitCrops: string[] }
 export type SegDim = "value" | "lifecycle";
-export async function getWorkbenchCustomers(f: WbFilters, storeId: number | null, dim: SegDim, seg: string, limit = 400): Promise<WbCustomer[]> {
+export async function getWorkbenchCustomers(f: WbFilters, storeId: number | null, dim: SegDim | "cross", seg: string, limit = 400): Promise<WbCustomer[]> {
   // Scope LAST (after applying the clicked cell's store) so an officer/RM can't drill into a foreign store.
   const scoped = await scopeFilters({ ...f, storeIds: storeId != null ? [storeId] : undefined });
   if (scoped === "none") return [];
   const cte = tiersCte(scoped), tf = tierFilter(scoped);
-  const dimCond = dim === "value" ? Prisma.sql`t.vseg = ${seg}` : Prisma.sql`t.lseg = ${seg}`;
+  // "cross" = a full 3×3 cell: seg encodes "VALUE|LIFECYCLE"; marginal cells filter one dimension.
+  const dimCond = dim === "value" ? Prisma.sql`t.vseg = ${seg}`
+    : dim === "lifecycle" ? Prisma.sql`t.lseg = ${seg}`
+    : Prisma.sql`t.vseg = ${seg.split("|")[0]} AND t.lseg = ${seg.split("|")[1]}`;
   const storeCond = storeId == null ? Prisma.sql`t."storeId" IS NULL` : Prisma.sql`t."storeId" = ${storeId}`;
   const rows = await prisma.$queryRaw<{ id: number; name: string; mobile: string | null; village: string | null; spend: bigint; vseg: string | null; lseg: string | null; salesc: string[]; visitc: string[] }[]>(Prisma.sql`
     WITH ${cte}

@@ -26,7 +26,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
   const [data, setData] = useState(initial);
   const [visitData, setVisitData] = useState<VisitAnalytics | null>(null);
   const [loading, start] = useTransition();
-  const [cell, setCell] = useState<{ storeId: number | null; storeName: string; dim: SegDim; seg: string } | null>(null);
+  const [cell, setCell] = useState<{ storeId: number | null; storeName: string; dim: SegDim | "cross"; seg: string } | null>(null);
   const [rows, setRows] = useState<WbCustomer[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -75,7 +75,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
   const setLens = (lens: Lens) => apply({ lens, crops: undefined, valueSegments: undefined, lifecycleSegments: undefined, spendTiers: undefined, problems: undefined });
   const clearAll = () => apply({ storeIds: undefined, zones: undefined, crops: undefined, pests: undefined, valueSegments: undefined, lifecycleSegments: undefined, spendTiers: undefined, problems: undefined, fyStarts: undefined });
 
-  const openCell = (storeId: number | null, storeName: string, dim: SegDim, seg: string) => {
+  const openCell = (storeId: number | null, storeName: string, dim: SegDim | "cross", seg: string) => {
     setCell({ storeId, storeName, dim, seg }); setRows(null);
     getWorkbenchCustomers(filters, storeId, dim, seg).then(setRows);
   };
@@ -189,7 +189,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
       <Modal open={!!cell} onClose={() => setCell(null)} className="max-w-[720px]">
         {cell && (
           <>
-            <ModalHeader eyebrow={`${cell.storeName} · ${segMeta(cell.seg).label}`} eyebrowColor={segMeta(cell.seg).color}
+            <ModalHeader eyebrow={`${cell.storeName} · ${segCellMeta(cell.dim, cell.seg).label}`} eyebrowColor={segCellMeta(cell.dim, cell.seg).color}
               title="Farmer list" subtitle="Matches the current filters" onClose={() => setCell(null)} />
             <div className="max-h-[64vh] overflow-y-auto px-5 py-4">
               {rows == null ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">Loading…</div>
@@ -291,54 +291,135 @@ function SegTree({ tree, by, onFlip }: { tree: TreeCell[]; by: "value" | "lifecy
   );
 }
 
-/** The merged Store × (Value | Lifecycle) table with two sub-totals. */
+/** Label + colour for a drilled cell — a marginal seg, or a "cross" cell whose seg is "VALUE|LIFECYCLE". */
+function segCellMeta(dim: SegDim | "cross", seg: string): { label: string; color: string } {
+  if (dim === "cross") { const [v, l] = seg.split("|"); return { label: `${segMeta(v).label} · ${segMeta(l).label}`, color: segMeta(v).color }; }
+  return { label: segMeta(seg).label, color: segMeta(seg).color };
+}
+const LIFE_SHORT: Record<string, string> = { NEW: "New", AT_RISK: "At Risk", LAPSED: "Lapsed" };
+
+/** The merged Store × (Value | Lifecycle) table. Summary = 6 marginal columns; Detailed = the full 3×3 (9 combos) per store. */
 const MERGED_GRID = "grid grid-cols-[1.4fr_repeat(3,0.85fr)_0.9fr_repeat(3,0.85fr)_0.9fr]";
 function MergedMatrixCard({ matrix, valueCols, lifecycleCols, onCell, right }: {
   matrix: MergedMatrix; valueCols: string[]; lifecycleCols: string[];
-  onCell: (storeId: number | null, storeName: string, dim: SegDim, seg: string) => void; right?: ReactNode;
+  onCell: (storeId: number | null, storeName: string, dim: SegDim | "cross", seg: string) => void; right?: ReactNode;
 }) {
+  const [view, setView] = useState<"summary" | "detailed">("summary");
   const cellBtn = (storeId: number | null, storeName: string, dim: SegDim, seg: string, c: number) =>
     c > 0 ? <button type="button" onClick={() => onCell(storeId, storeName, dim, seg)} className="font-semibold hover:underline" style={{ color: segMeta(seg).color }}>{n(c)}</button> : <span className="text-[#DDD]">·</span>;
   return (
     <div className={`${CARD} overflow-hidden`}>
-      <div className="flex items-center justify-between gap-2 border-b border-[#F0F0F0] px-4 py-2.5">
-        <div className="text-[13px] font-bold text-[#1A1C1A]">Store × {VALUE_TITLE} + {LIFECYCLE_TITLE}</div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#F0F0F0] px-4 py-2.5">
+        <div className="flex items-center gap-3">
+          <div className="text-[13px] font-bold text-[#1A1C1A]">Store × {VALUE_TITLE} + {LIFECYCLE_TITLE}</div>
+          <div className="inline-flex rounded-[8px] border border-[#E0E0E0] bg-[#F5F7F5] p-0.5">
+            {(["summary", "detailed"] as const).map((v) => (
+              <button key={v} type="button" onClick={() => setView(v)}
+                className="rounded-[6px] px-2.5 py-1 text-[11.5px] font-semibold transition-colors"
+                style={{ background: view === v ? "#fff" : "transparent", color: view === v ? "#2E7D32" : "#9E9E9E", boxShadow: view === v ? "0 1px 2px rgba(0,0,0,0.1)" : "none" }}>
+                {v === "summary" ? "Summary" : "Detailed · 3×3"}
+              </button>
+            ))}
+          </div>
+        </div>
         {right}
       </div>
-      <div className="overflow-x-auto">
-        <div className="min-w-[900px]">
-          <div className={`${MERGED_GRID} border-b border-[#F0F0F0] bg-[#FAFAFA] px-4 py-2.5 text-[10.5px] font-semibold uppercase tracking-[0.4px] text-[#9E9E9E]`}>
-            <div>Store</div>
-            {valueCols.map((s) => <div key={s} className="text-right" style={{ color: segMeta(s).color }}>{segMeta(s).label}</div>)}
-            <div className="text-right text-[#1A1C1A]">Segment Total</div>
-            {lifecycleCols.map((s) => <div key={s} className="text-right" style={{ color: segMeta(s).color }}>{segMeta(s).label}</div>)}
-            <div className="text-right text-[#1A1C1A]">Any Spend Total</div>
-          </div>
-          {matrix.rows.length === 0 ? (
-            <div className="px-4 py-10 text-center text-[13px] text-[#9E9E9E]">No farmers match these filters.</div>
-          ) : (
-            <>
-              <div className={`${MERGED_GRID} border-b border-[#EEE] bg-[#F5FBF5] px-4 py-2.5 text-[12px] font-bold text-[#1A1C1A]`}>
-                <div>All stores</div>
-                {valueCols.map((s) => <div key={s} className="text-right">{n(matrix.valueTotals[s] ?? 0)}</div>)}
-                <div className="text-right">{n(matrix.grandTotal)}</div>
-                {lifecycleCols.map((s) => <div key={s} className="text-right">{n(matrix.lifecycleTotals[s] ?? 0)}</div>)}
-                <div className="text-right">{n(matrix.grandTotal)}</div>
+      {matrix.rows.length === 0 ? (
+        <div className="px-4 py-10 text-center text-[13px] text-[#9E9E9E]">No farmers match these filters.</div>
+      ) : view === "detailed" ? (
+        <DetailedMatrix matrix={matrix} valueCols={valueCols} lifecycleCols={lifecycleCols} onCell={onCell} />
+      ) : (
+        <div className="overflow-x-auto">
+          <div className="min-w-[900px]">
+            <div className={`${MERGED_GRID} border-b border-[#F0F0F0] bg-[#FAFAFA] px-4 py-2.5 text-[10.5px] font-semibold uppercase tracking-[0.4px] text-[#9E9E9E]`}>
+              <div>Store</div>
+              {valueCols.map((s) => <div key={s} className="text-right" style={{ color: segMeta(s).color }}>{segMeta(s).label}</div>)}
+              <div className="text-right text-[#1A1C1A]">Segment Total</div>
+              {lifecycleCols.map((s) => <div key={s} className="text-right" style={{ color: segMeta(s).color }}>{segMeta(s).label}</div>)}
+              <div className="text-right text-[#1A1C1A]">Any Spend Total</div>
+            </div>
+            <div className={`${MERGED_GRID} border-b border-[#EEE] bg-[#F5FBF5] px-4 py-2.5 text-[12px] font-bold text-[#1A1C1A]`}>
+              <div>All stores</div>
+              {valueCols.map((s) => <div key={s} className="text-right">{n(matrix.valueTotals[s] ?? 0)}</div>)}
+              <div className="text-right">{n(matrix.grandTotal)}</div>
+              {lifecycleCols.map((s) => <div key={s} className="text-right">{n(matrix.lifecycleTotals[s] ?? 0)}</div>)}
+              <div className="text-right">{n(matrix.grandTotal)}</div>
+            </div>
+            {matrix.rows.map((r) => (
+              <div key={String(r.storeId)} className={`${MERGED_GRID} items-center border-b border-[#F8F8F8] px-4 py-2 text-[12px]`}>
+                <div className="truncate font-semibold text-[#1A1C1A]" title={r.storeName}>{r.storeName}</div>
+                {valueCols.map((s) => <div key={s} className="text-right">{cellBtn(r.storeId, r.storeName, "value", s, r.value[s] ?? 0)}</div>)}
+                <div className="text-right font-bold text-[#1A1C1A]">{n(r.total)}</div>
+                {lifecycleCols.map((s) => <div key={s} className="text-right">{cellBtn(r.storeId, r.storeName, "lifecycle", s, r.lifecycle[s] ?? 0)}</div>)}
+                <div className="text-right font-bold text-[#1A1C1A]">{n(r.total)}</div>
               </div>
-              {matrix.rows.map((r) => (
-                <div key={String(r.storeId)} className={`${MERGED_GRID} items-center border-b border-[#F8F8F8] px-4 py-2 text-[12px]`}>
-                  <div className="truncate font-semibold text-[#1A1C1A]" title={r.storeName}>{r.storeName}</div>
-                  {valueCols.map((s) => <div key={s} className="text-right">{cellBtn(r.storeId, r.storeName, "value", s, r.value[s] ?? 0)}</div>)}
-                  <div className="text-right font-bold text-[#1A1C1A]">{n(r.total)}</div>
-                  {lifecycleCols.map((s) => <div key={s} className="text-right">{cellBtn(r.storeId, r.storeName, "lifecycle", s, r.lifecycle[s] ?? 0)}</div>)}
-                  <div className="text-right font-bold text-[#1A1C1A]">{n(r.total)}</div>
-                </div>
-              ))}
-            </>
-          )}
+            ))}
+          </div>
         </div>
+      )}
+      <div className="px-4 py-2 text-[11px] text-[#9E9E9E]">
+        {view === "detailed"
+          ? "Every store split into all 9 Value × Lifecycle pockets. Shading = size within each value group; empty cells show a dot. Click a count to drill in."
+          : "Both totals equal the store's farmer count. Switch to Detailed · 3×3 for the full 9-way split. Value/lifecycle computed on the selected FY."}
       </div>
-      <div className="px-4 py-2 text-[11px] text-[#9E9E9E]">Both totals equal the store's farmer count. Click any count to drill into that farmer list. Value/lifecycle are computed on the selected FY's sales.</div>
+    </div>
+  );
+}
+
+/** The full 3×3: grouped columns (Value → Lifecycle), heat-shaded within each value group, zeros as dots. */
+function DetailedMatrix({ matrix, valueCols, lifecycleCols, onCell }: {
+  matrix: MergedMatrix; valueCols: string[]; lifecycleCols: string[];
+  onCell: (storeId: number | null, storeName: string, dim: "cross", seg: string) => void;
+}) {
+  // Heat is scaled per value group (so a group's own big/small pockets stand out, not just Regular vs HNI).
+  const groupMax: Record<string, number> = {};
+  for (const v of valueCols) groupMax[v] = Math.max(1, ...matrix.rows.flatMap((r) => lifecycleCols.map((l) => r.cross?.[v]?.[l] ?? 0)));
+  const heatBg = (v: string, val: number) => (val > 0 ? `color-mix(in srgb, ${segMeta(v).color} ${Math.round(12 + 42 * (val / groupMax[v]))}%, transparent)` : "transparent");
+  const th = "px-2.5 py-1.5 text-right text-[10.5px] font-semibold uppercase tracking-[0.3px]";
+  const td = "px-2.5 py-2 text-right text-[12px] tabular-nums";
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[820px] border-collapse">
+        <thead>
+          <tr className="border-b border-[#F0F0F0] bg-[#FAFAFA]">
+            <th rowSpan={2} className="sticky left-0 z-10 bg-[#FAFAFA] px-4 py-1.5 text-left text-[10.5px] font-semibold uppercase tracking-[0.3px] text-[#9E9E9E]">Store</th>
+            {valueCols.map((v, i) => (
+              <th key={v} colSpan={lifecycleCols.length} className={`px-2.5 py-1.5 text-center text-[11px] font-bold ${i > 0 ? "border-l border-[#EEE]" : ""}`} style={{ color: segMeta(v).color }}>{segMeta(v).label}</th>
+            ))}
+            <th rowSpan={2} className="border-l border-[#EEE] px-3 py-1.5 text-right text-[10.5px] font-bold uppercase tracking-[0.3px] text-[#1A1C1A]">Total</th>
+          </tr>
+          <tr className="border-b border-[#F0F0F0] bg-[#FAFAFA] text-[#9E9E9E]">
+            {valueCols.flatMap((v, gi) => lifecycleCols.map((l, li) => (
+              <th key={v + l} className={`${th} ${gi > 0 && li === 0 ? "border-l border-[#EEE]" : ""}`}>{LIFE_SHORT[l] ?? segMeta(l).label}</th>
+            )))}
+          </tr>
+        </thead>
+        <tbody>
+          <tr className="border-b border-[#EEE] bg-[#F5FBF5] font-bold text-[#1A1C1A]">
+            <td className="sticky left-0 z-10 bg-[#F5FBF5] px-4 py-2 text-left text-[12px]">All stores</td>
+            {valueCols.flatMap((v, gi) => lifecycleCols.map((l, li) => (
+              <td key={v + l} className={`${td} ${gi > 0 && li === 0 ? "border-l border-[#EEE]" : ""}`}>{n(matrix.grandCross?.[v]?.[l] ?? 0) || <span className="text-[#CFCFCF]">·</span>}</td>
+            )))}
+            <td className="border-l border-[#EEE] px-3 py-2 text-right text-[12px]">{n(matrix.grandTotal)}</td>
+          </tr>
+          {matrix.rows.map((r) => (
+            <tr key={String(r.storeId)} className="border-b border-[#F8F8F8]">
+              <td className="sticky left-0 z-10 max-w-[160px] truncate bg-white px-4 py-2 text-left text-[12px] font-semibold text-[#1A1C1A]" title={r.storeName}>{r.storeName}</td>
+              {valueCols.flatMap((v, gi) => lifecycleCols.map((l, li) => {
+                const val = r.cross?.[v]?.[l] ?? 0;
+                return (
+                  <td key={v + l} className={`${td} ${gi > 0 && li === 0 ? "border-l border-[#EEE]" : ""}`} style={{ background: heatBg(v, val) }}>
+                    {val > 0
+                      ? <button type="button" onClick={() => onCell(r.storeId, r.storeName, "cross", `${v}|${l}`)} className="font-semibold text-[#1A1C1A] hover:underline">{n(val)}</button>
+                      : <span className="text-[#D5D5D5]">·</span>}
+                  </td>
+                );
+              }))}
+              <td className="border-l border-[#EEE] px-3 py-2 text-right text-[12px] font-bold text-[#1A1C1A]">{n(r.total)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
