@@ -7,9 +7,10 @@ import { VALUE_SEGMENTS, LIFECYCLE_SEGMENTS, VALUE_TITLE, LIFECYCLE_TITLE, segMe
 import { cropLabel } from "@/lib/crops";
 import { tagLabel } from "@/lib/crop-pest";
 import {
-  getWorkbench, getWorkbenchCustomers, saveWorkbenchSegment, getCropTrend, getVisitAnalytics, exportWorkbookXlsx,
+  getWorkbench, getWorkbenchCustomers, saveWorkbenchSegment, getCropTrend, getVisitAnalytics, exportWorkbookXlsx, getSalesRawData,
   type Lens, type WbFilters, type WbData, type WbFacets, type WbBar, type WbCustomer, type CropTrendPoint,
   type VisitAnalytics, type VisitMonth, type VisitAdoption, type VisitStoreRow, type MergedMatrix, type TreeCell, type SegDim,
+  type RawKpis, type RawLine,
 } from "@/app/actions/analytics-segments";
 import { downloadB64 } from "@/lib/download";
 
@@ -177,7 +178,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
         </div>
         <BarCard title="Sales-crop breakdown (farmers)" bars={data.cropBreakdown.map((b) => ({ ...b, label: cropLabel(b.label) }))} fmt={n} accent="#F9A825" />
 
-        <MergedMatrixCard matrix={data.matrix} valueCols={data.valueCols} lifecycleCols={data.lifecycleCols} onCell={openCell} by={treeBy} onFlip={flipTree}
+        <MergedMatrixCard matrix={data.matrix} valueCols={data.valueCols} lifecycleCols={data.lifecycleCols} onCell={openCell} by={treeBy} onFlip={flipTree} filters={filters}
           right={<button type="button" onClick={exportXlsx} disabled={exporting}
             className="rounded-[8px] border border-[#2E7D32] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9] disabled:opacity-40">
             {exporting ? "Exporting…" : "⬇ Export to Excel"}</button>} />
@@ -301,25 +302,26 @@ const SEG_SHORT: Record<string, string> = { NEW: "New", AT_RISK: "At Risk", LAPS
 
 /** The merged Store × (Value | Lifecycle) table. Summary = 6 marginal columns; Detailed = the full 3×3 (9 combos) per store. */
 const MERGED_GRID = "grid grid-cols-[1.4fr_repeat(3,0.85fr)_0.9fr_repeat(3,0.85fr)_0.9fr]";
-function MergedMatrixCard({ matrix, valueCols, lifecycleCols, onCell, by, onFlip, right }: {
+function MergedMatrixCard({ matrix, valueCols, lifecycleCols, onCell, by, onFlip, filters, right }: {
   matrix: MergedMatrix; valueCols: string[]; lifecycleCols: string[];
   onCell: (storeId: number | null, storeName: string, dim: SegDim | "cross", seg: string) => void;
-  by: "value" | "lifecycle"; onFlip: () => void; right?: ReactNode;
+  by: "value" | "lifecycle"; onFlip: () => void; filters: WbFilters; right?: ReactNode;
 }) {
-  const [view, setView] = useState<"summary" | "detailed">("detailed");
+  const [view, setView] = useState<"summary" | "detailed" | "raw">("detailed");
   const cellBtn = (storeId: number | null, storeName: string, dim: SegDim, seg: string, c: number) =>
     c > 0 ? <button type="button" onClick={() => onCell(storeId, storeName, dim, seg)} className="font-semibold hover:underline" style={{ color: segMeta(seg).color }}>{n(c)}</button> : <span className="text-[#DDD]">·</span>;
+  const TABS = { detailed: "Detailed · 3×3", summary: "Summary", raw: "Sales raw data" } as const;
   return (
     <div className={`${CARD} overflow-hidden`}>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#F0F0F0] px-4 py-2.5">
         <div className="flex flex-wrap items-center gap-3">
-          <div className="text-[13px] font-bold text-[#1A1C1A]">Store × {VALUE_TITLE} + {LIFECYCLE_TITLE}</div>
+          <div className="text-[13px] font-bold text-[#1A1C1A]">{view === "raw" ? "Sales — raw line items" : `Store × ${VALUE_TITLE} + ${LIFECYCLE_TITLE}`}</div>
           <div className="inline-flex rounded-[8px] border border-[#E0E0E0] bg-[#F5F7F5] p-0.5">
-            {(["detailed", "summary"] as const).map((v) => (
+            {(["detailed", "summary", "raw"] as const).map((v) => (
               <button key={v} type="button" onClick={() => setView(v)}
                 className="rounded-[6px] px-2.5 py-1 text-[11.5px] font-semibold transition-colors"
                 style={{ background: view === v ? "#fff" : "transparent", color: view === v ? "#2E7D32" : "#9E9E9E", boxShadow: view === v ? "0 1px 2px rgba(0,0,0,0.1)" : "none" }}>
-                {v === "summary" ? "Summary" : "Detailed · 3×3"}
+                {TABS[v]}
               </button>
             ))}
           </div>
@@ -329,7 +331,9 @@ function MergedMatrixCard({ matrix, valueCols, lifecycleCols, onCell, by, onFlip
         </div>
         {right}
       </div>
-      {matrix.rows.length === 0 ? (
+      {view === "raw" ? (
+        <SalesRawData filters={filters} />
+      ) : matrix.rows.length === 0 ? (
         <div className="px-4 py-10 text-center text-[13px] text-[#9E9E9E]">No farmers match these filters.</div>
       ) : view === "detailed" ? (
         <DetailedMatrix matrix={matrix} valueCols={valueCols} lifecycleCols={lifecycleCols} onCell={onCell} by={by} />
@@ -362,11 +366,13 @@ function MergedMatrixCard({ matrix, valueCols, lifecycleCols, onCell, by, onFlip
           </div>
         </div>
       )}
-      <div className="px-4 py-2 text-[11px] text-[#9E9E9E]">
-        {view === "detailed"
-          ? `Every store split into all 9 pockets — grouped by ${by === "value" ? `${VALUE_TITLE} → ${LIFECYCLE_TITLE}` : `${LIFECYCLE_TITLE} → ${VALUE_TITLE}`}. ⇄ Flip swaps the grouping (synced with the KPI tree above). Shading = size within each group; click a count to drill in.`
-          : "Both totals equal the store's farmer count. Switch to Detailed · 3×3 for the full 9-way split. Value/lifecycle computed on the selected FY."}
-      </div>
+      {view !== "raw" && (
+        <div className="px-4 py-2 text-[11px] text-[#9E9E9E]">
+          {view === "detailed"
+            ? `Every store split into all 9 pockets — grouped by ${by === "value" ? `${VALUE_TITLE} → ${LIFECYCLE_TITLE}` : `${LIFECYCLE_TITLE} → ${VALUE_TITLE}`}. ⇄ Flip swaps the grouping (synced with the KPI tree above). Shading = size within each group; click a count to drill in.`
+            : "Both totals equal the store's farmer count. Switch to Detailed · 3×3 for the full 9-way split. Value/lifecycle computed on the selected FY."}
+        </div>
+      )}
     </div>
   );
 }
@@ -430,6 +436,78 @@ function DetailedMatrix({ matrix, valueCols, lifecycleCols, onCell, by }: {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/** Sales raw-data tab: filter-driven KPI cards + the actual sale line items (no aggregation). */
+function SalesRawData({ filters }: { filters: WbFilters }) {
+  const [data, setData] = useState<{ kpis: RawKpis; rows: RawLine[]; capped: boolean } | null>(null);
+  const [loading, start] = useTransition();
+  const key = JSON.stringify(filters); // refetch whenever any filter changes
+  useEffect(() => {
+    setData(null);
+    start(async () => setData(await getSalesRawData(filters)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  const k = data?.kpis;
+  const KPIS: [string, string][] = [
+    ["Sale lines", k ? n(k.lines) : "…"],
+    ["Base revenue", k ? money(k.base) : "…"],
+    ["Farmers", k ? n(k.farmers) : "…"],
+    ["Distinct items", k ? n(k.items) : "…"],
+    ["Avg / line", k && k.lines ? money(Math.round(k.base / k.lines)) : "…"],
+  ];
+  const TH = "whitespace-nowrap px-3 py-2 text-[10px] font-bold uppercase tracking-[0.3px] text-[#9E9E9E]";
+  const TD = "whitespace-nowrap px-3 py-1.5 text-[#424242]";
+  return (
+    <div className="p-4">
+      <div className="mb-3 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
+        {KPIS.map(([label, val]) => (
+          <div key={label} className="rounded-[10px] border border-[#EEE] bg-[#FAFAFA] px-3 py-2.5">
+            <div className="text-[10px] font-bold uppercase tracking-[0.3px] text-[#9E9E9E]">{label}</div>
+            <div className="mt-0.5 text-[17px] font-bold text-[#1A1C1A]">{val}</div>
+          </div>
+        ))}
+      </div>
+      {loading || data == null ? (
+        <div className="py-10 text-center text-[13px] text-[#9E9E9E]">Loading sale lines…</div>
+      ) : data.rows.length === 0 ? (
+        <div className="py-10 text-center text-[13px] text-[#9E9E9E]">No sale lines match these filters.</div>
+      ) : (
+        <div className="overflow-x-auto rounded-[10px] border border-[#F0F0F0]">
+          <table className="w-full min-w-[1040px] text-left text-[11.5px]">
+            <thead className="bg-[#FAFAFA]">
+              <tr className="border-b border-[#EEE]">
+                <th className={TH}>Date</th><th className={TH}>FY</th><th className={TH}>Farmer</th><th className={TH}>Phone</th>
+                <th className={TH}>Store</th><th className={TH}>Item</th><th className={TH}>Category</th><th className={TH}>Crop</th>
+                <th className={`${TH} text-right`}>Qty</th><th className={TH}>UOM</th><th className={`${TH} text-right`}>Base (₹)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.rows.map((r, i) => (
+                <tr key={i} className="border-b border-[#F6F6F6]">
+                  <td className={`${TD} text-[#616161]`}>{r.date ?? "—"}</td>
+                  <td className={`${TD} text-[#9E9E9E]`}>{r.fy ?? "—"}</td>
+                  <td className="px-3 py-1.5"><div className="font-semibold text-[#1A1C1A]">{r.farmer}</div>{r.village && <div className="text-[10px] text-[#9E9E9E]">{r.village}</div>}</td>
+                  <td className={`${TD} text-[#616161]`}>{r.phone ?? "—"}</td>
+                  <td className={`${TD} text-[#616161]`}>{r.store ?? "—"}</td>
+                  <td className="px-3 py-1.5 text-[#424242]">{r.item}</td>
+                  <td className={`${TD} text-[#9E9E9E]`}>{r.category ?? "—"}</td>
+                  <td className="px-3 py-1.5">{r.crop ? <span className="rounded-full bg-[#E8F5E9] px-1.5 py-0.5 text-[10px] font-semibold text-[#2E7D32]">{r.crop}</span> : <span className="text-[#DDD]">—</span>}</td>
+                  <td className={`${TD} text-right tabular-nums`}>{n(r.qty)}</td>
+                  <td className={`${TD} text-[#9E9E9E]`}>{r.uom ?? "—"}</td>
+                  <td className={`${TD} text-right font-semibold tabular-nums text-[#1A1C1A]`}>{money(r.base)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="mt-2 text-[11px] text-[#9E9E9E]">
+        Actual sale line items · base (pre-tax) price · KPIs and rows follow the active filters.
+        {data?.capped && " Showing first 1,000 lines by date — the KPIs cover the full set; use Export for everything."}
+      </div>
     </div>
   );
 }

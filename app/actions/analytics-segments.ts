@@ -509,6 +509,52 @@ export async function getWorkbenchCustomers(f: WbFilters, storeId: number | null
   }));
 }
 
+/* ── Raw sale-line view: the actual line items behind the filters (no aggregation) + live KPIs ── */
+export interface RawKpis { lines: number; base: number; farmers: number; items: number; qty: number }
+export interface RawLine {
+  date: string | null; fy: string | null; farmer: string; phone: string | null; village: string | null;
+  store: string | null; orderNo: string | null; item: string; category: string | null; crop: string | null;
+  qty: number; uom: string | null; base: number;
+}
+const RAW_LINE_CAP = 1000; // rows shown in the table; the KPIs above always cover the full filtered set
+export async function getSalesRawData(f: WbFilters): Promise<{ kpis: RawKpis; rows: RawLine[]; capped: boolean }> {
+  const empty = { kpis: { lines: 0, base: 0, farmers: 0, items: 0, qty: 0 }, rows: [], capped: false };
+  const scoped = await scopeFilters(f);
+  if (scoped === "none") return empty;
+  const cte = tiersCte(scoped), tf = tierFilter(scoped);
+  const cropLine = scoped.crops?.length ? Prisma.sql`AND sl."cropTag" = ANY(${scoped.crops}::text[])` : Prisma.empty;
+  const fyLine = scoped.fyStarts?.length ? Prisma.sql`AND ${fyBounds(scoped.fyStarts).window("sl")}` : Prisma.empty;
+  const [kpiRows, rows] = await Promise.all([
+    prisma.$queryRaw<{ lines: number; base: bigint; farmers: number; items: number; qty: number }[]>(Prisma.sql`
+      WITH ${cte}
+      SELECT COUNT(*)::int lines, COALESCE(SUM(sl."basic"),0)::bigint base, COUNT(DISTINCT sl."farmerId")::int farmers,
+             COUNT(DISTINCT sl."itemRaw")::int items, COALESCE(SUM(sl.qty),0)::float qty
+      FROM tiers t JOIN "SaleLine" sl ON sl."farmerId" = t.id AND sl.source = 'REAL'
+      WHERE ${tf} ${cropLine} ${fyLine}`),
+    prisma.$queryRaw<{ soldAt: Date | null; fy: string | null; farmer: string; phone: string | null; village: string | null; store: string | null; orderNo: string | null; item: string; category: string | null; crop: string | null; qty: number; uom: string | null; base: number }[]>(Prisma.sql`
+      WITH ${cte}
+      SELECT sl."soldAt" "soldAt", sl."financialYear" fy, f.name farmer, f.mobile phone, f.village,
+             st."name" store, sl."orderNo" "orderNo", sl."itemRaw" item, sl."mainCategory" category, sl."cropTag" crop,
+             sl.qty, sl.uom, sl."basic" base
+      FROM tiers t JOIN "Farmer" f ON f.id = t.id
+        JOIN "SaleLine" sl ON sl."farmerId" = t.id AND sl.source = 'REAL'
+        LEFT JOIN "Store" st ON st.id = sl."storeId"
+      WHERE ${tf} ${cropLine} ${fyLine}
+      ORDER BY sl."soldAt" DESC NULLS LAST, sl."basic" DESC LIMIT ${RAW_LINE_CAP + 1}`),
+  ]);
+  const k = kpiRows[0];
+  const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
+  return {
+    kpis: { lines: num(k?.lines), base: Number(k?.base ?? 0), farmers: num(k?.farmers), items: num(k?.items), qty: num(k?.qty) },
+    rows: rows.slice(0, RAW_LINE_CAP).map((r) => ({
+      date: iso(r.soldAt), fy: r.fy, farmer: r.farmer, phone: r.phone, village: r.village,
+      store: r.store ? shortStore(r.store) : null, orderNo: r.orderNo, item: r.item, category: r.category,
+      crop: r.crop ? cropLabel(r.crop) : null, qty: num(r.qty), uom: r.uom, base: Number(r.base ?? 0),
+    })),
+    capped: rows.length > RAW_LINE_CAP,
+  };
+}
+
 /* ── Export the workbench Segment × Store table + the full filtered farmer list to Excel ── */
 const FARMER_EXPORT_CAP = 200000; // covers the whole REAL farmer base; the note row fires only past it
 const LINE_EXPORT_CAP = 100000; // sale-line list cap (biggest lines by value kept when it fires)
