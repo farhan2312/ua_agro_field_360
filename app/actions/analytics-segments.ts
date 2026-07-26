@@ -555,9 +555,31 @@ export async function exportWorkbookXlsx(f: WbFilters): Promise<{ ok: boolean; f
     farmerSheet.push([`Note: list capped at ${FARMER_EXPORT_CAP.toLocaleString("en-IN")} farmers (by FY spend). Narrow the filters for a complete set.`]);
   }
 
+  // ── "Filters applied" sheet — the effective (scope-enforced) filters behind this export. ──
+  const fyLbl = (y: number) => `FY ${y}–${String((y + 1) % 100).padStart(2, "0")}`;
+  const listOf = <T,>(arr: T[] | undefined, fn: (x: T) => string, none: string) => (arr?.length ? arr.map(fn).join(", ") : none);
+  const now = new Date().toISOString().slice(0, 19).replace("T", " ");
+  const filtersSheet: (string | number)[][] = [
+    ["Filter", "Applied"],
+    ["Lens", scoped.lens === "visit" ? "Visits" : "Sales"],
+    ["Financial year(s)", listOf(scoped.fyStarts, fyLbl, "All FYs (all-time spend)")],
+    ["Stores", listOf(scoped.storeIds, (id) => nameById.get(id) ?? `#${id}`, "All stores")],
+    ["Regions / zones", listOf(scoped.zones, (z) => String(z), "All regions")],
+    ["Crops", listOf(scoped.crops, cropLabel, "All crops")],
+    ["Pests / diseases", listOf(scoped.pests, tagLabel, "All")],
+    ["Value segment", listOf(scoped.valueSegments, (s) => segMeta(s).label, "All")],
+    ["Lifecycle", listOf(scoped.lifecycleSegments, (s) => segMeta(s).label, "All")],
+    ["Spend tier (FY)", listOf(scoped.spendTiers, (i) => SPEND_TIERS[i]?.label ?? String(i), "Any spend")],
+    ["", ""],
+    ["Stores in matrix", rows.length],
+    ["Farmers in list", farmerRows.length],
+    ["Exported (UTC)", now],
+  ];
+
   const b64 = buildWorkbookB64([
     { name: "Value x Lifecycle x Store", rows: mergedSheet, merges: mergedSheetMerges },
     { name: "Farmers", rows: farmerSheet },
+    { name: "Filters applied", rows: filtersSheet },
   ]);
   const today = new Date().toISOString().slice(0, 10);
   return { ok: true, filename: `analytics-segments-${today}.xlsx`, b64 };
