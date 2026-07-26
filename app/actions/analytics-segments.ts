@@ -82,27 +82,21 @@ function fyBounds(fyStarts: number[]): { window: (alias: string) => Prisma.Sql; 
 }
 /**
  * The scoped→agg→tiers CTE: per-farmer FY spend + last purchase → live value/lifecycle tier.
- * When a crop filter is active, SPEND is crop-scoped — summed from the crop-tagged SaleLines
- * (SaleLine.totalPrice) rather than the whole bill (Sale.amountNum) — so "potato ₹" means potato
- * revenue only, and the value tier (HNI/Potential/Regular) follows. Lifecycle recency (last_at)
- * always uses ALL sales, per product decision (a farmer active on other crops isn't "lapsed").
+ * SPEND is always summed from SaleLine.basic — the pre-tax BASE price from the source file (not the
+ * GST-inclusive line total). When a crop filter is active it is crop-scoped (only that crop's tagged
+ * lines) so "potato ₹" means potato base revenue only, and the value tier (HNI/Potential/Regular)
+ * follows. Lifecycle recency (last_at) always uses ALL sales (a farmer active on other crops isn't "lapsed").
  */
 function tiersCte(f: WbFilters): Prisma.Sql {
   const { window, asOfSql } = fyBounds(f.fyStarts ?? []);
   const where = Prisma.sql`WHERE ${Prisma.join(staticConds(f, "f"), " AND ")}`;
   const newM = Prisma.raw(String(LIFECYCLE_NEW_MAX_MONTHS)), lapsedM = Prisma.raw(String(LIFECYCLE_LAPSED_MIN_MONTHS));
-  const cropScoped = !!f.crops?.length;
-  // Spend source: crop filter → SUM crop-tagged SaleLine totals; else → SUM whole-bill totals.
-  const spendAgg = cropScoped
-    ? Prisma.sql`spend_agg AS (
-        SELECT sl."farmerId" id, COALESCE(SUM(sl."totalPrice") FILTER (WHERE ${window("sl")}), 0)::bigint spend
+  // Base-price spend from the sale lines; the crop filter (when set) restricts to that crop's lines.
+  const cropCond = f.crops?.length ? Prisma.sql`AND sl."cropTag" = ANY(${f.crops}::text[])` : Prisma.empty;
+  const spendAgg = Prisma.sql`spend_agg AS (
+        SELECT sl."farmerId" id, COALESCE(SUM(sl."basic") FILTER (WHERE ${window("sl")}), 0)::bigint spend
         FROM "SaleLine" sl JOIN scoped sc ON sc.id = sl."farmerId"
-        WHERE sl.source = 'REAL' AND sl."soldAt" IS NOT NULL AND sl."cropTag" = ANY(${f.crops}::text[])
-        GROUP BY 1)`
-    : Prisma.sql`spend_agg AS (
-        SELECT s."farmerId" id, COALESCE(SUM(s."amountNum") FILTER (WHERE ${window("s")}), 0)::bigint spend
-        FROM "Sale" s JOIN scoped sc ON sc.id = s."farmerId"
-        WHERE s.source = 'REAL' AND s."soldAt" IS NOT NULL
+        WHERE sl.source = 'REAL' AND sl."soldAt" IS NOT NULL ${cropCond}
         GROUP BY 1)`;
   return Prisma.sql`
     scoped AS (SELECT f.id, f."storeId", f."zone" FROM "Farmer" f ${where}),
@@ -535,16 +529,16 @@ export async function exportWorkbookXlsx(f: WbFilters): Promise<{ ok: boolean; f
       WITH ${cte} SELECT f.name, f.mobile, f.village, f."zone" AS zone, t."storeId" AS "storeId", t.vseg, t.lseg, t.spend,
         COALESCE(at.tot, 0)::bigint alltime, at.first_at "firstAt", at.last_at "lastAt", f."salesCropTags" salesc, f."visitCropTags" visitc, f."pestTags" pests
       FROM tiers t JOIN "Farmer" f ON f.id=t.id
-        LEFT JOIN (SELECT "farmerId" fid, SUM("amountNum")::bigint tot, MIN("soldAt") first_at, MAX("soldAt") last_at FROM "Sale" WHERE source='REAL' GROUP BY 1) at ON at.fid = f.id
+        LEFT JOIN (SELECT sl2."farmerId" fid, SUM(sl2."basic")::bigint tot, MIN(sl2."soldAt") first_at, MAX(sl2."soldAt") last_at FROM "SaleLine" sl2 WHERE sl2.source='REAL' GROUP BY 1) at ON at.fid = f.id
       WHERE ${tf} ORDER BY t.spend DESC NULLS LAST LIMIT ${FARMER_EXPORT_CAP}`),
-    prisma.$queryRaw<{ orderNo: string; soldAt: Date | null; name: string; mobile: string | null; zone: string | null; storeId: number | null; itemRaw: string; cropTag: string | null; mainCategory: string | null; qty: number; uom: string | null; totalPrice: number; vseg: string | null; lseg: string | null }[]>(Prisma.sql`
+    prisma.$queryRaw<{ orderNo: string; soldAt: Date | null; fy: string | null; name: string; mobile: string | null; zone: string | null; storeId: number | null; itemRaw: string; cropTag: string | null; mainCategory: string | null; qty: number; uom: string | null; basic: number; vseg: string | null; lseg: string | null }[]>(Prisma.sql`
       WITH ${cte}
-      SELECT sl."orderNo" "orderNo", sl."soldAt" "soldAt", f.name, f.mobile, f."zone" AS zone, sl."storeId" AS "storeId",
-        sl."itemRaw" "itemRaw", sl."cropTag" "cropTag", sl."mainCategory" "mainCategory", sl.qty, sl.uom, sl."totalPrice" "totalPrice", t.vseg, t.lseg
+      SELECT sl."orderNo" "orderNo", sl."soldAt" "soldAt", sl."financialYear" fy, f.name, f.mobile, f."zone" AS zone, sl."storeId" AS "storeId",
+        sl."itemRaw" "itemRaw", sl."cropTag" "cropTag", sl."mainCategory" "mainCategory", sl.qty, sl.uom, sl."basic" basic, t.vseg, t.lseg
       FROM tiers t JOIN "Farmer" f ON f.id=t.id
         JOIN "SaleLine" sl ON sl."farmerId" = t.id AND sl.source='REAL'
       WHERE ${tf} ${cropLine} ${fyLine}
-      ORDER BY sl."totalPrice" DESC NULLS LAST LIMIT ${LINE_EXPORT_CAP}`),
+      ORDER BY sl."basic" DESC NULLS LAST LIMIT ${LINE_EXPORT_CAP}`),
   ]);
 
   const nameById = new Map(stores.map((s) => [s.id, shortStore(s.name)]));
@@ -581,7 +575,7 @@ export async function exportWorkbookXlsx(f: WbFilters): Promise<{ ok: boolean; f
   ];
   const isoDate = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
   const farmerSheet: (string | number)[][] = [
-    ["Farmer", "Mobile", "Store", "Region", "Village", "Value segment", "Lifecycle", "FY Spend (₹)", "Total sales (₹, all-time)", "First purchase", "Last purchase", "Sales crops", "Visit crops", "Target pests / diseases"],
+    ["Farmer", "Mobile", "Store", "Region", "Village", "Value segment", "Lifecycle", "FY base spend (₹)", "Total base value (₹, all-time)", "First purchase", "Last purchase", "Sales crops", "Visit crops", "Target pests / diseases"],
     ...farmerRows.map((r) => [
       r.name, r.mobile ?? "", r.storeId != null ? nameById.get(r.storeId) ?? "" : "", r.zone ?? "", r.village ?? "",
       r.vseg ? segMeta(r.vseg).label : "—", r.lseg ? segMeta(r.lseg).label : "—", Number(r.spend ?? 0), Number(r.alltime ?? 0),
@@ -595,10 +589,10 @@ export async function exportWorkbookXlsx(f: WbFilters): Promise<{ ok: boolean; f
 
   // ── By sales-line sheet: one row per matching SaleLine (crop + FY filters applied at line level). ──
   const lineSheet: (string | number)[][] = [
-    ["Order No", "Date", "Farmer", "Mobile", "Store", "Region", "Item", "Crop", "Category", "Qty", "UOM", "Line total (₹)", "Value segment", "Lifecycle"],
+    ["Order No", "Date", "Financial year", "Farmer", "Mobile", "Store", "Region", "Item", "Crop", "Category", "Qty", "UOM", "Base value (₹)", "Value segment", "Lifecycle"],
     ...lineRows.map((r) => [
-      r.orderNo ?? "", isoDate(r.soldAt), r.name, r.mobile ?? "", r.storeId != null ? nameById.get(r.storeId) ?? "" : "", r.zone ?? "",
-      r.itemRaw, r.cropTag ? cropLabel(r.cropTag) : "—", r.mainCategory ?? "", Number(r.qty ?? 0), r.uom ?? "", Number(r.totalPrice ?? 0),
+      r.orderNo ?? "", isoDate(r.soldAt), r.fy ?? "", r.name, r.mobile ?? "", r.storeId != null ? nameById.get(r.storeId) ?? "" : "", r.zone ?? "",
+      r.itemRaw, r.cropTag ? cropLabel(r.cropTag) : "—", r.mainCategory ?? "", Number(r.qty ?? 0), r.uom ?? "", Number(r.basic ?? 0),
       r.vseg ? segMeta(r.vseg).label : "—", r.lseg ? segMeta(r.lseg).label : "—",
     ]),
   ];
@@ -663,7 +657,7 @@ export async function getCropTrend(crops: string[]): Promise<CropTrendPoint[]> {
   const cropCond = safe.length ? Prisma.sql`sl."cropTag" = ANY(${safe}) AND ` : Prisma.empty;
   const rows = await prisma.$queryRaw<{ ym: string; rev: number; lines: number }[]>(Prisma.sql`
     SELECT to_char(date_trunc('month', sl."soldAt"), 'YYYY-MM') ym,
-           COALESCE(SUM(sl."totalPrice"), 0)::float rev, COUNT(*)::int lines
+           COALESCE(SUM(sl."basic"), 0)::float rev, COUNT(*)::int lines
     FROM "SaleLine" sl
     WHERE ${cropCond}sl."soldAt" IS NOT NULL ${scopeSql}
     GROUP BY 1 ORDER BY 1`);
