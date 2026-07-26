@@ -83,22 +83,25 @@ function fyBounds(fyStarts: number[]): { window: (alias: string) => Prisma.Sql; 
 /**
  * The scoped→agg→tiers CTE: per-farmer FY spend + last purchase → live value/lifecycle tier.
  * SPEND is always summed from SaleLine.basic — the pre-tax BASE price from the source file (not the
- * GST-inclusive line total). When a crop filter is active it is crop-scoped (only that crop's tagged
- * lines) so "potato ₹" means potato base revenue only, and the value tier (HNI/Potential/Regular)
- * follows. Lifecycle recency (last_at) always uses ALL sales (a farmer active on other crops isn't "lapsed").
+ * GST-inclusive line total). When a crop filter is active, spend is the whole BASKET of the farmer's
+ * crop bills — every line on any bill that contains a crop-tagged line — so "potato ₹" is the full
+ * value of potato-context bills (matches the client's Pareto), and the value tier follows. Lifecycle
+ * recency (last_at) always uses ALL sales (a farmer active on other crops isn't "lapsed").
  */
 function tiersCte(f: WbFilters): Prisma.Sql {
   const { window, asOfSql } = fyBounds(f.fyStarts ?? []);
   const where = Prisma.sql`WHERE ${Prisma.join(staticConds(f, "f"), " AND ")}`;
   const newM = Prisma.raw(String(LIFECYCLE_NEW_MAX_MONTHS)), lapsedM = Prisma.raw(String(LIFECYCLE_LAPSED_MIN_MONTHS));
-  // Base-price spend from the sale lines; the crop filter (when set) restricts to that crop's lines.
-  const cropCond = f.crops?.length ? Prisma.sql`AND sl."cropTag" = ANY(${f.crops}::text[])` : Prisma.empty;
+  // Crop filter → basket: all lines on bills containing a crop-tagged line. No crop → every line.
+  const cropOrders = f.crops?.length ? Prisma.sql`crop_orders AS (SELECT DISTINCT "orderNo" FROM "SaleLine" WHERE "cropTag" = ANY(${f.crops}::text[]) AND "orderNo" IS NOT NULL),` : Prisma.empty;
+  const basketCond = f.crops?.length ? Prisma.sql`AND sl."orderNo" IN (SELECT "orderNo" FROM crop_orders)` : Prisma.empty;
   const spendAgg = Prisma.sql`spend_agg AS (
         SELECT sl."farmerId" id, COALESCE(SUM(sl."basic") FILTER (WHERE ${window("sl")}), 0)::bigint spend
         FROM "SaleLine" sl JOIN scoped sc ON sc.id = sl."farmerId"
-        WHERE sl.source = 'REAL' AND sl."soldAt" IS NOT NULL ${cropCond}
+        WHERE sl.source = 'REAL' AND sl."soldAt" IS NOT NULL ${basketCond}
         GROUP BY 1)`;
   return Prisma.sql`
+    ${cropOrders}
     scoped AS (SELECT f.id, f."storeId", f."zone" FROM "Farmer" f ${where}),
     ${spendAgg},
     recency_agg AS (
@@ -522,7 +525,7 @@ export async function getSalesRawData(f: WbFilters): Promise<{ kpis: RawKpis; ro
   const scoped = await scopeFilters(f);
   if (scoped === "none") return empty;
   const cte = tiersCte(scoped), tf = tierFilter(scoped);
-  const cropLine = scoped.crops?.length ? Prisma.sql`AND sl."cropTag" = ANY(${scoped.crops}::text[])` : Prisma.empty;
+  const cropLine = scoped.crops?.length ? Prisma.sql`AND sl."orderNo" IN (SELECT "orderNo" FROM "SaleLine" WHERE "cropTag" = ANY(${scoped.crops}::text[]))` : Prisma.empty;
   const fyLine = scoped.fyStarts?.length ? Prisma.sql`AND ${fyBounds(scoped.fyStarts).window("sl")}` : Prisma.empty;
   const [kpiRows, rows] = await Promise.all([
     prisma.$queryRaw<{ lines: number; base: bigint; farmers: number; items: number; qty: number }[]>(Prisma.sql`
@@ -564,7 +567,7 @@ export async function exportWorkbookXlsx(f: WbFilters): Promise<{ ok: boolean; f
   if (scoped === "none") return { ok: false, error: "No store or region is assigned to your account." };
   const cte = tiersCte(scoped), tf = tierFilter(scoped);
   // Line-level filters for the by-line sheet: same crop + FY as the numbers (so ₹ reconciles).
-  const cropLine = scoped.crops?.length ? Prisma.sql`AND sl."cropTag" = ANY(${scoped.crops}::text[])` : Prisma.empty;
+  const cropLine = scoped.crops?.length ? Prisma.sql`AND sl."orderNo" IN (SELECT "orderNo" FROM "SaleLine" WHERE "cropTag" = ANY(${scoped.crops}::text[]))` : Prisma.empty;
   const fyLine = scoped.fyStarts?.length ? Prisma.sql`AND ${fyBounds(scoped.fyStarts).window("sl")}` : Prisma.empty;
 
   const [cross, stores, farmerRows, lineRows] = await Promise.all([
