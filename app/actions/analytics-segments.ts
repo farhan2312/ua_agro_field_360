@@ -501,10 +501,12 @@ export async function exportWorkbookXlsx(f: WbFilters): Promise<{ ok: boolean; f
     prisma.$queryRaw<{ storeId: number | null; vseg: string; lseg: string; n: number }[]>(Prisma.sql`
       WITH ${cte} SELECT "storeId", vseg, lseg, COUNT(*)::int n FROM tiers WHERE ${tf} GROUP BY 1,2,3`),
     prisma.store.findMany({ select: { id: true, name: true } }),
-    prisma.$queryRaw<{ name: string; mobile: string | null; village: string | null; zone: string | null; storeId: number | null; vseg: string | null; lseg: string | null; spend: bigint; salesc: string[]; visitc: string[]; pests: string[] }[]>(Prisma.sql`
+    prisma.$queryRaw<{ name: string; mobile: string | null; village: string | null; zone: string | null; storeId: number | null; vseg: string | null; lseg: string | null; spend: bigint; alltime: bigint; firstAt: Date | null; lastAt: Date | null; salesc: string[]; visitc: string[]; pests: string[] }[]>(Prisma.sql`
       WITH ${cte} SELECT f.name, f.mobile, f.village, f."zone" AS zone, t."storeId" AS "storeId", t.vseg, t.lseg, t.spend,
-        f."salesCropTags" salesc, f."visitCropTags" visitc, f."pestTags" pests
-      FROM tiers t JOIN "Farmer" f ON f.id=t.id WHERE ${tf} ORDER BY t.spend DESC NULLS LAST LIMIT ${FARMER_EXPORT_CAP}`),
+        COALESCE(at.tot, 0)::bigint alltime, at.first_at "firstAt", at.last_at "lastAt", f."salesCropTags" salesc, f."visitCropTags" visitc, f."pestTags" pests
+      FROM tiers t JOIN "Farmer" f ON f.id=t.id
+        LEFT JOIN (SELECT "farmerId" fid, SUM("amountNum")::bigint tot, MIN("soldAt") first_at, MAX("soldAt") last_at FROM "Sale" WHERE source='REAL' GROUP BY 1) at ON at.fid = f.id
+      WHERE ${tf} ORDER BY t.spend DESC NULLS LAST LIMIT ${FARMER_EXPORT_CAP}`),
   ]);
 
   const nameById = new Map(stores.map((s) => [s.id, shortStore(s.name)]));
@@ -539,11 +541,13 @@ export async function exportWorkbookXlsx(f: WbFilters): Promise<{ ok: boolean; f
     ...V.map((_, gi) => ({ s: { r: 0, c: 1 + gi * nSub }, e: { r: 0, c: 1 + gi * nSub + nSub - 1 } })), // each value group
     { s: { r: 0, c: totalCol }, e: { r: 1, c: totalCol } }, // "Total" spans both header rows
   ];
+  const isoDate = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
   const farmerSheet: (string | number)[][] = [
-    ["Farmer", "Mobile", "Store", "Region", "Village", "Value segment", "Lifecycle", "FY Spend (₹)", "Sales crops", "Visit crops", "Target pests / diseases"],
+    ["Farmer", "Mobile", "Store", "Region", "Village", "Value segment", "Lifecycle", "FY Spend (₹)", "Total sales (₹, all-time)", "First purchase", "Last purchase", "Sales crops", "Visit crops", "Target pests / diseases"],
     ...farmerRows.map((r) => [
       r.name, r.mobile ?? "", r.storeId != null ? nameById.get(r.storeId) ?? "" : "", r.zone ?? "", r.village ?? "",
-      r.vseg ? segMeta(r.vseg).label : "—", r.lseg ? segMeta(r.lseg).label : "—", Number(r.spend ?? 0),
+      r.vseg ? segMeta(r.vseg).label : "—", r.lseg ? segMeta(r.lseg).label : "—", Number(r.spend ?? 0), Number(r.alltime ?? 0),
+      isoDate(r.firstAt), isoDate(r.lastAt),
       (r.salesc ?? []).map(cropLabel).join(", "), (r.visitc ?? []).map(cropLabel).join(", "), (r.pests ?? []).map(tagLabel).join(", "),
     ]),
   ];
