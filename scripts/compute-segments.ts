@@ -121,14 +121,16 @@ async function main() {
     valueCounts[valueSeg] = (valueCounts[valueSeg] ?? 0) + 1;
     lifecycleCounts[lifecycleSeg] = (lifecycleCounts[lifecycleSeg] ?? 0) + 1;
 
-    const crops: string[] = [];
-    if (a.maizeItem) { crops.push("maize"); maizeCount++; }
-    if (a.potatoItem) { crops.push("potato"); potatoCount++; }
+    // NB: crop tags are owned solely by the sheet's AE column (backfill-saleline-crop +
+    // retag-farmer-crops-ae-only). This script must NOT touch Farmer.cropTags — client
+    // instruction: crop tagging comes only from the sheet, no name-based inference.
+    if (a.maizeItem) maizeCount++;
+    if (a.potatoItem) potatoCount++;
 
     const gap = valueSeg === "POTENTIAL_HNI" ? HNI_MIN - a.spend12 : null;
 
     rows.push(
-      `(${id}::int, ${txtArr(tags)}, ${q(seg)}::text, ${q(valueSeg)}::text, ${q(lifecycleSeg)}::text, ${ts(a.latest)}, ${txtArr(crops)}, ${int(a.spend12)}, ${int(gap)}, ` +
+      `(${id}::int, ${txtArr(tags)}, ${q(seg)}::text, ${q(valueSeg)}::text, ${q(lifecycleSeg)}::text, ${ts(a.latest)}, ${int(a.spend12)}, ${int(gap)}, ` +
       `${txt(a.maizeItem)}, ${ts(a.maizeAt)}, ${txt(a.potatoItem)}, ${ts(a.potatoAt)})`,
     );
   }
@@ -140,11 +142,11 @@ async function main() {
     const slice = rows.slice(i, i + CHUNK);
     const sql =
       `UPDATE "Farmer" AS f SET ` +
-      `"segmentTags"=v.tags, "campaignSegment"=v.seg, "valueSegment"=v.vseg, "lifecycleSegment"=v.lseg, "lastPurchaseAt"=v.lastat, "cropTags"=v.crops, ` +
+      `"segmentTags"=v.tags, "campaignSegment"=v.seg, "valueSegment"=v.vseg, "lifecycleSegment"=v.lseg, "lastPurchaseAt"=v.lastat, ` +
       `"p12mSpend"=v.spend, "hniGap"=v.gap, ` +
       `"lastMaizeItem"=v.mitem, "lastMaizeAt"=v.mat, "lastPotatoItem"=v.pitem, "lastPotatoAt"=v.pat, ` +
       `"segmentComputedAt"=now() ` +
-      `FROM (VALUES ${slice.join(",")}) AS v(id, tags, seg, vseg, lseg, lastat, crops, spend, gap, mitem, mat, pitem, pat) ` +
+      `FROM (VALUES ${slice.join(",")}) AS v(id, tags, seg, vseg, lseg, lastat, spend, gap, mitem, mat, pitem, pat) ` +
       `WHERE f.id = v.id;`;
     updated += await prisma.$executeRawUnsafe(sql);
     process.stdout.write(`\r  farmers updated: ${updated}/${rows.length}`);
