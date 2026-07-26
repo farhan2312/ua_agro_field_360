@@ -30,7 +30,8 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
   const [rows, setRows] = useState<WbCustomer[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [treeBy, setTreeBy] = useState<"value" | "lifecycle">("value"); // KPI cross-tab primary dimension
+  const [treeBy, setTreeBy] = useState<"value" | "lifecycle">("value"); // shared primary dimension for the KPI tree AND the detailed matrix
+  const flipTree = () => setTreeBy((b) => (b === "value" ? "lifecycle" : "value"));
   const years = filters.fyStarts ?? []; // selected FY start years — drives the whole sales analysis
   const toggleStr = (key: "zones" | "crops" | "pests" | "problems" | "valueSegments" | "lifecycleSegments", v: string) => {
     const cur = (filters[key] as string[] | undefined) ?? [];
@@ -150,7 +151,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
             <div className="mt-1 text-[28px] font-bold text-[#1A1C1A]">{n(k.farmers)}</div>
             <div className="mt-0.5 text-[11.5px] text-[#9E9E9E]">FY spend · {money(k.spend)}</div>
           </div>
-          <SegTree tree={data.tree} by={treeBy} onFlip={() => setTreeBy((b) => (b === "value" ? "lifecycle" : "value"))} />
+          <SegTree tree={data.tree} by={treeBy} onFlip={flipTree} />
         </div>
       ) : (
         <div className="mb-3 grid grid-cols-2 gap-[12px] sm:grid-cols-3 lg:grid-cols-6">
@@ -176,7 +177,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
         </div>
         <BarCard title="Sales-crop breakdown (farmers)" bars={data.cropBreakdown.map((b) => ({ ...b, label: cropLabel(b.label) }))} fmt={n} accent="#F9A825" />
 
-        <MergedMatrixCard matrix={data.matrix} valueCols={data.valueCols} lifecycleCols={data.lifecycleCols} onCell={openCell}
+        <MergedMatrixCard matrix={data.matrix} valueCols={data.valueCols} lifecycleCols={data.lifecycleCols} onCell={openCell} by={treeBy} onFlip={flipTree}
           right={<button type="button" onClick={exportXlsx} disabled={exporting}
             className="rounded-[8px] border border-[#2E7D32] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9] disabled:opacity-40">
             {exporting ? "Exporting…" : "⬇ Export to Excel"}</button>} />
@@ -296,24 +297,25 @@ function segCellMeta(dim: SegDim | "cross", seg: string): { label: string; color
   if (dim === "cross") { const [v, l] = seg.split("|"); return { label: `${segMeta(v).label} · ${segMeta(l).label}`, color: segMeta(v).color }; }
   return { label: segMeta(seg).label, color: segMeta(seg).color };
 }
-const LIFE_SHORT: Record<string, string> = { NEW: "New", AT_RISK: "At Risk", LAPSED: "Lapsed" };
+const SEG_SHORT: Record<string, string> = { NEW: "New", AT_RISK: "At Risk", LAPSED: "Lapsed", HNI: "HNI", POTENTIAL_HNI: "Potential", REGULAR: "Regular" };
 
 /** The merged Store × (Value | Lifecycle) table. Summary = 6 marginal columns; Detailed = the full 3×3 (9 combos) per store. */
 const MERGED_GRID = "grid grid-cols-[1.4fr_repeat(3,0.85fr)_0.9fr_repeat(3,0.85fr)_0.9fr]";
-function MergedMatrixCard({ matrix, valueCols, lifecycleCols, onCell, right }: {
+function MergedMatrixCard({ matrix, valueCols, lifecycleCols, onCell, by, onFlip, right }: {
   matrix: MergedMatrix; valueCols: string[]; lifecycleCols: string[];
-  onCell: (storeId: number | null, storeName: string, dim: SegDim | "cross", seg: string) => void; right?: ReactNode;
+  onCell: (storeId: number | null, storeName: string, dim: SegDim | "cross", seg: string) => void;
+  by: "value" | "lifecycle"; onFlip: () => void; right?: ReactNode;
 }) {
-  const [view, setView] = useState<"summary" | "detailed">("summary");
+  const [view, setView] = useState<"summary" | "detailed">("detailed");
   const cellBtn = (storeId: number | null, storeName: string, dim: SegDim, seg: string, c: number) =>
     c > 0 ? <button type="button" onClick={() => onCell(storeId, storeName, dim, seg)} className="font-semibold hover:underline" style={{ color: segMeta(seg).color }}>{n(c)}</button> : <span className="text-[#DDD]">·</span>;
   return (
     <div className={`${CARD} overflow-hidden`}>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#F0F0F0] px-4 py-2.5">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <div className="text-[13px] font-bold text-[#1A1C1A]">Store × {VALUE_TITLE} + {LIFECYCLE_TITLE}</div>
           <div className="inline-flex rounded-[8px] border border-[#E0E0E0] bg-[#F5F7F5] p-0.5">
-            {(["summary", "detailed"] as const).map((v) => (
+            {(["detailed", "summary"] as const).map((v) => (
               <button key={v} type="button" onClick={() => setView(v)}
                 className="rounded-[6px] px-2.5 py-1 text-[11.5px] font-semibold transition-colors"
                 style={{ background: view === v ? "#fff" : "transparent", color: view === v ? "#2E7D32" : "#9E9E9E", boxShadow: view === v ? "0 1px 2px rgba(0,0,0,0.1)" : "none" }}>
@@ -321,13 +323,16 @@ function MergedMatrixCard({ matrix, valueCols, lifecycleCols, onCell, right }: {
               </button>
             ))}
           </div>
+          {view === "detailed" && (
+            <button type="button" onClick={onFlip} className="rounded-full border border-[#E0E0E0] px-3 py-1 text-[11px] font-semibold text-[#616161] hover:bg-[#F5F5F5]">⇄ Flip</button>
+          )}
         </div>
         {right}
       </div>
       {matrix.rows.length === 0 ? (
         <div className="px-4 py-10 text-center text-[13px] text-[#9E9E9E]">No farmers match these filters.</div>
       ) : view === "detailed" ? (
-        <DetailedMatrix matrix={matrix} valueCols={valueCols} lifecycleCols={lifecycleCols} onCell={onCell} />
+        <DetailedMatrix matrix={matrix} valueCols={valueCols} lifecycleCols={lifecycleCols} onCell={onCell} by={by} />
       ) : (
         <div className="overflow-x-auto">
           <div className="min-w-[900px]">
@@ -359,22 +364,27 @@ function MergedMatrixCard({ matrix, valueCols, lifecycleCols, onCell, right }: {
       )}
       <div className="px-4 py-2 text-[11px] text-[#9E9E9E]">
         {view === "detailed"
-          ? "Every store split into all 9 Value × Lifecycle pockets. Shading = size within each value group; empty cells show a dot. Click a count to drill in."
+          ? `Every store split into all 9 pockets — grouped by ${by === "value" ? `${VALUE_TITLE} → ${LIFECYCLE_TITLE}` : `${LIFECYCLE_TITLE} → ${VALUE_TITLE}`}. ⇄ Flip swaps the grouping (synced with the KPI tree above). Shading = size within each group; click a count to drill in.`
           : "Both totals equal the store's farmer count. Switch to Detailed · 3×3 for the full 9-way split. Value/lifecycle computed on the selected FY."}
       </div>
     </div>
   );
 }
 
-/** The full 3×3: grouped columns (Value → Lifecycle), heat-shaded within each value group, zeros as dots. */
-function DetailedMatrix({ matrix, valueCols, lifecycleCols, onCell }: {
+/** The full 3×3, grouped + heat-shaded. `by` picks which dimension forms the column groups (flip). */
+function DetailedMatrix({ matrix, valueCols, lifecycleCols, onCell, by }: {
   matrix: MergedMatrix; valueCols: string[]; lifecycleCols: string[];
-  onCell: (storeId: number | null, storeName: string, dim: "cross", seg: string) => void;
+  onCell: (storeId: number | null, storeName: string, dim: "cross", seg: string) => void; by: "value" | "lifecycle";
 }) {
-  // Heat is scaled per value group (so a group's own big/small pockets stand out, not just Regular vs HNI).
+  const groups = by === "value" ? valueCols : lifecycleCols; // outer column groups
+  const subs = by === "value" ? lifecycleCols : valueCols;   // inner sub-columns within each group
+  // cross is always stored value→lifecycle; read it in whichever order the current grouping needs.
+  const at = (cross: Record<string, Record<string, number>> | undefined, g: string, s: string) => (by === "value" ? cross?.[g]?.[s] : cross?.[s]?.[g]) ?? 0;
+  const crossSeg = (g: string, s: string) => (by === "value" ? `${g}|${s}` : `${s}|${g}`); // drill key is always VALUE|LIFECYCLE
+  // Heat scaled per column group so each group's own big/small pockets stand out.
   const groupMax: Record<string, number> = {};
-  for (const v of valueCols) groupMax[v] = Math.max(1, ...matrix.rows.flatMap((r) => lifecycleCols.map((l) => r.cross?.[v]?.[l] ?? 0)));
-  const heatBg = (v: string, val: number) => (val > 0 ? `color-mix(in srgb, ${segMeta(v).color} ${Math.round(12 + 42 * (val / groupMax[v]))}%, transparent)` : "transparent");
+  for (const g of groups) groupMax[g] = Math.max(1, ...matrix.rows.flatMap((r) => subs.map((s) => at(r.cross, g, s))));
+  const heatBg = (g: string, val: number) => (val > 0 ? `color-mix(in srgb, ${segMeta(g).color} ${Math.round(12 + 42 * (val / groupMax[g]))}%, transparent)` : "transparent");
   const th = "px-2.5 py-1.5 text-right text-[10.5px] font-semibold uppercase tracking-[0.3px]";
   const td = "px-2.5 py-2 text-right text-[12px] tabular-nums";
   return (
@@ -383,34 +393,34 @@ function DetailedMatrix({ matrix, valueCols, lifecycleCols, onCell }: {
         <thead>
           <tr className="border-b border-[#F0F0F0] bg-[#FAFAFA]">
             <th rowSpan={2} className="sticky left-0 z-10 bg-[#FAFAFA] px-4 py-1.5 text-left text-[10.5px] font-semibold uppercase tracking-[0.3px] text-[#9E9E9E]">Store</th>
-            {valueCols.map((v, i) => (
-              <th key={v} colSpan={lifecycleCols.length} className={`px-2.5 py-1.5 text-center text-[11px] font-bold ${i > 0 ? "border-l border-[#EEE]" : ""}`} style={{ color: segMeta(v).color }}>{segMeta(v).label}</th>
+            {groups.map((g, i) => (
+              <th key={g} colSpan={subs.length} className={`px-2.5 py-1.5 text-center text-[11px] font-bold ${i > 0 ? "border-l border-[#EEE]" : ""}`} style={{ color: segMeta(g).color }}>{segMeta(g).label}</th>
             ))}
             <th rowSpan={2} className="border-l border-[#EEE] px-3 py-1.5 text-right text-[10.5px] font-bold uppercase tracking-[0.3px] text-[#1A1C1A]">Total</th>
           </tr>
           <tr className="border-b border-[#F0F0F0] bg-[#FAFAFA] text-[#9E9E9E]">
-            {valueCols.flatMap((v, gi) => lifecycleCols.map((l, li) => (
-              <th key={v + l} className={`${th} ${gi > 0 && li === 0 ? "border-l border-[#EEE]" : ""}`}>{LIFE_SHORT[l] ?? segMeta(l).label}</th>
+            {groups.flatMap((g, gi) => subs.map((s, si) => (
+              <th key={g + s} className={`${th} ${gi > 0 && si === 0 ? "border-l border-[#EEE]" : ""}`}>{SEG_SHORT[s] ?? segMeta(s).label}</th>
             )))}
           </tr>
         </thead>
         <tbody>
           <tr className="border-b border-[#EEE] bg-[#F5FBF5] font-bold text-[#1A1C1A]">
             <td className="sticky left-0 z-10 bg-[#F5FBF5] px-4 py-2 text-left text-[12px]">All stores</td>
-            {valueCols.flatMap((v, gi) => lifecycleCols.map((l, li) => (
-              <td key={v + l} className={`${td} ${gi > 0 && li === 0 ? "border-l border-[#EEE]" : ""}`}>{n(matrix.grandCross?.[v]?.[l] ?? 0) || <span className="text-[#CFCFCF]">·</span>}</td>
+            {groups.flatMap((g, gi) => subs.map((s, si) => (
+              <td key={g + s} className={`${td} ${gi > 0 && si === 0 ? "border-l border-[#EEE]" : ""}`}>{n(at(matrix.grandCross, g, s)) || <span className="text-[#CFCFCF]">·</span>}</td>
             )))}
             <td className="border-l border-[#EEE] px-3 py-2 text-right text-[12px]">{n(matrix.grandTotal)}</td>
           </tr>
           {matrix.rows.map((r) => (
             <tr key={String(r.storeId)} className="border-b border-[#F8F8F8]">
               <td className="sticky left-0 z-10 max-w-[160px] truncate bg-white px-4 py-2 text-left text-[12px] font-semibold text-[#1A1C1A]" title={r.storeName}>{r.storeName}</td>
-              {valueCols.flatMap((v, gi) => lifecycleCols.map((l, li) => {
-                const val = r.cross?.[v]?.[l] ?? 0;
+              {groups.flatMap((g, gi) => subs.map((s, si) => {
+                const val = at(r.cross, g, s);
                 return (
-                  <td key={v + l} className={`${td} ${gi > 0 && li === 0 ? "border-l border-[#EEE]" : ""}`} style={{ background: heatBg(v, val) }}>
+                  <td key={g + s} className={`${td} ${gi > 0 && si === 0 ? "border-l border-[#EEE]" : ""}`} style={{ background: heatBg(g, val) }}>
                     {val > 0
-                      ? <button type="button" onClick={() => onCell(r.storeId, r.storeName, "cross", `${v}|${l}`)} className="font-semibold text-[#1A1C1A] hover:underline">{n(val)}</button>
+                      ? <button type="button" onClick={() => onCell(r.storeId, r.storeName, "cross", crossSeg(g, s))} className="font-semibold text-[#1A1C1A] hover:underline">{n(val)}</button>
                       : <span className="text-[#D5D5D5]">·</span>}
                   </td>
                 );
