@@ -517,13 +517,17 @@ export async function getWorkbenchCustomers(f: WbFilters, storeId: number | null
 
 /* ── Export the workbench Segment × Store table + the full filtered farmer list to Excel ── */
 const FARMER_EXPORT_CAP = 200000; // covers the whole REAL farmer base; the note row fires only past it
+const LINE_EXPORT_CAP = 100000; // sale-line list cap (biggest lines by value kept when it fires)
 
 export async function exportWorkbookXlsx(f: WbFilters): Promise<{ ok: boolean; filename?: string; b64?: string; error?: string }> {
   const scoped = await scopeFilters(f);
   if (scoped === "none") return { ok: false, error: "No store or region is assigned to your account." };
   const cte = tiersCte(scoped), tf = tierFilter(scoped);
+  // Line-level filters for the by-line sheet: same crop + FY as the numbers (so ₹ reconciles).
+  const cropLine = scoped.crops?.length ? Prisma.sql`AND sl."cropTag" = ANY(${scoped.crops}::text[])` : Prisma.empty;
+  const fyLine = scoped.fyStarts?.length ? Prisma.sql`AND ${fyBounds(scoped.fyStarts).window("sl")}` : Prisma.empty;
 
-  const [cross, stores, farmerRows] = await Promise.all([
+  const [cross, stores, farmerRows, lineRows] = await Promise.all([
     prisma.$queryRaw<{ storeId: number | null; vseg: string; lseg: string; n: number }[]>(Prisma.sql`
       WITH ${cte} SELECT "storeId", vseg, lseg, COUNT(*)::int n FROM tiers WHERE ${tf} GROUP BY 1,2,3`),
     prisma.store.findMany({ select: { id: true, name: true } }),
@@ -533,6 +537,14 @@ export async function exportWorkbookXlsx(f: WbFilters): Promise<{ ok: boolean; f
       FROM tiers t JOIN "Farmer" f ON f.id=t.id
         LEFT JOIN (SELECT "farmerId" fid, SUM("amountNum")::bigint tot, MIN("soldAt") first_at, MAX("soldAt") last_at FROM "Sale" WHERE source='REAL' GROUP BY 1) at ON at.fid = f.id
       WHERE ${tf} ORDER BY t.spend DESC NULLS LAST LIMIT ${FARMER_EXPORT_CAP}`),
+    prisma.$queryRaw<{ orderNo: string; soldAt: Date | null; name: string; mobile: string | null; zone: string | null; storeId: number | null; itemRaw: string; cropTag: string | null; mainCategory: string | null; qty: number; uom: string | null; totalPrice: number; vseg: string | null; lseg: string | null }[]>(Prisma.sql`
+      WITH ${cte}
+      SELECT sl."orderNo" "orderNo", sl."soldAt" "soldAt", f.name, f.mobile, f."zone" AS zone, sl."storeId" AS "storeId",
+        sl."itemRaw" "itemRaw", sl."cropTag" "cropTag", sl."mainCategory" "mainCategory", sl.qty, sl.uom, sl."totalPrice" "totalPrice", t.vseg, t.lseg
+      FROM tiers t JOIN "Farmer" f ON f.id=t.id
+        JOIN "SaleLine" sl ON sl."farmerId" = t.id AND sl.source='REAL'
+      WHERE ${tf} ${cropLine} ${fyLine}
+      ORDER BY sl."totalPrice" DESC NULLS LAST LIMIT ${LINE_EXPORT_CAP}`),
   ]);
 
   const nameById = new Map(stores.map((s) => [s.id, shortStore(s.name)]));
@@ -581,6 +593,19 @@ export async function exportWorkbookXlsx(f: WbFilters): Promise<{ ok: boolean; f
     farmerSheet.push([`Note: list capped at ${FARMER_EXPORT_CAP.toLocaleString("en-IN")} farmers (by FY spend). Narrow the filters for a complete set.`]);
   }
 
+  // ── By sales-line sheet: one row per matching SaleLine (crop + FY filters applied at line level). ──
+  const lineSheet: (string | number)[][] = [
+    ["Order No", "Date", "Farmer", "Mobile", "Store", "Region", "Item", "Crop", "Category", "Qty", "UOM", "Line total (₹)", "Value segment", "Lifecycle"],
+    ...lineRows.map((r) => [
+      r.orderNo ?? "", isoDate(r.soldAt), r.name, r.mobile ?? "", r.storeId != null ? nameById.get(r.storeId) ?? "" : "", r.zone ?? "",
+      r.itemRaw, r.cropTag ? cropLabel(r.cropTag) : "—", r.mainCategory ?? "", Number(r.qty ?? 0), r.uom ?? "", Number(r.totalPrice ?? 0),
+      r.vseg ? segMeta(r.vseg).label : "—", r.lseg ? segMeta(r.lseg).label : "—",
+    ]),
+  ];
+  if (lineRows.length >= LINE_EXPORT_CAP) {
+    lineSheet.push([`Note: list capped at ${LINE_EXPORT_CAP.toLocaleString("en-IN")} lines (by line value). Narrow the filters for a complete set.`]);
+  }
+
   // ── "Filters applied" sheet — the effective (scope-enforced) filters behind this export. ──
   const fyLbl = (y: number) => `FY ${y}–${String((y + 1) % 100).padStart(2, "0")}`;
   const listOf = <T,>(arr: T[] | undefined, fn: (x: T) => string, none: string) => (arr?.length ? arr.map(fn).join(", ") : none);
@@ -599,12 +624,14 @@ export async function exportWorkbookXlsx(f: WbFilters): Promise<{ ok: boolean; f
     ["", ""],
     ["Stores in matrix", rows.length],
     ["Farmers in list", farmerRows.length],
+    ["Sales lines in file", lineRows.length],
     ["Exported (UTC)", now],
   ];
 
   const b64 = buildWorkbookB64([
     { name: "Value x Lifecycle x Store", rows: mergedSheet, merges: mergedSheetMerges },
     { name: "Farmers", rows: farmerSheet },
+    { name: "Sales lines", rows: lineSheet },
     { name: "Filters applied", rows: filtersSheet },
   ]);
   const today = new Date().toISOString().slice(0, 10);
