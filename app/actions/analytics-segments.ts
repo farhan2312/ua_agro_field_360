@@ -509,24 +509,35 @@ export async function exportWorkbookXlsx(f: WbFilters): Promise<{ ok: boolean; f
 
   const nameById = new Map(stores.map((s) => [s.id, shortStore(s.name)]));
   const V = [...VALUE_SEGMENTS], L = [...LIFECYCLE_SEGMENTS];
-  const byStore = new Map<number | null, { value: Record<string, number>; lifecycle: Record<string, number>; total: number }>();
-  const valueTotals: Record<string, number> = {}, lifecycleTotals: Record<string, number> = {};
+  // Full 3×3 per store (Value → Lifecycle), matching the on-screen Detailed view.
+  const byStore = new Map<number | null, { cross: Record<string, Record<string, number>>; total: number }>();
+  const grandCross: Record<string, Record<string, number>> = {};
   let grand = 0;
   for (const r of cross) {
     const cnt = num(r.n);
-    const st = byStore.get(r.storeId) ?? { value: {}, lifecycle: {}, total: 0 };
-    st.value[r.vseg] = (st.value[r.vseg] ?? 0) + cnt; st.lifecycle[r.lseg] = (st.lifecycle[r.lseg] ?? 0) + cnt; st.total += cnt;
+    const st = byStore.get(r.storeId) ?? { cross: {}, total: 0 };
+    (st.cross[r.vseg] ??= {})[r.lseg] = (st.cross[r.vseg]?.[r.lseg] ?? 0) + cnt; st.total += cnt;
     byStore.set(r.storeId, st);
-    valueTotals[r.vseg] = (valueTotals[r.vseg] ?? 0) + cnt; lifecycleTotals[r.lseg] = (lifecycleTotals[r.lseg] ?? 0) + cnt; grand += cnt;
+    (grandCross[r.vseg] ??= {})[r.lseg] = (grandCross[r.vseg]?.[r.lseg] ?? 0) + cnt; grand += cnt;
   }
   const rows = [...byStore.entries()].map(([storeId, s]) => ({
     storeName: storeId == null ? "Unassigned" : nameById.get(storeId) ?? `Store #${storeId}`, ...s,
   })).sort((a, b) => b.total - a.total).slice(0, 100);
 
+  // Two-row grouped header: each Value group spans its 3 Lifecycle sub-columns (merged), like the UI.
+  const nSub = L.length, totalCol = 1 + V.length * nSub;
+  const groupHeader: (string | number)[] = ["Store", ...V.flatMap((v) => [segMeta(v).label, ...Array(nSub - 1).fill("")]), "Total"];
+  const subHeader: (string | number)[] = ["", ...V.flatMap(() => L.map((l) => segMeta(l).label)), ""];
+  const flatCross = (c: Record<string, Record<string, number>>) => V.flatMap((v) => L.map((l) => c[v]?.[l] ?? 0));
   const mergedSheet: (string | number)[][] = [
-    ["Store", ...V.map((s) => segMeta(s).label), "Segment Total", ...L.map((s) => segMeta(s).label), "Any Spend Total"],
-    ["All stores", ...V.map((s) => valueTotals[s] ?? 0), grand, ...L.map((s) => lifecycleTotals[s] ?? 0), grand],
-    ...rows.map((r) => [r.storeName, ...V.map((s) => r.value[s] ?? 0), r.total, ...L.map((s) => r.lifecycle[s] ?? 0), r.total]),
+    groupHeader, subHeader,
+    ["All stores", ...flatCross(grandCross), grand],
+    ...rows.map((r) => [r.storeName, ...flatCross(r.cross), r.total]),
+  ];
+  const mergedSheetMerges = [
+    { s: { r: 0, c: 0 }, e: { r: 1, c: 0 } }, // "Store" spans both header rows
+    ...V.map((_, gi) => ({ s: { r: 0, c: 1 + gi * nSub }, e: { r: 0, c: 1 + gi * nSub + nSub - 1 } })), // each value group
+    { s: { r: 0, c: totalCol }, e: { r: 1, c: totalCol } }, // "Total" spans both header rows
   ];
   const farmerSheet: (string | number)[][] = [
     ["Farmer", "Mobile", "Store", "Region", "Village", "Value segment", "Lifecycle", "FY Spend (₹)", "Sales crops", "Visit crops", "Target pests / diseases"],
@@ -541,7 +552,7 @@ export async function exportWorkbookXlsx(f: WbFilters): Promise<{ ok: boolean; f
   }
 
   const b64 = buildWorkbookB64([
-    { name: "Value + Lifecycle x Store", rows: mergedSheet },
+    { name: "Value x Lifecycle x Store", rows: mergedSheet, merges: mergedSheetMerges },
     { name: "Farmers", rows: farmerSheet },
   ]);
   const today = new Date().toISOString().slice(0, 10);

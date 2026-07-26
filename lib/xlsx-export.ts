@@ -5,6 +5,8 @@ export interface SheetSpec {
   name: string;
   /** Array-of-arrays, including the header row. */
   rows: (string | number | null)[][];
+  /** Optional merged-cell ranges (0-indexed), e.g. grouped two-row headers. */
+  merges?: { s: { r: number; c: number }; e: { r: number; c: number } }[];
 }
 
 /**
@@ -15,6 +17,7 @@ export function buildWorkbookB64(sheets: SheetSpec[]): string {
   const wb = XLSX.utils.book_new();
   for (const s of sheets) {
     const ws = XLSX.utils.aoa_to_sheet(s.rows);
+    if (s.merges?.length) ws["!merges"] = s.merges;
     XLSX.utils.book_append_sheet(wb, ws, s.name.replace(/[\\/?*[\]:]/g, " ").slice(0, 31));
   }
   return XLSX.write(wb, { type: "base64", bookType: "xlsx" });
