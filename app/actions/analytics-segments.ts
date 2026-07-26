@@ -68,27 +68,53 @@ function farmerConds(f: WbFilters, alias = ""): Prisma.Sql[] {
 }
 
 /* ── FY-dynamic sales segmentation (value/lifecycle computed live from Sale within the selected FY) ── */
-/** FY window (spend filter) + as-of date (lifecycle cutoff) for the Sale alias `s`. */
-function fyBounds(fyStarts: number[]): { windowSql: Prisma.Sql; asOfSql: Prisma.Sql } {
-  if (!fyStarts.length) return { windowSql: Prisma.sql`TRUE`, asOfSql: Prisma.sql`now()` };
+/** FY window on any date alias + as-of date (lifecycle cutoff). `window(alias)` filters `<alias>."soldAt"`. */
+function fyBounds(fyStarts: number[]): { window: (alias: string) => Prisma.Sql; asOfSql: Prisma.Sql } {
+  if (!fyStarts.length) return { window: () => Prisma.sql`TRUE`, asOfSql: Prisma.sql`now()` };
   const maxY = Math.max(...fyStarts);
   const asOfSql = Prisma.sql`${`${maxY + 1}-04-01`}::timestamptz`;
-  const ors = fyStarts.map((y) => Prisma.sql`(s."soldAt" >= ${`${y}-04-01`}::timestamptz AND s."soldAt" < ${`${y + 1}-04-01`}::timestamptz)`);
-  return { windowSql: Prisma.sql`(${Prisma.join(ors, " OR ")})`, asOfSql };
+  const window = (alias: string) => {
+    const c = Prisma.raw(`${alias}."soldAt"`);
+    const ors = fyStarts.map((y) => Prisma.sql`(${c} >= ${`${y}-04-01`}::timestamptz AND ${c} < ${`${y + 1}-04-01`}::timestamptz)`);
+    return Prisma.sql`(${Prisma.join(ors, " OR ")})`;
+  };
+  return { window, asOfSql };
 }
-/** The scoped→agg→tiers CTE: per-farmer FY spend + last purchase → live value/lifecycle tier. */
+/**
+ * The scoped→agg→tiers CTE: per-farmer FY spend + last purchase → live value/lifecycle tier.
+ * When a crop filter is active, SPEND is crop-scoped — summed from the crop-tagged SaleLines
+ * (SaleLine.totalPrice) rather than the whole bill (Sale.amountNum) — so "potato ₹" means potato
+ * revenue only, and the value tier (HNI/Potential/Regular) follows. Lifecycle recency (last_at)
+ * always uses ALL sales, per product decision (a farmer active on other crops isn't "lapsed").
+ */
 function tiersCte(f: WbFilters): Prisma.Sql {
-  const { windowSql, asOfSql } = fyBounds(f.fyStarts ?? []);
+  const { window, asOfSql } = fyBounds(f.fyStarts ?? []);
   const where = Prisma.sql`WHERE ${Prisma.join(staticConds(f, "f"), " AND ")}`;
   const newM = Prisma.raw(String(LIFECYCLE_NEW_MAX_MONTHS)), lapsedM = Prisma.raw(String(LIFECYCLE_LAPSED_MIN_MONTHS));
+  const cropScoped = !!f.crops?.length;
+  // Spend source: crop filter → SUM crop-tagged SaleLine totals; else → SUM whole-bill totals.
+  const spendAgg = cropScoped
+    ? Prisma.sql`spend_agg AS (
+        SELECT sl."farmerId" id, COALESCE(SUM(sl."totalPrice") FILTER (WHERE ${window("sl")}), 0)::bigint spend
+        FROM "SaleLine" sl JOIN scoped sc ON sc.id = sl."farmerId"
+        WHERE sl.source = 'REAL' AND sl."soldAt" IS NOT NULL AND sl."cropTag" = ANY(${f.crops}::text[])
+        GROUP BY 1)`
+    : Prisma.sql`spend_agg AS (
+        SELECT s."farmerId" id, COALESCE(SUM(s."amountNum") FILTER (WHERE ${window("s")}), 0)::bigint spend
+        FROM "Sale" s JOIN scoped sc ON sc.id = s."farmerId"
+        WHERE s.source = 'REAL' AND s."soldAt" IS NOT NULL
+        GROUP BY 1)`;
   return Prisma.sql`
     scoped AS (SELECT f.id, f."storeId", f."zone" FROM "Farmer" f ${where}),
+    ${spendAgg},
+    recency_agg AS (
+      SELECT s."farmerId" id, MAX(s."soldAt") FILTER (WHERE s."soldAt" < ${asOfSql}) last_at
+      FROM "Sale" s JOIN scoped sc ON sc.id = s."farmerId"
+      WHERE s.source = 'REAL' AND s."soldAt" IS NOT NULL
+      GROUP BY 1),
     agg AS (
-      SELECT sc.id, sc."storeId", sc."zone",
-        COALESCE(SUM(s."amountNum") FILTER (WHERE ${windowSql}), 0)::bigint spend,
-        MAX(s."soldAt") FILTER (WHERE s."soldAt" < ${asOfSql}) last_at
-      FROM scoped sc LEFT JOIN "Sale" s ON s."farmerId" = sc.id AND s.source = 'REAL' AND s."soldAt" IS NOT NULL
-      GROUP BY 1, 2, 3),
+      SELECT sc.id, sc."storeId", sc."zone", COALESCE(sp.spend, 0)::bigint spend, rc.last_at
+      FROM scoped sc LEFT JOIN spend_agg sp ON sp.id = sc.id LEFT JOIN recency_agg rc ON rc.id = sc.id),
     tiers AS (
       SELECT id, "storeId", "zone", spend,
         CASE WHEN spend >= ${VALUE_HNI_MIN} THEN 'HNI' WHEN spend >= ${VALUE_POTENTIAL_MIN} THEN 'POTENTIAL_HNI' ELSE 'REGULAR' END vseg,
