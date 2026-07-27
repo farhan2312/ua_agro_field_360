@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { shortStoreName } from "@/lib/store-utils";
-import { SEGMENT_COLUMNS, segMeta } from "@/lib/campaign-segments";
+import { segMeta, VALUE_SEGMENTS, LIFECYCLE_SEGMENTS } from "@/lib/campaign-segments";
 import { inr } from "@/lib/format";
 import type { Prisma } from "@prisma/client";
 import {
@@ -346,9 +346,10 @@ export async function createCampaign(input: CreateCampaignInput): Promise<{ ok: 
     let total = 0;
     for (let i = 0; i < ids.length; i += 5000) {
       const slice = ids.slice(i, i + 5000);
-      const farmers = await prisma.farmer.findMany({ where: { id: { in: slice } }, select: { id: true, campaignSegment: true, cropTags: true, storeId: true, zone: true } });
+      const farmers = await prisma.farmer.findMany({ where: { id: { in: slice } }, select: { id: true, campaignSegment: true, valueSegment: true, lifecycleSegment: true, cropTags: true, storeId: true, zone: true } });
       const members = farmers.map((f) => ({
         campaignId: camp.id, farmerId: f.id, segment: f.campaignSegment ?? "OTHER",
+        valueSegment: f.valueSegment, lifecycleSegment: f.lifecycleSegment,
         crop: f.cropTags[0] ?? null, storeId: f.storeId ?? null, zone: f.zone ?? null,
         group: f.id % controlEvery === 0 ? "CONTROL" : "TEST",
       }));
@@ -460,19 +461,22 @@ export async function getCampaignMembers(campaignId: number, limit = 1000): Prom
 }
 
 /* ── Campaign audience analytics: composition breakdowns + Segment × Store matrix ── */
+export interface SegCol { key: string; label: string; color: string; bg: string }
 export interface CampaignAnalytics {
   total: number;
-  bySegment: { key: string; label: string; color: string; bg: string; count: number }[];
+  byValue: (SegCol & { count: number })[];       // value-tier composition (HNI/Potential/Regular)
+  byLifecycle: (SegCol & { count: number })[];    // lifecycle composition (New/At Risk/Lapsed)
   byStore: { label: string; count: number }[];
   byVillage: { label: string; count: number }[];
   byCrop: { label: string; count: number }[];
-  /** Segment columns for the matrix (present segments in canonical order). */
-  segCols: { key: string; label: string; color: string; bg: string }[];
-  /** Rows of the Segment × Store matrix: per-store counts keyed by segment key + row total. */
-  matrix: { store: string; counts: Record<string, number>; total: number }[];
+  valueCols: SegCol[];      // matrix value columns
+  lifecycleCols: SegCol[];  // matrix lifecycle columns
+  /** Merged Store × (Value | Lifecycle) matrix — both count-sets sum to `total` per store. */
+  matrix: { store: string; value: Record<string, number>; lifecycle: Record<string, number>; total: number }[];
 }
 
-const EMPTY_ANALYTICS: CampaignAnalytics = { total: 0, bySegment: [], byStore: [], byVillage: [], byCrop: [], segCols: [], matrix: [] };
+const EMPTY_ANALYTICS: CampaignAnalytics = { total: 0, byValue: [], byLifecycle: [], byStore: [], byVillage: [], byCrop: [], valueCols: [], lifecycleCols: [], matrix: [] };
+const colOf = (k: string): SegCol => { const m = segMeta(k); return { key: k, label: m.label, color: m.color, bg: m.bg }; };
 
 /**
  * Composition of a campaign's enrolled farmers — for the "Analytics" button on each campaign row.
@@ -484,7 +488,7 @@ export async function getCampaignAnalytics(campaignId: number): Promise<Campaign
   if (scope === "none") return EMPTY_ANALYTICS;
   const members = await prisma.campaignMember.findMany({
     where: { campaignId, ...(scope ?? {}) },
-    select: { farmerId: true, segment: true, storeId: true },
+    select: { farmerId: true, segment: true, valueSegment: true, lifecycleSegment: true, storeId: true },
     take: 40000, // realistic campaigns are far below this; guards a pathological audience
   });
   if (!members.length) return EMPTY_ANALYTICS;
@@ -497,36 +501,40 @@ export async function getCampaignAnalytics(campaignId: number): Promise<Campaign
   const fMap = new Map(farmers.map((f) => [f.id, f]));
   const sMap = new Map(stores.map((s) => [s.id, shortStoreName(s.name)]));
 
-  const seg: Record<string, number> = {};
+  const vcount: Record<string, number> = {}, lcount: Record<string, number> = {};
   const store: Record<string, number> = {};
   const village: Record<string, number> = {};
   const crop: Record<string, number> = {};
-  // Segment × Store cross-tab: storeName → { segKey → count }.
-  const cross = new Map<string, Record<string, number>>();
+  // Store → { value → count, lifecycle → count } cross-tab (both sum to the store's member count).
+  const cross = new Map<string, { value: Record<string, number>; lifecycle: Record<string, number>; total: number }>();
   for (const m of members) {
     const f = fMap.get(m.farmerId);
     const storeName = m.storeId != null ? sMap.get(m.storeId) ?? "—" : "—";
+    // Fall back to deriving from the legacy collapsed snapshot for pre-split members.
+    const v = m.valueSegment ?? (VALUE_SEGMENTS.includes(m.segment as never) ? m.segment : "REGULAR");
+    const l = m.lifecycleSegment ?? (LIFECYCLE_SEGMENTS.includes(m.segment as never) ? m.segment : "LAPSED");
     const villageName = f?.village || "—";
-    const crops = f?.cropTags ?? [];
-    seg[m.segment] = (seg[m.segment] ?? 0) + 1;
+    vcount[v] = (vcount[v] ?? 0) + 1;
+    lcount[l] = (lcount[l] ?? 0) + 1;
     store[storeName] = (store[storeName] ?? 0) + 1;
     if (villageName !== "—") village[villageName] = (village[villageName] ?? 0) + 1;
-    for (const c of crops) crop[c] = (crop[c] ?? 0) + 1;
-    const row = cross.get(storeName) ?? cross.set(storeName, {}).get(storeName)!;
-    row[m.segment] = (row[m.segment] ?? 0) + 1;
+    for (const c of (f?.cropTags ?? [])) crop[c] = (crop[c] ?? 0) + 1;
+    const row = cross.get(storeName) ?? cross.set(storeName, { value: {}, lifecycle: {}, total: 0 }).get(storeName)!;
+    row.value[v] = (row.value[v] ?? 0) + 1;
+    row.lifecycle[l] = (row.lifecycle[l] ?? 0) + 1;
+    row.total += 1;
   }
   const top = (o: Record<string, number>, k = 12) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, k).map(([label, count]) => ({ label, count }));
-  const segCols = SEGMENT_COLUMNS.filter((k) => seg[k]).map((k) => { const m = segMeta(k); return { key: k, label: m.label, color: m.color, bg: m.bg }; });
-  const matrix = [...cross.entries()]
-    .map(([storeName, counts]) => ({ store: storeName, counts, total: Object.values(counts).reduce((a, b) => a + b, 0) }))
-    .sort((a, b) => b.total - a.total);
+  const matrix = [...cross.entries()].map(([storeName, c]) => ({ store: storeName, value: c.value, lifecycle: c.lifecycle, total: c.total })).sort((a, b) => b.total - a.total);
   return {
     total: members.length,
-    bySegment: segCols.map((c) => ({ ...c, count: seg[c.key] })),
+    byValue: VALUE_SEGMENTS.filter((k) => vcount[k]).map((k) => ({ ...colOf(k), count: vcount[k] })),
+    byLifecycle: LIFECYCLE_SEGMENTS.filter((k) => lcount[k]).map((k) => ({ ...colOf(k), count: lcount[k] })),
     byStore: top(store),
     byVillage: top(village),
     byCrop: top(crop).map((x) => ({ label: cropLabel(x.label), count: x.count })),
-    segCols,
+    valueCols: [...VALUE_SEGMENTS].map(colOf),
+    lifecycleCols: [...LIFECYCLE_SEGMENTS].map(colOf),
     matrix,
   };
 }
@@ -540,7 +548,7 @@ export async function exportCampaignAudienceXlsx(campaignId: number, campaignNam
   if (scope === "none") return { ok: false, error: "No store or region is assigned to your account." };
   const members = await prisma.campaignMember.findMany({
     where: { campaignId, ...(scope ?? {}) },
-    select: { farmerId: true, segment: true, storeId: true, group: true },
+    select: { farmerId: true, segment: true, valueSegment: true, lifecycleSegment: true, storeId: true, group: true },
     take: 100000,
   });
   if (!members.length) return { ok: false, error: "No enrolled farmers in your scope for this campaign." };
@@ -553,41 +561,41 @@ export async function exportCampaignAudienceXlsx(campaignId: number, campaignNam
   const fMap = new Map(farmers.map((f) => [f.id, f]));
   const sMap = new Map(stores.map((s) => [s.id, shortStoreName(s.name)]));
 
-  // Segment × Store cross-tab (mirrors getCampaignAnalytics: every enrolled member, TEST + CONTROL).
-  const cross = new Map<string, Record<string, number>>();
-  const totals: Record<string, number> = {};
+  const V = [...VALUE_SEGMENTS], L = [...LIFECYCLE_SEGMENTS];
+  const vseg = (m: { valueSegment: string | null; segment: string }) => m.valueSegment ?? (V.includes(m.segment as never) ? m.segment : "REGULAR");
+  const lseg = (m: { lifecycleSegment: string | null; segment: string }) => m.lifecycleSegment ?? (L.includes(m.segment as never) ? m.segment : "LAPSED");
+  // Merged Store × (Value | Lifecycle) cross-tab (both count-sets sum to the store total).
+  const cross = new Map<string, { value: Record<string, number>; lifecycle: Record<string, number>; total: number }>();
+  const vTot: Record<string, number> = {}, lTot: Record<string, number> = {};
   for (const m of members) {
     const storeName = m.storeId != null ? sMap.get(m.storeId) ?? "—" : "—";
-    const row = cross.get(storeName) ?? cross.set(storeName, {}).get(storeName)!;
-    row[m.segment] = (row[m.segment] ?? 0) + 1;
-    totals[m.segment] = (totals[m.segment] ?? 0) + 1;
+    const v = vseg(m), l = lseg(m);
+    const row = cross.get(storeName) ?? cross.set(storeName, { value: {}, lifecycle: {}, total: 0 }).get(storeName)!;
+    row.value[v] = (row.value[v] ?? 0) + 1; row.lifecycle[l] = (row.lifecycle[l] ?? 0) + 1; row.total += 1;
+    vTot[v] = (vTot[v] ?? 0) + 1; lTot[l] = (lTot[l] ?? 0) + 1;
   }
-  const segKeys = SEGMENT_COLUMNS.filter((k) => totals[k]);
-  const segLabels = segKeys.map((k) => segMeta(k).label);
-  const mrows = [...cross.entries()]
-    .map(([store, counts]) => ({ store, counts, total: Object.values(counts).reduce((a, b) => a + b, 0) }))
-    .sort((a, b) => b.total - a.total);
+  const mrows = [...cross.entries()].map(([store, c]) => ({ store, ...c })).sort((a, b) => b.total - a.total);
 
   const matrixSheet: (string | number)[][] = [
-    ["Store", ...segLabels, "Total"],
-    ["All stores", ...segKeys.map((k) => totals[k] ?? 0), members.length],
-    ...mrows.map((r) => [r.store, ...segKeys.map((k) => r.counts[k] ?? 0), r.total]),
+    ["Store", ...V.map((s) => segMeta(s).label), "Segment Total", ...L.map((s) => segMeta(s).label), "Lifecycle Total"],
+    ["All stores", ...V.map((k) => vTot[k] ?? 0), members.length, ...L.map((k) => lTot[k] ?? 0), members.length],
+    ...mrows.map((r) => [r.store, ...V.map((k) => r.value[k] ?? 0), r.total, ...L.map((k) => r.lifecycle[k] ?? 0), r.total]),
   ];
   const farmerSheet: (string | number)[][] = [
-    ["Farmer", "Mobile", "Store", "Village", "Segment", "Group", "Crops"],
+    ["Farmer", "Mobile", "Store", "Village", "Value segment", "Lifecycle", "Group", "Crops"],
     ...members.map((m) => {
       const f = fMap.get(m.farmerId);
       return [
         f?.name ?? `Farmer #${m.farmerId}`, f?.mobile ?? "",
         m.storeId != null ? sMap.get(m.storeId) ?? "" : "", f?.village ?? "",
-        segMeta(m.segment).label, m.group, (f?.cropTags ?? []).map(cropLabel).join(", "),
+        segMeta(vseg(m)).label, segMeta(lseg(m)).label, m.group, (f?.cropTags ?? []).map(cropLabel).join(", "),
       ];
     }),
   ];
 
   const safe = (campaignName || "campaign").replace(/[\\/?*[\]:]/g, " ").trim().slice(0, 60) || "campaign";
   const b64 = buildWorkbookB64([
-    { name: "Segment x Store", rows: matrixSheet },
+    { name: "Value + Lifecycle x Store", rows: matrixSheet },
     { name: "Farmers", rows: farmerSheet },
   ]);
   return { ok: true, filename: `${safe} - audience.xlsx`, b64 };

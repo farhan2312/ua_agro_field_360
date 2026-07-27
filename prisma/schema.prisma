@@ -366,7 +366,9 @@ model CampaignMember {
   campaignId Int
   campaign   Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   farmerId   Int
-  segment    String // snapshot at enrolment
+  segment    String // legacy collapsed segment snapshot at enrolment (kept for back-compat)
+  valueSegment     String? // value tier snapshot: HNI | POTENTIAL_HNI | REGULAR
+  lifecycleSegment String? // lifecycle snapshot: NEW | AT_RISK | LAPSED
   crop       String?
   group      String // TEST | CONTROL
   storeId    Int? // snapshot of the farmer's store (for officer-scoped visibility)

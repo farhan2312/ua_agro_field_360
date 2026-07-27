@@ -1038,43 +1038,46 @@ function TreemapCard({ title, rows, total }: { title: string; rows: { label: str
 }
 
 /** Segment × Store cross-tab: rows = stores, columns = segments, cells tinted by count. */
-function SegStoreMatrix({ segCols, matrix, total }: { segCols: CampaignAnalytics["segCols"]; matrix: CampaignAnalytics["matrix"]; total: number }) {
-  const colTotals: Record<string, number> = {};
-  for (const c of segCols) colTotals[c.key] = matrix.reduce((s, r) => s + (r.counts[c.key] ?? 0), 0);
-  const maxCell = Math.max(1, ...matrix.flatMap((r) => segCols.map((c) => r.counts[c.key] ?? 0)));
+function SegStoreMatrix({ valueCols, lifecycleCols, matrix, total }: { valueCols: CampaignAnalytics["valueCols"]; lifecycleCols: CampaignAnalytics["lifecycleCols"]; matrix: CampaignAnalytics["matrix"]; total: number }) {
+  const vTot: Record<string, number> = {}, lTot: Record<string, number> = {};
+  for (const c of valueCols) vTot[c.key] = matrix.reduce((s, r) => s + (r.value[c.key] ?? 0), 0);
+  for (const c of lifecycleCols) lTot[c.key] = matrix.reduce((s, r) => s + (r.lifecycle[c.key] ?? 0), 0);
+  const maxCell = Math.max(1, ...matrix.flatMap((r) => [...valueCols.map((c) => r.value[c.key] ?? 0), ...lifecycleCols.map((c) => r.lifecycle[c.key] ?? 0)]));
+  const cell = (key: string, v: number, color: string) => (
+    <td key={key} className="px-2 py-1.5 text-right tabular-nums" style={{ background: v ? hexToRgba(color, 0.08 + 0.55 * (v / maxCell)) : undefined, color: v ? "#1A1C1A" : "#DADADA" }}>{v || "·"}</td>
+  );
   return (
     <div className={`${CARD} overflow-hidden`}>
-      <div className="border-b border-[#F0F0F0] px-4 py-2.5 text-[12px] font-bold text-[#1A1C1A]">Segment × Store matrix</div>
+      <div className="border-b border-[#F0F0F0] px-4 py-2.5 text-[12px] font-bold text-[#1A1C1A]">Store × Value segment + Lifecycle</div>
       <div className="max-h-[46vh] overflow-auto">
-        <table className="w-full min-w-[560px] border-collapse text-[11.5px]">
+        <table className="w-full min-w-[680px] border-collapse text-[11.5px]">
           <thead className="sticky top-0 z-10">
             <tr className="bg-[#FAFAFA] text-[10px] font-bold uppercase tracking-[0.3px] text-[#9E9E9E]">
               <th className="sticky left-0 z-10 bg-[#FAFAFA] px-4 py-2 text-left">Store</th>
-              {segCols.map((c) => <th key={c.key} className="px-2 py-2 text-right" style={{ color: c.color }}>{c.label}</th>)}
-              <th className="px-3 py-2 text-right text-[#1A1C1A]">Total</th>
+              {valueCols.map((c) => <th key={c.key} className="px-2 py-2 text-right" style={{ color: c.color }}>{c.label}</th>)}
+              <th className="border-l border-[#EEE] px-3 py-2 text-right text-[#1A1C1A]">Segment total</th>
+              {lifecycleCols.map((c) => <th key={c.key} className="px-2 py-2 text-right" style={{ color: c.color }}>{c.label}</th>)}
+              <th className="border-l border-[#EEE] px-3 py-2 text-right text-[#1A1C1A]">Total</th>
             </tr>
           </thead>
           <tbody>
             {matrix.map((r) => (
               <tr key={r.store} className="border-b border-[#F5F5F5]">
                 <td className="sticky left-0 z-10 bg-white px-4 py-1.5 font-semibold text-[#1565C0]">{r.store}</td>
-                {segCols.map((c) => {
-                  const v = r.counts[c.key] ?? 0;
-                  return (
-                    <td key={c.key} className="px-2 py-1.5 text-right tabular-nums" style={{ background: v ? hexToRgba(c.color, 0.08 + 0.55 * (v / maxCell)) : undefined, color: v ? "#1A1C1A" : "#DADADA" }}>
-                      {v || "·"}
-                    </td>
-                  );
-                })}
-                <td className="px-3 py-1.5 text-right font-bold text-[#1A1C1A]">{n(r.total)}</td>
+                {valueCols.map((c) => cell("v" + c.key, r.value[c.key] ?? 0, c.color))}
+                <td className="border-l border-[#EEE] px-3 py-1.5 text-right font-bold text-[#1A1C1A]">{n(r.total)}</td>
+                {lifecycleCols.map((c) => cell("l" + c.key, r.lifecycle[c.key] ?? 0, c.color))}
+                <td className="border-l border-[#EEE] px-3 py-1.5 text-right font-bold text-[#1A1C1A]">{n(r.total)}</td>
               </tr>
             ))}
           </tbody>
           <tfoot className="sticky bottom-0">
             <tr className="border-t border-[#EEE] bg-[#F8F8F8] font-bold text-[#1A1C1A]">
-              <td className="sticky left-0 z-10 bg-[#F8F8F8] px-4 py-2">Total</td>
-              {segCols.map((c) => <td key={c.key} className="px-2 py-2 text-right tabular-nums">{n(colTotals[c.key])}</td>)}
-              <td className="px-3 py-2 text-right">{n(total)}</td>
+              <td className="sticky left-0 z-10 bg-[#F8F8F8] px-4 py-2">All stores</td>
+              {valueCols.map((c) => <td key={c.key} className="px-2 py-2 text-right tabular-nums">{n(vTot[c.key])}</td>)}
+              <td className="border-l border-[#EEE] px-3 py-2 text-right">{n(total)}</td>
+              {lifecycleCols.map((c) => <td key={c.key} className="px-2 py-2 text-right tabular-nums">{n(lTot[c.key])}</td>)}
+              <td className="border-l border-[#EEE] px-3 py-2 text-right">{n(total)}</td>
             </tr>
           </tfoot>
         </table>
@@ -1110,11 +1113,14 @@ function AnalyticsBody({ a, campaign }: { a: CampaignAnalytics; campaign: Campai
         </button>
       </div>
 
-      {/* Segment pie + crop bars (crops overlap across farmers, so a bar reads clearer than a pie) */}
+      {/* Two independent segment dimensions: value tier + lifecycle */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <PieCard title="By segment" data={a.bySegment.map((s) => ({ label: s.label, count: s.count, color: s.color }))} total={a.total} />
-        <HBarCard title="By crop (top)" data={cropData} total={a.total} note="% = share of enrolled farmers; a farmer may grow several crops, so these overlap." />
+        <PieCard title="By value segment" data={a.byValue.map((s) => ({ label: s.label, count: s.count, color: s.color }))} total={a.total} />
+        <PieCard title="By lifecycle" data={a.byLifecycle.map((s) => ({ label: s.label, count: s.count, color: s.color }))} total={a.total} />
       </div>
+
+      {/* Crop bars (crops overlap across farmers, so a bar reads clearer than a pie) */}
+      <HBarCard title="By crop (top)" data={cropData} total={a.total} note="% = share of enrolled farmers; a farmer may grow several crops, so these overlap." />
 
       {/* Decomposition treemaps: store + village */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -1122,8 +1128,8 @@ function AnalyticsBody({ a, campaign }: { a: CampaignAnalytics; campaign: Campai
         <TreemapCard title="By village (top)" rows={a.byVillage} total={a.total} />
       </div>
 
-      {/* Segment × Store matrix (replaces the farmer list) */}
-      <SegStoreMatrix segCols={a.segCols} matrix={a.matrix} total={a.total} />
+      {/* Store × Value + Lifecycle matrix (replaces the farmer list) */}
+      <SegStoreMatrix valueCols={a.valueCols} lifecycleCols={a.lifecycleCols} matrix={a.matrix} total={a.total} />
     </div>
   );
 }
