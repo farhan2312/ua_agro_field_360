@@ -11,7 +11,7 @@ const dmSans = DM_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "UA Field Intel — Kisan Sewa Kendra",
+  title: "UA Agro | Kisan Sewa Kendra",
   description:
     "Field data capture & analytics platform for Agricultural Specialist Sales Representatives.",
   icons: { icon: "/logo.png" },

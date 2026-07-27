@@ -315,7 +315,7 @@ function MergedMatrixCard({ matrix, valueCols, lifecycleCols, onCell, by, onFlip
     <div className={`${CARD} overflow-hidden`}>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#F0F0F0] px-4 py-2.5">
         <div className="flex flex-wrap items-center gap-3">
-          <div className="text-[13px] font-bold text-[#1A1C1A]">{view === "raw" ? "Sales | raw lines" : `Store × ${VALUE_TITLE} + ${LIFECYCLE_TITLE}`}</div>
+          <div className="text-[13px] font-bold text-[#1A1C1A]">{view === "raw" ? "Sales — raw line items" : `Store × ${VALUE_TITLE} + ${LIFECYCLE_TITLE}`}</div>
           <div className="inline-flex rounded-[8px] border border-[#E0E0E0] bg-[#F5F7F5] p-0.5">
             {(["detailed", "summary", "raw"] as const).map((v) => (
               <button key={v} type="button" onClick={() => setView(v)}
