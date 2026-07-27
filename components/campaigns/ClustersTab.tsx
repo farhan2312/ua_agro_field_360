@@ -18,12 +18,6 @@ import type { ClusterMembersResult } from "@/components/clusters/types";
 
 const CARD = "rounded-[14px] border border-black/[0.04] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]";
 const n = (x: number) => x.toLocaleString("en-IN");
-const SPEND_PRESETS: { label: string; min?: number; max?: number }[] = [
-  { label: "HNI ₹12K+", min: 12000 },
-  { label: "Potential ₹10–12K", min: 10000, max: 12000 },
-  { label: "₹5–10K", min: 5000, max: 10000 },
-  { label: "< ₹2.5K", max: 2500 },
-];
 const ORIGIN_LABEL: Record<string, string> = { map: "Map", segment: "Builder", analytics: "Analytics" };
 
 export interface StoreOption { id: number; name: string; zone: string | null }
@@ -96,7 +90,6 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
   const [pests, setPests] = useState<string[]>([]);
   const [zoneList, setZoneList] = useState<string[]>([]);
   const [storeIds, setStoreIds] = useState<number[]>([]);
-  const [spendIdx, setSpendIdx] = useState(-1);
   const [q, setQ] = useState("");
   const [count, setCount] = useState<number | null>(null);
   const [counting, setCounting] = useState(false);
@@ -117,10 +110,9 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
     pestTags: pests.length ? pests : undefined,
     zones: zoneList.length ? zoneList : undefined,
     storeIds: storeIds.length ? storeIds : undefined,
-    ...(spendIdx >= 0 ? { spendMin: SPEND_PRESETS[spendIdx].min, spendMax: SPEND_PRESETS[spendIdx].max } : {}),
     q: q.trim() || undefined,
   });
-  const hasAny = valueSegs.length || lifecycleSegs.length || crops.length || pests.length || zoneList.length || storeIds.length || spendIdx >= 0 || q.trim();
+  const hasAny = valueSegs.length || lifecycleSegs.length || crops.length || pests.length || zoneList.length || storeIds.length || q.trim();
 
   // Debounced live count preview.
   useEffect(() => {
@@ -129,7 +121,7 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
     const t = setTimeout(async () => { setCount(await previewClusterCount(criteria())); setCounting(false); }, 350);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [valueSegs, lifecycleSegs, crops, pests, zoneList, storeIds, spendIdx, q]);
+  }, [valueSegs, lifecycleSegs, crops, pests, zoneList, storeIds, q]);
 
   const toggle = (arr: string[], set: (a: string[]) => void, v: string) => set(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
   const toggleZone = (z: string) => {
@@ -193,10 +185,6 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
           <button key={p} type="button" onClick={() => toggle(pests, setPests, p)} className="rounded-full border-[1.5px] border-[#E65100] bg-[#FFF3E0] px-3 py-1 text-[12px] font-semibold text-[#E65100]">{tagLabel(p)} ✕</button>
         ))}</div>
 
-        <div className="mb-1.5 text-[11px] font-semibold uppercase text-[#9E9E9E]">Spend tier (optional)</div>
-        <div className="mb-3 flex flex-wrap gap-1.5">{SPEND_PRESETS.map((p, i) => { const on = spendIdx === i; return (
-          <button key={p.label} type="button" onClick={() => setSpendIdx(on ? -1 : i)} className="rounded-full border-[1.5px] px-3 py-1 text-[12px] font-semibold" style={{ background: on ? "#E3F2FD" : "#fff", color: on ? "#1565C0" : "#616161", borderColor: on ? "#1565C0" : "#E0E0E0" }}>{p.label}</button>
-        ); })}</div>
 
         {/* Regions — multi-select; cascades into the Stores picker below */}
         <div className="mb-1.5 text-[11px] font-semibold uppercase text-[#9E9E9E]">Regions (any of)</div>
