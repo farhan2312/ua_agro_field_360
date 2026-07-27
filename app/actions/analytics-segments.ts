@@ -282,7 +282,8 @@ export async function getWorkbench(f: WbFilters): Promise<WbData> {
     prisma.$queryRaw<{ zone: string; spend: bigint }[]>(Prisma.sql`
       WITH ${cte} SELECT "zone" AS zone, COALESCE(SUM(spend),0)::bigint spend FROM tiers WHERE ${tf} AND "zone" IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10`),
     prisma.$queryRaw<{ crop: string; n: number }[]>(Prisma.sql`
-      WITH ${cte} SELECT unnest(f."salesCropTags") crop, COUNT(*)::int n FROM tiers t JOIN "Farmer" f ON f.id=t.id WHERE ${tf} GROUP BY 1 ORDER BY 2 DESC LIMIT 12`),
+      WITH ${cte} SELECT crop, COUNT(*)::int n FROM (SELECT unnest(f."salesCropTags") crop FROM tiers t JOIN "Farmer" f ON f.id=t.id WHERE ${tf}) u
+      ${f.crops?.length ? Prisma.sql`WHERE crop = ANY(${f.crops}::text[])` : Prisma.empty} GROUP BY 1 ORDER BY 2 DESC LIMIT 12`),
   ]);
 
   const byStore = new Map<number | null, { value: Record<string, number>; lifecycle: Record<string, number>; cross: Record<string, Record<string, number>>; total: number }>();

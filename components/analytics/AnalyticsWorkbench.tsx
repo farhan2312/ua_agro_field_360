@@ -176,7 +176,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
           <HistogramCard title="Spend tiers (FY) — farmer histogram" bars={data.extra} />
           <BarCard title={data.secondaryTitle} bars={data.secondary} fmt={money} accent="#6A1B9A" />
         </div>
-        <BarCard title="Sales-crop breakdown (farmers)" bars={data.cropBreakdown.map((b) => ({ ...b, label: cropLabel(b.label) }))} fmt={n} accent="#F9A825" />
+        <BarCard title="Sales-crop breakdown" bars={data.cropBreakdown.map((b) => ({ ...b, label: cropLabel(b.label) }))} fmt={n} accent="#F9A825" />
 
         <MergedMatrixCard matrix={data.matrix} valueCols={data.valueCols} lifecycleCols={data.lifecycleCols} onCell={openCell} by={treeBy} onFlip={flipTree} filters={filters}
           right={<button type="button" onClick={exportXlsx} disabled={exporting}
@@ -475,13 +475,13 @@ function SalesRawData({ filters }: { filters: WbFilters }) {
       ) : data.rows.length === 0 ? (
         <div className="py-10 text-center text-[13px] text-[#9E9E9E]">No sale lines match these filters.</div>
       ) : (
-        <div className="overflow-x-auto rounded-[10px] border border-[#F0F0F0]">
+        <div className="max-h-[460px] overflow-auto rounded-[10px] border border-[#F0F0F0]">
           <table className="w-full min-w-[1040px] text-left text-[11.5px]">
-            <thead className="bg-[#FAFAFA]">
+            <thead>
               <tr className="border-b border-[#EEE]">
-                <th className={TH}>Date</th><th className={TH}>FY</th><th className={TH}>Farmer</th><th className={TH}>Phone</th>
-                <th className={TH}>Store</th><th className={TH}>Item</th><th className={TH}>Category</th><th className={TH}>Crop</th>
-                <th className={`${TH} text-right`}>Qty</th><th className={TH}>UOM</th><th className={`${TH} text-right`}>Base (₹)</th>
+                <th className={`${TH} sticky top-0 z-10 bg-[#FAFAFA]`}>Date</th><th className={`${TH} sticky top-0 z-10 bg-[#FAFAFA]`}>FY</th><th className={`${TH} sticky top-0 z-10 bg-[#FAFAFA]`}>Farmer</th><th className={`${TH} sticky top-0 z-10 bg-[#FAFAFA]`}>Phone</th>
+                <th className={`${TH} sticky top-0 z-10 bg-[#FAFAFA]`}>Store</th><th className={`${TH} sticky top-0 z-10 bg-[#FAFAFA]`}>Item</th><th className={`${TH} sticky top-0 z-10 bg-[#FAFAFA]`}>Category</th><th className={`${TH} sticky top-0 z-10 bg-[#FAFAFA]`}>Crop</th>
+                <th className={`${TH} sticky top-0 z-10 bg-[#FAFAFA] text-right`}>Qty</th><th className={`${TH} sticky top-0 z-10 bg-[#FAFAFA]`}>UOM</th><th className={`${TH} sticky top-0 z-10 bg-[#FAFAFA] text-right`}>Base (₹)</th>
               </tr>
             </thead>
             <tbody>
