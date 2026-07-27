@@ -116,8 +116,9 @@ async function main() {
 
     // ── The two split dimensions ──
     const valueSeg = valueSegmentOf(a.spend12); // HNI | POTENTIAL_HNI | REGULAR
-    const monthsSince = a.latest ? Math.floor((ASOF.getTime() - a.latest.getTime()) / MS_PER_MONTH) : null;
-    const lifecycleSeg = lifecycleSegmentOf(monthsSince); // NEW | AT_RISK | LAPSED (never ⇒ LAPSED)
+    const monthsSinceLast = a.latest ? Math.floor((ASOF.getTime() - a.latest.getTime()) / MS_PER_MONTH) : null;
+    const monthsSinceFirst = a.earliest ? Math.floor((ASOF.getTime() - a.earliest.getTime()) / MS_PER_MONTH) : null;
+    const lifecycleSeg = lifecycleSegmentOf(monthsSinceLast, monthsSinceFirst); // NEW | RECENT | AT_RISK | LAPSED
     valueCounts[valueSeg] = (valueCounts[valueSeg] ?? 0) + 1;
     lifecycleCounts[lifecycleSeg] = (lifecycleCounts[lifecycleSeg] ?? 0) + 1;
 

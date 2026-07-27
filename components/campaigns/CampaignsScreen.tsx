@@ -4,7 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Modal, ModalHeader } from "@/components/interactive";
-import { segMeta, fillTemplate, SEGMENT_COLUMNS } from "@/lib/campaign-segments";
+import { segMeta, fillTemplate, SEGMENT_COLUMNS, VALUE_TITLE, LIFECYCLE_TITLE } from "@/lib/campaign-segments";
 import { cropLabel } from "@/lib/crops";
 import { inr } from "@/lib/format";
 import {
@@ -1137,6 +1137,8 @@ function AnalyticsBody({ a, campaign }: { a: CampaignAnalytics; campaign: Campai
 function TrackerBody({ t }: { t: CampaignTracker }) {
   const a = t.attribution;
   const reachPct = t.reach.testTotal > 0 ? Math.round((t.reach.reached / t.reach.testTotal) * 100) : 0;
+  const [upliftBy, setUpliftBy] = useState<"value" | "lifecycle">("value");
+  const uplift = upliftBy === "value" ? t.upliftByValue : t.upliftByLifecycle;
   return (
     <div className="flex flex-col gap-4">
       <div className={`${CARD} p-4`}>
@@ -1182,14 +1184,26 @@ function TrackerBody({ t }: { t: CampaignTracker }) {
       </div>
 
       <div className={`${CARD} p-4`}>
-        <div className="mb-2 text-[13px] font-bold text-[#1A1C1A]">Test vs control uplift</div>
-        {t.uplift.length === 0 ? <div className="py-4 text-center text-[12.5px] text-[#9E9E9E]">No members / no matched sales yet. Uplift matures as monthly sales are imported.</div>
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <div className="text-[13px] font-bold text-[#1A1C1A]">Test vs control uplift</div>
+          <div className="inline-flex rounded-[8px] border border-[#E0E0E0] bg-[#F5F7F5] p-0.5">
+            {([["value", VALUE_TITLE], ["lifecycle", LIFECYCLE_TITLE]] as const).map(([k, label]) => (
+              <button key={k} type="button" onClick={() => setUpliftBy(k)}
+                className="rounded-[6px] px-2.5 py-1 text-[11.5px] font-semibold transition-colors"
+                style={{ background: upliftBy === k ? "#fff" : "transparent", color: upliftBy === k ? "#2E7D32" : "#9E9E9E", boxShadow: upliftBy === k ? "0 1px 2px rgba(0,0,0,0.1)" : "none" }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="mb-2 text-[11px] text-[#9E9E9E]">Value tier and lifecycle are independent — a farmer can be an HNI <b>and</b> Lapsed. Toggle to break the same members down either way.</div>
+        {uplift.length === 0 ? <div className="py-4 text-center text-[12.5px] text-[#9E9E9E]">No members / no matched sales yet. Uplift matures as monthly sales are imported.</div>
           : (
             <div className="overflow-x-auto"><table className="w-full min-w-[640px] text-left text-[12px]">
               <thead><tr className="border-b border-[#EEE] text-[10px] font-bold uppercase text-[#9E9E9E]">
-                <th className="py-2">Segment</th><th className="text-right">Test</th><th className="text-right">Reached</th><th className="text-right">Test %buy</th><th className="text-right">Ctrl %buy</th><th className="text-right">Uplift</th><th className="text-right">Incremental ₹</th>
+                <th className="py-2">{upliftBy === "value" ? VALUE_TITLE : LIFECYCLE_TITLE}</th><th className="text-right">Test</th><th className="text-right">Reached</th><th className="text-right">Test %buy</th><th className="text-right">Ctrl %buy</th><th className="text-right">Uplift</th><th className="text-right">Incremental ₹</th>
               </tr></thead>
-              <tbody>{t.uplift.map((u) => { const testPct = u.test.reached > 0 ? (u.test.purchased / u.test.reached) : (u.test.farmers ? u.test.purchased / u.test.farmers : 0); const ctrlPct = u.control.farmers ? u.control.purchased / u.control.farmers : 0; return (
+              <tbody>{uplift.map((u) => { const testPct = u.test.reached > 0 ? (u.test.purchased / u.test.reached) : (u.test.farmers ? u.test.purchased / u.test.farmers : 0); const ctrlPct = u.control.farmers ? u.control.purchased / u.control.farmers : 0; return (
                 <tr key={u.segment} className="border-b border-[#F5F5F5]">
                   <td className="py-2 font-semibold" style={{ color: segMeta(u.segment).color }}>{segMeta(u.segment).label}</td>
                   <td className="text-right">{n(u.test.farmers)}</td>

@@ -268,7 +268,7 @@ function SegTree({ tree, by, onFlip }: { tree: TreeCell[]; by: "value" | "lifecy
         <div className="text-[12px] font-bold text-[#1A1C1A]">{by === "value" ? `${VALUE_TITLE} → ${LIFECYCLE_TITLE}` : `${LIFECYCLE_TITLE} → ${VALUE_TITLE}`}</div>
         <button type="button" onClick={onFlip} className="rounded-full border border-[#E0E0E0] px-3 py-1 text-[11px] font-semibold text-[#616161] hover:bg-[#F5F7F5]">⇄ Flip</button>
       </div>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+      <div className={`grid grid-cols-1 gap-2 ${primaries.length >= 4 ? "sm:grid-cols-2 lg:grid-cols-4" : "sm:grid-cols-3"}`}>
         {primaries.map((p) => {
           const total = secondaries.reduce((a, s) => a + cellOf(p, s), 0);
           return (
@@ -298,10 +298,10 @@ function segCellMeta(dim: SegDim | "cross", seg: string): { label: string; color
   if (dim === "cross") { const [v, l] = seg.split("|"); return { label: `${segMeta(v).label} · ${segMeta(l).label}`, color: segMeta(v).color }; }
   return { label: segMeta(seg).label, color: segMeta(seg).color };
 }
-const SEG_SHORT: Record<string, string> = { NEW: "New", AT_RISK: "At Risk", LAPSED: "Lapsed", HNI: "HNI", POTENTIAL_HNI: "Potential", REGULAR: "Regular" };
+const SEG_SHORT: Record<string, string> = { NEW: "New", RECENT: "Recent", AT_RISK: "At Risk", LAPSED: "Lapsed", HNI: "HNI", POTENTIAL_HNI: "Potential", REGULAR: "Regular" };
 
 /** The merged Store × (Value | Lifecycle) table. Summary = 6 marginal columns; Detailed = the full 3×3 (9 combos) per store. */
-const MERGED_GRID = "grid grid-cols-[1.4fr_repeat(3,0.85fr)_0.9fr_repeat(3,0.85fr)_0.9fr]";
+const MERGED_GRID = "grid grid-cols-[1.4fr_repeat(3,0.85fr)_0.9fr_repeat(4,0.85fr)_0.9fr]";
 function MergedMatrixCard({ matrix, valueCols, lifecycleCols, onCell, by, onFlip, filters, right }: {
   matrix: MergedMatrix; valueCols: string[]; lifecycleCols: string[];
   onCell: (storeId: number | null, storeName: string, dim: SegDim | "cross", seg: string) => void;
@@ -310,7 +310,7 @@ function MergedMatrixCard({ matrix, valueCols, lifecycleCols, onCell, by, onFlip
   const [view, setView] = useState<"summary" | "detailed" | "raw">("detailed");
   const cellBtn = (storeId: number | null, storeName: string, dim: SegDim, seg: string, c: number) =>
     c > 0 ? <button type="button" onClick={() => onCell(storeId, storeName, dim, seg)} className="font-semibold hover:underline" style={{ color: segMeta(seg).color }}>{n(c)}</button> : <span className="text-[#DDD]">·</span>;
-  const TABS = { detailed: "Detailed · 3×3", summary: "Summary", raw: "Sales raw data" } as const;
+  const TABS = { detailed: "Detailed", summary: "Summary", raw: "Sales raw data" } as const;
   return (
     <div className={`${CARD} overflow-hidden`}>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#F0F0F0] px-4 py-2.5">
@@ -369,8 +369,8 @@ function MergedMatrixCard({ matrix, valueCols, lifecycleCols, onCell, by, onFlip
       {view !== "raw" && (
         <div className="px-4 py-2 text-[11px] text-[#9E9E9E]">
           {view === "detailed"
-            ? `Every store split into all 9 pockets — grouped by ${by === "value" ? `${VALUE_TITLE} → ${LIFECYCLE_TITLE}` : `${LIFECYCLE_TITLE} → ${VALUE_TITLE}`}. ⇄ Flip swaps the grouping (synced with the KPI tree above). Shading = size within each group; click a count to drill in.`
-            : "Both totals equal the store's farmer count. Switch to Detailed · 3×3 for the full 9-way split. Value/lifecycle computed on the selected FY."}
+            ? `Every store split into all 12 pockets — grouped by ${by === "value" ? `${VALUE_TITLE} → ${LIFECYCLE_TITLE}` : `${LIFECYCLE_TITLE} → ${VALUE_TITLE}`}. ⇄ Flip swaps the grouping (synced with the KPI tree above). Shading = size within each group; click a count to drill in.`
+            : "Both totals equal the store's farmer count. Switch to Detailed for the full 3×4 split. Value/lifecycle computed on the selected FY."}
         </div>
       )}
     </div>

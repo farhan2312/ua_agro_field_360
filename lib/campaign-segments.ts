@@ -18,10 +18,11 @@ export const SEGMENT_META: Record<string, SegMeta> = {
   HNI:           { label: "HNI",           priority: 1, color: "#2E7D32", bg: "#E8F5E9", medium: "1:1 or Call" },
   POTENTIAL_HNI: { label: "Potential HNI", priority: 2, color: "#1565C0", bg: "#E3F2FD", medium: "1:1 or Call" },
   REGULAR:       { label: "Regular",       priority: 3, color: "#00897B", bg: "#E0F2F1", medium: "Whatsapp" },
-  AT_RISK:       { label: "At Risk",       priority: 4, color: "#E65100", bg: "#FFF3E0", medium: "Whatsapp + Call" },
-  NEW:           { label: "New",           priority: 5, color: "#7B1FA2", bg: "#F3E5F5", medium: "Whatsapp" },
-  LAPSED:        { label: "Lapsed",        priority: 6, color: "#616161", bg: "#EEEEEE", medium: "Whatsapp + Call" },
-  OTHER:         { label: "Other",         priority: 7, color: "#9E9E9E", bg: "#F5F5F5", medium: "Whatsapp" },
+  RECENT:        { label: "Recent",        priority: 4, color: "#0277BD", bg: "#E1F5FE", medium: "Whatsapp" },
+  AT_RISK:       { label: "At Risk",       priority: 5, color: "#E65100", bg: "#FFF3E0", medium: "Whatsapp + Call" },
+  NEW:           { label: "New",           priority: 6, color: "#7B1FA2", bg: "#F3E5F5", medium: "Whatsapp" },
+  LAPSED:        { label: "Lapsed",        priority: 7, color: "#616161", bg: "#EEEEEE", medium: "Whatsapp + Call" },
+  OTHER:         { label: "Other",         priority: 8, color: "#9E9E9E", bg: "#F5F5F5", medium: "Whatsapp" },
 };
 
 export function segMeta(seg: string | null | undefined): SegMeta {
@@ -38,11 +39,17 @@ export type ValueSegment = (typeof VALUE_SEGMENTS)[number];
 export const VALUE_HNI_MIN = 12000;
 export const VALUE_POTENTIAL_MIN = 8000;
 
-/** Lifecycle — by months since the farmer's last purchase. New <5 · At Risk 5–<12 · Lapsed ≥12 (or never). */
-export const LIFECYCLE_SEGMENTS = ["NEW", "AT_RISK", "LAPSED"] as const;
+/**
+ * Lifecycle — by the purchase windows a farmer falls in, relative to the reference date:
+ *   New    — bought in the last 6 months AND has NO earlier purchases (first-timer).
+ *   Recent — bought in the last 6 months AND also bought before that (active repeat).
+ *   At Risk— last purchase 6–12 months ago (nothing in the last 6 months).
+ *   Lapsed — last purchase 12+ months ago, or never.
+ */
+export const LIFECYCLE_SEGMENTS = ["NEW", "RECENT", "AT_RISK", "LAPSED"] as const;
 export type LifecycleSegment = (typeof LIFECYCLE_SEGMENTS)[number];
-export const LIFECYCLE_NEW_MAX_MONTHS = 5;   // < 5 months → New
-export const LIFECYCLE_LAPSED_MIN_MONTHS = 12; // ≥ 12 months (or never) → Lapsed; between → At Risk
+export const LIFECYCLE_RECENT_MONTHS = 6;      // < 6 months since last purchase → New or Recent
+export const LIFECYCLE_LAPSED_MIN_MONTHS = 12; // ≥ 12 months (or never) → Lapsed; 6–12 → At Risk
 
 /** Human title for the lifecycle dimension (user-chosen). */
 export const LIFECYCLE_TITLE = "Lifecycle";
@@ -59,8 +66,9 @@ export function segDef(k: string): string {
     case "HNI": return `Value tier — spends ${inr(VALUE_HNI_MIN)}+ in the period`;
     case "POTENTIAL_HNI": return `Value tier — spends ${inr(VALUE_POTENTIAL_MIN)}–${inr(VALUE_HNI_MIN)} in the period`;
     case "REGULAR": return `Value tier — spends under ${inr(VALUE_POTENTIAL_MIN)} in the period`;
-    case "NEW": return `Lifecycle — last purchase under ${LIFECYCLE_NEW_MAX_MONTHS} months ago`;
-    case "AT_RISK": return `Lifecycle — last purchase ${LIFECYCLE_NEW_MAX_MONTHS}–${LIFECYCLE_LAPSED_MIN_MONTHS} months ago`;
+    case "NEW": return `Lifecycle — first & only purchases within the last ${LIFECYCLE_RECENT_MONTHS} months (new customer)`;
+    case "RECENT": return `Lifecycle — bought in the last ${LIFECYCLE_RECENT_MONTHS} months and earlier too (active)`;
+    case "AT_RISK": return `Lifecycle — last purchase ${LIFECYCLE_RECENT_MONTHS}–${LIFECYCLE_LAPSED_MIN_MONTHS} months ago`;
     case "LAPSED": return `Lifecycle — last purchase ${LIFECYCLE_LAPSED_MIN_MONTHS}+ months ago, or never`;
     default: return "";
   }
@@ -71,10 +79,19 @@ export function valueSegmentOf(spend: number | null | undefined): ValueSegment {
   const s = spend ?? 0;
   return s >= VALUE_HNI_MIN ? "HNI" : s >= VALUE_POTENTIAL_MIN ? "POTENTIAL_HNI" : "REGULAR";
 }
-/** Compute the lifecycle stage from whole months since the last purchase (null/never ⇒ Lapsed). */
-export function lifecycleSegmentOf(monthsSinceLast: number | null | undefined): LifecycleSegment {
+/**
+ * Compute the lifecycle stage from whole months since the last AND first purchase (null/never ⇒ Lapsed).
+ *   < 6 months since last → New if the first purchase is also < 6 months ago (no prior history), else Recent.
+ *   6–12 months since last → At Risk · 12+ (or never) → Lapsed.
+ */
+export function lifecycleSegmentOf(
+  monthsSinceLast: number | null | undefined,
+  monthsSinceFirst?: number | null | undefined,
+): LifecycleSegment {
   if (monthsSinceLast == null) return "LAPSED";
-  if (monthsSinceLast < LIFECYCLE_NEW_MAX_MONTHS) return "NEW";
+  if (monthsSinceLast < LIFECYCLE_RECENT_MONTHS) {
+    return monthsSinceFirst != null && monthsSinceFirst < LIFECYCLE_RECENT_MONTHS ? "NEW" : "RECENT";
+  }
   if (monthsSinceLast < LIFECYCLE_LAPSED_MIN_MONTHS) return "AT_RISK";
   return "LAPSED";
 }

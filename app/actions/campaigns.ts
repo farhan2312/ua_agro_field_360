@@ -725,7 +725,7 @@ export interface CampaignAttribution {
   windowStart: string; windowEnd: string;
   reachedFarmers: number; payingFarmers: number; matchedRevenue: number; totalRevenue: number;
 }
-export interface CampaignTracker { reach: CampaignReach; attribution: CampaignAttribution; uplift: UpliftRow[] }
+export interface CampaignTracker { reach: CampaignReach; attribution: CampaignAttribution; upliftByValue: UpliftRow[]; upliftByLifecycle: UpliftRow[] }
 
 /**
  * Campaign Tracker (managers only): outreach reach + real attributed revenue + test/control uplift.
@@ -762,7 +762,7 @@ export async function getCampaignTracker(campaignId: number): Promise<CampaignTr
   const start = camp.startDate;
   const end = new Date(camp.endDate); end.setDate(end.getDate() + 30); // +30-day grace tail
 
-  const members = await prisma.campaignMember.findMany({ where: { campaignId }, select: { farmerId: true, segment: true, group: true, reached: true, mediums: true, response: true, responseCrop: true } });
+  const members = await prisma.campaignMember.findMany({ where: { campaignId }, select: { farmerId: true, segment: true, valueSegment: true, lifecycleSegment: true, group: true, reached: true, mediums: true, response: true, responseCrop: true } });
   const test = members.filter((m) => m.group === "TEST");
   const reachedMembers = test.filter((m) => m.reached);
   // Approaches are multi-select, so a farmer reached by Call AND WhatsApp counts under both:
@@ -795,33 +795,43 @@ export async function getCampaignTracker(campaignId: number): Promise<CampaignTr
   const totalRevenue = [...totalSpend.values()].reduce((a, b) => a + b, 0);
   const payingFarmers = reachedMembers.filter((m) => (matched.get(m.farmerId) ?? 0) > 0).length;
 
-  // Uplift per segment — test vs control, on MATCHED spend in window (the real values).
+  // Uplift — test vs control on MATCHED spend in window. The value tier and the lifecycle stage are
+  // independent (an HNI farmer can be Lapsed), so we build BOTH breakdowns; the UI toggles between them.
+  // Segment snapshots fall back to the legacy collapsed `segment` for members enrolled before the split.
   type Acc = { tF: number; tR: number; tP: number; tSum: number; cF: number; cP: number; cSum: number };
-  const bySeg = new Map<string, Acc>();
-  for (const m of members) {
-    const a = bySeg.get(m.segment) ?? { tF: 0, tR: 0, tP: 0, tSum: 0, cF: 0, cP: 0, cSum: 0 };
-    const spend = matched.get(m.farmerId) ?? 0;
-    const bought = spend > 0;
-    if (m.group === "TEST") { a.tF++; if (m.reached) a.tR++; if (bought) { a.tP++; a.tSum += spend; } }
-    else { a.cF++; if (bought) { a.cP++; a.cSum += spend; } }
-    bySeg.set(m.segment, a);
-  }
-  const uplift: UpliftRow[] = [...bySeg.entries()].map(([segment, a]) => {
-    const testPurchPct = a.tR > 0 ? a.tP / a.tR : a.tF > 0 ? a.tP / a.tF : 0;
-    const ctrlPurchPct = a.cF > 0 ? a.cP / a.cF : 0;
-    const testAvg = a.tP > 0 ? a.tSum / a.tP : 0;
-    const ctrlAvg = a.cP > 0 ? a.cSum / a.cP : 0;
-    const upliftPct = testPurchPct - ctrlPurchPct;
-    const reachedOrFarmers = a.tR > 0 ? a.tR : a.tF;
-    return {
-      segment,
-      test: { farmers: a.tF, reached: a.tR, purchased: a.tP, avg: Math.round(testAvg) },
-      control: { farmers: a.cF, purchased: a.cP, avg: Math.round(ctrlAvg) },
-      upliftPurchasePct: Math.round(upliftPct * 1000) / 10,
-      upliftAvg: Math.round(testAvg - ctrlAvg),
-      incremental: Math.round(reachedOrFarmers * upliftPct * testAvg),
-    };
-  });
+  const buildUplift = (keyOf: (m: (typeof members)[number]) => string, order: readonly string[]): UpliftRow[] => {
+    const bySeg = new Map<string, Acc>();
+    for (const m of members) {
+      const k = keyOf(m);
+      const a = bySeg.get(k) ?? { tF: 0, tR: 0, tP: 0, tSum: 0, cF: 0, cP: 0, cSum: 0 };
+      const spend = matched.get(m.farmerId) ?? 0;
+      const bought = spend > 0;
+      if (m.group === "TEST") { a.tF++; if (m.reached) a.tR++; if (bought) { a.tP++; a.tSum += spend; } }
+      else { a.cF++; if (bought) { a.cP++; a.cSum += spend; } }
+      bySeg.set(k, a);
+    }
+    return order.filter((k) => bySeg.has(k)).map((segment) => {
+      const a = bySeg.get(segment)!;
+      const testPurchPct = a.tR > 0 ? a.tP / a.tR : a.tF > 0 ? a.tP / a.tF : 0;
+      const ctrlPurchPct = a.cF > 0 ? a.cP / a.cF : 0;
+      const testAvg = a.tP > 0 ? a.tSum / a.tP : 0;
+      const ctrlAvg = a.cP > 0 ? a.cSum / a.cP : 0;
+      const upliftPct = testPurchPct - ctrlPurchPct;
+      const reachedOrFarmers = a.tR > 0 ? a.tR : a.tF;
+      return {
+        segment,
+        test: { farmers: a.tF, reached: a.tR, purchased: a.tP, avg: Math.round(testAvg) },
+        control: { farmers: a.cF, purchased: a.cP, avg: Math.round(ctrlAvg) },
+        upliftPurchasePct: Math.round(upliftPct * 1000) / 10,
+        upliftAvg: Math.round(testAvg - ctrlAvg),
+        incremental: Math.round(reachedOrFarmers * upliftPct * testAvg),
+      };
+    });
+  };
+  const upliftByValue = buildUplift(
+    (m) => m.valueSegment ?? (VALUE_SEGMENTS.includes(m.segment as never) ? m.segment : "REGULAR"), VALUE_SEGMENTS);
+  const upliftByLifecycle = buildUplift(
+    (m) => m.lifecycleSegment ?? (LIFECYCLE_SEGMENTS.includes(m.segment as never) ? m.segment : "LAPSED"), LIFECYCLE_SEGMENTS);
 
   const basisLabel = pf.all
     ? "All purchases (cluster isn't product-specific)"
@@ -834,6 +844,6 @@ export async function getCampaignTracker(campaignId: number): Promise<CampaignTr
       windowStart: iso(start)!, windowEnd: iso(end)!,
       reachedFarmers: reachedMembers.length, payingFarmers, matchedRevenue, totalRevenue,
     },
-    uplift,
+    upliftByValue, upliftByLifecycle,
   };
 }

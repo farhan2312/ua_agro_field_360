@@ -2,7 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
-import { segMeta, VALUE_SEGMENTS, LIFECYCLE_SEGMENTS, VALUE_HNI_MIN, VALUE_POTENTIAL_MIN, LIFECYCLE_NEW_MAX_MONTHS, LIFECYCLE_LAPSED_MIN_MONTHS } from "@/lib/campaign-segments";
+import { segMeta, VALUE_SEGMENTS, LIFECYCLE_SEGMENTS, VALUE_HNI_MIN, VALUE_POTENTIAL_MIN, LIFECYCLE_RECENT_MONTHS, LIFECYCLE_LAPSED_MIN_MONTHS } from "@/lib/campaign-segments";
 import { inr } from "@/lib/format";
 import { cropLabel } from "@/lib/crops";
 import { tagLabel } from "@/lib/crop-pest";
@@ -90,7 +90,7 @@ function fyBounds(fyStarts: number[]): { window: (alias: string) => Prisma.Sql; 
 function tiersCte(f: WbFilters): Prisma.Sql {
   const { window, asOfSql } = fyBounds(f.fyStarts ?? []);
   const where = Prisma.sql`WHERE ${Prisma.join(staticConds(f, "f"), " AND ")}`;
-  const newM = Prisma.raw(String(LIFECYCLE_NEW_MAX_MONTHS)), lapsedM = Prisma.raw(String(LIFECYCLE_LAPSED_MIN_MONTHS));
+  const recentM = Prisma.raw(String(LIFECYCLE_RECENT_MONTHS)), lapsedM = Prisma.raw(String(LIFECYCLE_LAPSED_MIN_MONTHS));
   // Crop filter → only that crop's tagged lines. No crop → every line.
   const cropCond = f.crops?.length ? Prisma.sql`AND sl."cropTag" = ANY(${f.crops}::text[])` : Prisma.empty;
   const spendAgg = Prisma.sql`spend_agg AS (
@@ -102,18 +102,21 @@ function tiersCte(f: WbFilters): Prisma.Sql {
     scoped AS (SELECT f.id, f."storeId", f."zone" FROM "Farmer" f ${where}),
     ${spendAgg},
     recency_agg AS (
-      SELECT s."farmerId" id, MAX(s."soldAt") FILTER (WHERE s."soldAt" < ${asOfSql}) last_at
+      SELECT s."farmerId" id,
+        MAX(s."soldAt") FILTER (WHERE s."soldAt" < ${asOfSql}) last_at,
+        MIN(s."soldAt") FILTER (WHERE s."soldAt" < ${asOfSql}) first_at
       FROM "Sale" s JOIN scoped sc ON sc.id = s."farmerId"
       WHERE s.source = 'REAL' AND s."soldAt" IS NOT NULL
       GROUP BY 1),
     agg AS (
-      SELECT sc.id, sc."storeId", sc."zone", COALESCE(sp.spend, 0)::bigint spend, rc.last_at
+      SELECT sc.id, sc."storeId", sc."zone", COALESCE(sp.spend, 0)::bigint spend, rc.last_at, rc.first_at
       FROM scoped sc LEFT JOIN spend_agg sp ON sp.id = sc.id LEFT JOIN recency_agg rc ON rc.id = sc.id),
     tiers AS (
       SELECT id, "storeId", "zone", spend,
         CASE WHEN spend >= ${VALUE_HNI_MIN} THEN 'HNI' WHEN spend >= ${VALUE_POTENTIAL_MIN} THEN 'POTENTIAL_HNI' ELSE 'REGULAR' END vseg,
         CASE WHEN last_at IS NULL THEN 'LAPSED'
-          WHEN last_at > ${asOfSql} - interval '${newM} months' THEN 'NEW'
+          WHEN last_at > ${asOfSql} - interval '${recentM} months'
+            THEN CASE WHEN first_at > ${asOfSql} - interval '${recentM} months' THEN 'NEW' ELSE 'RECENT' END
           WHEN last_at > ${asOfSql} - interval '${lapsedM} months' THEN 'AT_RISK'
           ELSE 'LAPSED' END lseg
       FROM agg)`;
