@@ -163,6 +163,9 @@ export async function getClusterFarmers(
 
     // Dynamic clusters resolve their rule live; static/legacy use the frozen id snapshot.
     const crit = cluster.mode === "dynamic" ? parseCriteria(cluster.criteria) : null;
+    // The crop(s) this cluster was built on (any mode) — used to scope the Crop + LTV columns.
+    const cCrit = parseCriteria(cluster.criteria);
+    const selectedCrops = [...new Set([...(cCrit?.salesCrops ?? []), ...(cCrit?.cropTags ?? []), ...(cCrit?.visitCrops ?? []), ...(cCrit?.crop ? [cCrit.crop] : [])])];
     const base: Prisma.FarmerWhereInput = crit
       ? scopedCriteriaWhere(crit)
       : { source: "REAL", id: { in: cluster.farmerIds } };
@@ -189,30 +192,32 @@ export async function getClusterFarmers(
     }
     if (pageIds.length === 0) return { rows: [], total, page, pageSize: CLUSTER_PAGE_SIZE };
 
-    const [farmers, sums] = await Promise.all([
-      prisma.farmer.findMany({
-        where: { id: { in: pageIds } },
-        select: {
-          id: true,
-          name: true,
-          village: true,
-          salesCropTags: true,
-          land: true,
-          valueSegment: true,
-          lifecycleSegment: true,
-          store: { select: { name: true } },
-          visits: { orderBy: { id: "desc" }, take: 1, select: { date: true } },
-        },
-      }),
-      prisma.sale.groupBy({
-        by: ["farmerId"],
-        where: { farmerId: { in: pageIds } },
-        _sum: { amountNum: true },
-      }),
-    ]);
+    const farmers = await prisma.farmer.findMany({
+      where: { id: { in: pageIds } },
+      select: {
+        id: true,
+        name: true,
+        village: true,
+        salesCropTags: true,
+        land: true,
+        valueSegment: true,
+        lifecycleSegment: true,
+        store: { select: { name: true } },
+        visits: { orderBy: { id: "desc" }, take: 1, select: { date: true } },
+      },
+    });
 
+    // LTV: crop-scoped base spend (SaleLine.basic on the cluster's crop-tagged lines) when the cluster
+    // has a crop filter — not the whole-basket bill total. No crop filter → all-time bill total.
+    const ltvById = new Map<number, number>();
+    if (selectedCrops.length) {
+      const rows = await prisma.saleLine.groupBy({ by: ["farmerId"], where: { farmerId: { in: pageIds }, source: "REAL", cropTag: { in: selectedCrops } }, _sum: { basic: true } });
+      for (const r of rows) if (r.farmerId != null) ltvById.set(r.farmerId, Math.round(r._sum.basic ?? 0));
+    } else {
+      const rows = await prisma.sale.groupBy({ by: ["farmerId"], where: { farmerId: { in: pageIds } }, _sum: { amountNum: true } });
+      for (const r of rows) ltvById.set(r.farmerId, r._sum.amountNum ?? 0);
+    }
     const byId = new Map(farmers.map((f) => [f.id, f]));
-    const ltvById = new Map(sums.map((s) => [s.farmerId, s._sum.amountNum ?? 0]));
 
     // Preserve the stored id order.
     const rows = pageIds
@@ -222,7 +227,9 @@ export async function getClusterFarmers(
         id: f.id,
         name: f.name,
         village: f.village ?? "—",
-        crop: f.salesCropTags?.length ? f.salesCropTags.map(cropLabel).join(", ") : "—",
+        crop: selectedCrops.length
+          ? ((f.salesCropTags ?? []).filter((c) => selectedCrops.includes(c)).map(cropLabel).join(", ") || selectedCrops.map(cropLabel).join(", "))
+          : ((f.salesCropTags ?? []).length ? f.salesCropTags.map(cropLabel).join(", ") : "—"),
         land: f.land ?? 0,
         segment: f.valueSegment ? segMeta(f.valueSegment).label : "—",
         lifecycle: f.lifecycleSegment ? segMeta(f.lifecycleSegment).label : "—",
