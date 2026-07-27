@@ -50,7 +50,8 @@ export interface ClusterMemberRow {
   village: string;
   crop: string;
   land: number;
-  segment: string; // display label or "—"
+  segment: string; // value tier label (HNI/Potential HNI/Regular) or "—"
+  lifecycle: string; // lifecycle label (New/At Risk/Lapsed) or "—"
   lastVisit: string;
   ltv: string; // formatted ₹ or "—"
   /** The farmer's mapped store (short name), or "—". */

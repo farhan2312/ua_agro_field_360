@@ -5,6 +5,8 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { LAYER_LABELS, type MapLayerKey } from "@/lib/map-layers";
 import { SEGMENT_ENUM_TO_LABEL, LEAD_ENUM_TO_LABEL } from "@/lib/segments";
+import { segMeta } from "@/lib/campaign-segments";
+import { cropLabel } from "@/lib/crops";
 import { inr } from "@/lib/format";
 import { shortStoreName } from "@/lib/store-utils";
 import { getScope, farmerScopeWhere } from "@/lib/scope";
@@ -194,9 +196,10 @@ export async function getClusterFarmers(
           id: true,
           name: true,
           village: true,
-          crop: true,
+          salesCropTags: true,
           land: true,
-          segment: true,
+          valueSegment: true,
+          lifecycleSegment: true,
           store: { select: { name: true } },
           visits: { orderBy: { id: "desc" }, take: 1, select: { date: true } },
         },
@@ -219,9 +222,10 @@ export async function getClusterFarmers(
         id: f.id,
         name: f.name,
         village: f.village ?? "—",
-        crop: f.crop ?? "—",
+        crop: f.salesCropTags?.length ? f.salesCropTags.map(cropLabel).join(", ") : "—",
         land: f.land ?? 0,
-        segment: f.segment ? SEGMENT_ENUM_TO_LABEL[f.segment] ?? "—" : "—",
+        segment: f.valueSegment ? segMeta(f.valueSegment).label : "—",
+        lifecycle: f.lifecycleSegment ? segMeta(f.lifecycleSegment).label : "—",
         lastVisit: f.visits[0]?.date ?? "—",
         ltv: ltvById.get(f.id) ? inr(ltvById.get(f.id)!) : "—",
         store: shortStoreName(f.store?.name) || "—",

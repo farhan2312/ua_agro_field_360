@@ -243,7 +243,7 @@ function MembersModal({ cluster, onClose }: { cluster: ClusterVM; onClose: () =>
           : data.rows.length === 0 ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">No members.</div>
           : (
             <div className="overflow-x-auto"><table className="w-full min-w-[640px] text-left text-[12.5px]">
-              <thead><tr className="border-b border-[#EEE] text-[10px] font-bold uppercase text-[#9E9E9E]"><th className="py-2">Farmer</th><th>Store</th><th>Village</th><th>Crop</th><th>Segment</th><th className="text-right">LTV</th></tr></thead>
+              <thead><tr className="border-b border-[#EEE] text-[10px] font-bold uppercase text-[#9E9E9E]"><th className="py-2">Farmer</th><th>Store</th><th>Village</th><th>Crop</th><th>Value segment</th><th>Lifecycle</th><th className="text-right">LTV</th></tr></thead>
               <tbody>{data.rows.map((f) => (
                 <tr key={f.id} className="border-b border-[#F5F5F5]">
                   <td className="py-2 font-semibold text-[#1A1C1A]">{f.name}</td>
@@ -251,6 +251,7 @@ function MembersModal({ cluster, onClose }: { cluster: ClusterVM; onClose: () =>
                   <td className="text-[#616161]">{f.village}</td>
                   <td className="text-[#616161]">{f.crop}</td>
                   <td className="text-[#616161]">{f.segment}</td>
+                  <td className="text-[#616161]">{f.lifecycle}</td>
                   <td className="text-right font-semibold text-[#1A1C1A]">{f.ltv}</td>
                 </tr>
               ))}</tbody>

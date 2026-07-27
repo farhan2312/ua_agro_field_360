@@ -553,12 +553,7 @@ export async function exportCampaignAudienceXlsx(campaignId: number, campaignNam
   });
   if (!members.length) return { ok: false, error: "No enrolled farmers in your scope for this campaign." };
 
-  const farmerIds = [...new Set(members.map((m) => m.farmerId))];
-  const [farmers, stores] = await Promise.all([
-    prisma.farmer.findMany({ where: { id: { in: farmerIds } }, select: { id: true, name: true, mobile: true, village: true, cropTags: true } }),
-    prisma.store.findMany({ select: { id: true, name: true } }),
-  ]);
-  const fMap = new Map(farmers.map((f) => [f.id, f]));
+  const stores = await prisma.store.findMany({ select: { id: true, name: true } });
   const sMap = new Map(stores.map((s) => [s.id, shortStoreName(s.name)]));
 
   const V = [...VALUE_SEGMENTS], L = [...LIFECYCLE_SEGMENTS];
@@ -581,22 +576,9 @@ export async function exportCampaignAudienceXlsx(campaignId: number, campaignNam
     ["All stores", ...V.map((k) => vTot[k] ?? 0), members.length, ...L.map((k) => lTot[k] ?? 0), members.length],
     ...mrows.map((r) => [r.store, ...V.map((k) => r.value[k] ?? 0), r.total, ...L.map((k) => r.lifecycle[k] ?? 0), r.total]),
   ];
-  const farmerSheet: (string | number)[][] = [
-    ["Farmer", "Mobile", "Store", "Village", "Value segment", "Lifecycle", "Group", "Crops"],
-    ...members.map((m) => {
-      const f = fMap.get(m.farmerId);
-      return [
-        f?.name ?? `Farmer #${m.farmerId}`, f?.mobile ?? "",
-        m.storeId != null ? sMap.get(m.storeId) ?? "" : "", f?.village ?? "",
-        segMeta(vseg(m)).label, segMeta(lseg(m)).label, m.group, (f?.cropTags ?? []).map(cropLabel).join(", "),
-      ];
-    }),
-  ];
-
   const safe = (campaignName || "campaign").replace(/[\\/?*[\]:]/g, " ").trim().slice(0, 60) || "campaign";
   const b64 = buildWorkbookB64([
     { name: "Value + Lifecycle x Store", rows: matrixSheet },
-    { name: "Farmers", rows: farmerSheet },
   ]);
   return { ok: true, filename: `${safe} - audience.xlsx`, b64 };
 }
