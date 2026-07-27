@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition, type ReactNode } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
 import { ChainNext } from "@/components/ChainNext";
-import { VALUE_SEGMENTS, LIFECYCLE_SEGMENTS, VALUE_TITLE, LIFECYCLE_TITLE, segMeta } from "@/lib/campaign-segments";
+import { VALUE_SEGMENTS, LIFECYCLE_SEGMENTS, VALUE_TITLE, LIFECYCLE_TITLE, segMeta, segDef } from "@/lib/campaign-segments";
 import { cropLabel } from "@/lib/crops";
 import { tagLabel } from "@/lib/crop-pest";
 import {
@@ -125,9 +125,9 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
           selected={filters.pests ?? []} onToggle={(v) => toggleStr("pests", v)} onClear={() => apply({ pests: undefined })} />
         {filters.lens === "sales" && (
           <>
-            <MultiSel ph={`All ${VALUE_TITLE.toLowerCase()}s`} options={VALUE_SEGMENTS.map((s) => [s, segMeta(s).label])}
+            <MultiSel ph={`All ${VALUE_TITLE.toLowerCase()}s`} options={VALUE_SEGMENTS.map((s) => [s, segMeta(s).label])} titleOf={segDef}
               selected={filters.valueSegments ?? []} onToggle={(v) => toggleStr("valueSegments", v)} onClear={() => apply({ valueSegments: undefined })} />
-            <MultiSel ph={`All ${LIFECYCLE_TITLE.toLowerCase()}`} options={LIFECYCLE_SEGMENTS.map((s) => [s, segMeta(s).label])}
+            <MultiSel ph={`All ${LIFECYCLE_TITLE.toLowerCase()}`} options={LIFECYCLE_SEGMENTS.map((s) => [s, segMeta(s).label])} titleOf={segDef}
               selected={filters.lifecycleSegments ?? []} onToggle={(v) => toggleStr("lifecycleSegments", v)} onClear={() => apply({ lifecycleSegments: undefined })} />
             <MultiSel ph="Any spend" options={facets.spendTiers.map((t, i) => [String(i), t])}
               selected={(filters.spendTiers ?? []).map(String)} onToggle={(v) => toggleInt("spendTiers", Number(v))} onClear={() => apply({ spendTiers: undefined })} />
@@ -229,8 +229,8 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
  * the bar reads cleanly. Native <details> popover (closed on outside click by the parent listener).
  * `ph` doubles as the "all" placeholder and the reset button label. Options are pre-sorted server-side.
  */
-function MultiSel({ ph, options, selected, onToggle, onClear, accent = "#2E7D32" }: {
-  ph: string; options: [string, string][]; selected: string[]; onToggle: (v: string) => void; onClear: () => void; accent?: string;
+function MultiSel({ ph, options, selected, onToggle, onClear, accent = "#2E7D32", titleOf }: {
+  ph: string; options: [string, string][]; selected: string[]; onToggle: (v: string) => void; onClear: () => void; accent?: string; titleOf?: (v: string) => string;
 }) {
   const text = selected.length === 0 ? ph : selected.length === 1 ? (options.find((o) => o[0] === selected[0])?.[1] ?? selected[0]) : `${selected.length} selected`;
   return (
@@ -244,9 +244,9 @@ function MultiSel({ ph, options, selected, onToggle, onClear, accent = "#2E7D32"
           className={`w-full rounded px-2 py-1.5 text-left text-[12.5px] font-semibold hover:bg-[#F5F7F5] ${selected.length === 0 ? "" : "text-[#616161]"}`}
           style={selected.length === 0 ? { color: accent } : undefined}>{ph}</button>
         {options.map(([v, l]) => (
-          <label key={v} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[12.5px] text-[#424242] hover:bg-[#F5F7F5]">
+          <label key={v} title={titleOf ? titleOf(v) : l} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[12.5px] text-[#424242] hover:bg-[#F5F7F5]">
             <input type="checkbox" checked={selected.includes(v)} onChange={() => onToggle(v)} style={{ accentColor: accent }} />
-            <span className="truncate" title={l}>{l}</span>
+            <span className="truncate">{l}</span>
           </label>
         ))}
       </div>

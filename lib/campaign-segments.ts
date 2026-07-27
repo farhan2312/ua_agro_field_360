@@ -52,6 +52,20 @@ export const VALUE_TITLE = "Value segment";
 export const valueMeta = (k: string) => segMeta(k);
 export const lifecycleMeta = (k: string) => segMeta(k);
 
+/** One-line definition of what a value/lifecycle segment means — used as hover tooltips across the app. */
+export function segDef(k: string): string {
+  const inr = (n: number) => "₹" + n.toLocaleString("en-IN");
+  switch (k) {
+    case "HNI": return `Value tier — spends ${inr(VALUE_HNI_MIN)}+ in the period`;
+    case "POTENTIAL_HNI": return `Value tier — spends ${inr(VALUE_POTENTIAL_MIN)}–${inr(VALUE_HNI_MIN)} in the period`;
+    case "REGULAR": return `Value tier — spends under ${inr(VALUE_POTENTIAL_MIN)} in the period`;
+    case "NEW": return `Lifecycle — last purchase under ${LIFECYCLE_NEW_MAX_MONTHS} months ago`;
+    case "AT_RISK": return `Lifecycle — last purchase ${LIFECYCLE_NEW_MAX_MONTHS}–${LIFECYCLE_LAPSED_MIN_MONTHS} months ago`;
+    case "LAPSED": return `Lifecycle — last purchase ${LIFECYCLE_LAPSED_MIN_MONTHS}+ months ago, or never`;
+    default: return "";
+  }
+}
+
 /** Compute the value tier from P12M spend. */
 export function valueSegmentOf(spend: number | null | undefined): ValueSegment {
   const s = spend ?? 0;

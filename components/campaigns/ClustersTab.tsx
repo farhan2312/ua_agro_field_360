@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
-import { SEGMENT_COLUMNS, segMeta } from "@/lib/campaign-segments";
+import { segMeta, segDef, VALUE_SEGMENTS, LIFECYCLE_SEGMENTS, VALUE_TITLE, LIFECYCLE_TITLE } from "@/lib/campaign-segments";
 import { cropLabel } from "@/lib/crops";
 import { tagLabel } from "@/lib/crop-pest";
 import { shortStoreName } from "@/lib/store-utils";
@@ -90,7 +90,8 @@ export function ClustersTab({ initial, zones, crops, pests, stores, canChain, ca
 function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain, onClose, onCreated }: { zones: string[]; crops: CropOption[]; pests: PestOption[]; stores: StoreOption[]; canChain: boolean; onClose: () => void; onCreated: () => void }) {
   const [name, setName] = useState("");
   const [createdId, setCreatedId] = useState<number | null>(null); // chain: cluster → project
-  const [segs, setSegs] = useState<string[]>([]);
+  const [valueSegs, setValueSegs] = useState<string[]>([]);
+  const [lifecycleSegs, setLifecycleSegs] = useState<string[]>([]);
   const [crops, setCrops] = useState<string[]>([]);
   const [pests, setPests] = useState<string[]>([]);
   const [zoneList, setZoneList] = useState<string[]>([]);
@@ -110,7 +111,8 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
   );
 
   const criteria = (): ClusterCriteria => ({
-    campaignSegments: segs.length ? segs : undefined,
+    valueSegments: valueSegs.length ? valueSegs : undefined,
+    lifecycleSegments: lifecycleSegs.length ? lifecycleSegs : undefined,
     cropTags: crops.length ? crops : undefined,
     pestTags: pests.length ? pests : undefined,
     zones: zoneList.length ? zoneList : undefined,
@@ -118,7 +120,7 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
     ...(spendIdx >= 0 ? { spendMin: SPEND_PRESETS[spendIdx].min, spendMax: SPEND_PRESETS[spendIdx].max } : {}),
     q: q.trim() || undefined,
   });
-  const hasAny = segs.length || crops.length || pests.length || zoneList.length || storeIds.length || spendIdx >= 0 || q.trim();
+  const hasAny = valueSegs.length || lifecycleSegs.length || crops.length || pests.length || zoneList.length || storeIds.length || spendIdx >= 0 || q.trim();
 
   // Debounced live count preview.
   useEffect(() => {
@@ -127,7 +129,7 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
     const t = setTimeout(async () => { setCount(await previewClusterCount(criteria())); setCounting(false); }, 350);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segs, crops, pests, zoneList, storeIds, spendIdx, q]);
+  }, [valueSegs, lifecycleSegs, crops, pests, zoneList, storeIds, spendIdx, q]);
 
   const toggle = (arr: string[], set: (a: string[]) => void, v: string) => set(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
   const toggleZone = (z: string) => {
@@ -161,9 +163,14 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
         <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Name</label>
         <input className="mt-1 mb-3 w-full rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Amethi At-Risk HNI" />
 
-        <div className="mb-1.5 text-[11px] font-semibold uppercase text-[#9E9E9E]">Segments (any)</div>
-        <div className="mb-3 flex flex-wrap gap-1.5">{SEGMENT_COLUMNS.map((s) => { const on = segs.includes(s); const m = segMeta(s); return (
-          <button key={s} type="button" onClick={() => toggle(segs, setSegs, s)} className="rounded-full border-[1.5px] px-3 py-1 text-[12px] font-semibold" style={{ background: on ? m.bg : "#fff", color: on ? m.color : "#616161", borderColor: on ? m.color : "#E0E0E0" }}>{m.label}</button>
+        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase text-[#9E9E9E]">{VALUE_TITLE} (any)<span className="normal-case text-[10px] font-normal text-[#BDBDBD]">· by spend · hover for definition</span></div>
+        <div className="mb-3 flex flex-wrap gap-1.5">{VALUE_SEGMENTS.map((s) => { const on = valueSegs.includes(s); const m = segMeta(s); return (
+          <button key={s} type="button" title={segDef(s)} onClick={() => toggle(valueSegs, setValueSegs, s)} className="rounded-full border-[1.5px] px-3 py-1 text-[12px] font-semibold" style={{ background: on ? m.bg : "#fff", color: on ? m.color : "#616161", borderColor: on ? m.color : "#E0E0E0" }}>{m.label}</button>
+        ); })}</div>
+
+        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase text-[#9E9E9E]">{LIFECYCLE_TITLE} (any)<span className="normal-case text-[10px] font-normal text-[#BDBDBD]">· by recency · hover for definition</span></div>
+        <div className="mb-3 flex flex-wrap gap-1.5">{LIFECYCLE_SEGMENTS.map((s) => { const on = lifecycleSegs.includes(s); const m = segMeta(s); return (
+          <button key={s} type="button" title={segDef(s)} onClick={() => toggle(lifecycleSegs, setLifecycleSegs, s)} className="rounded-full border-[1.5px] px-3 py-1 text-[12px] font-semibold" style={{ background: on ? m.bg : "#fff", color: on ? m.color : "#616161", borderColor: on ? m.color : "#E0E0E0" }}>{m.label}</button>
         ); })}</div>
 
         <div className="mb-1.5 text-[11px] font-semibold uppercase text-[#9E9E9E]">Crop (any of)</div>
