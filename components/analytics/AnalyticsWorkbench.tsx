@@ -7,12 +7,11 @@ import { VALUE_SEGMENTS, LIFECYCLE_SEGMENTS, VALUE_TITLE, LIFECYCLE_TITLE, segMe
 import { cropLabel } from "@/lib/crops";
 import { tagLabel } from "@/lib/crop-pest";
 import {
-  getWorkbench, getWorkbenchCustomers, saveWorkbenchSegment, getCropTrend, getVisitAnalytics, exportWorkbookXlsx, getSalesRawData,
+  getWorkbench, getWorkbenchCustomers, saveWorkbenchSegment, getCropTrend, getVisitAnalytics, getSalesRawData,
   type Lens, type WbFilters, type WbData, type WbFacets, type WbBar, type WbCustomer, type CropTrendPoint,
   type VisitAnalytics, type VisitMonth, type VisitAdoption, type VisitStoreRow, type MergedMatrix, type TreeCell, type SegDim,
   type RawKpis, type RawLine,
 } from "@/app/actions/analytics-segments";
-import { downloadB64 } from "@/lib/download";
 
 const CARD = "rounded-[14px] border border-black/[0.04] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]";
 const n = (x: number) => Math.round(x).toLocaleString("en-IN");
@@ -31,6 +30,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
   const [rows, setRows] = useState<WbCustomer[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportBytes, setExportBytes] = useState(0);
   const [treeBy, setTreeBy] = useState<"value" | "lifecycle">("value"); // shared primary dimension for the KPI tree AND the detailed matrix
   const flipTree = () => setTreeBy((b) => (b === "value" ? "lifecycle" : "value"));
   const years = filters.fyStarts ?? []; // selected FY start years — drives the whole sales analysis
@@ -51,27 +51,40 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
     return () => document.removeEventListener("mousedown", onDown);
   }, []);
 
-  const exportXlsx = () => {
-    setExporting(true);
-    exportWorkbookXlsx(filters)
-      .then((res) => {
-        if (res.ok && res.b64 && res.filename) downloadB64(res.b64, res.filename);
-        else alert(res.error ?? "Export failed.");
-      })
-      .catch(() => alert("Export failed."))
-      .finally(() => setExporting(false));
+  // One streaming Excel export (matrix + all sale lines + filters) — any size, with live progress.
+  const exportExcel = async () => {
+    if (exporting) return;
+    setExporting(true); setExportBytes(0);
+    try {
+      const f = {
+        storeIds: filters.storeIds, zones: filters.zones, crops: filters.crops, pests: filters.pests,
+        valueSegments: filters.valueSegments, lifecycleSegments: filters.lifecycleSegments,
+        spendTiers: filters.spendTiers, fyStarts: filters.fyStarts,
+      };
+      const url = `/api/analytics/export?f=${encodeURIComponent(btoa(JSON.stringify(f)))}`;
+      const res = await fetch(url);
+      if (!res.ok || !res.body) throw new Error((await res.text().catch(() => "")) || "Export failed.");
+      const reader = res.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let received = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) { chunks.push(value); received += value.length; setExportBytes(received); }
+      }
+      const blob = new Blob(chunks as BlobPart[], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = res.headers.get("X-Export-Filename") || "analytics-export.xlsx";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Export failed.");
+    } finally {
+      setExporting(false);
+    }
   };
-
-  // Whole line-level dataset — streamed from a route handler as CSV (no size cap; works with no filters).
-  const exportAllCsv = () => {
-    const f = {
-      storeIds: filters.storeIds, zones: filters.zones, crops: filters.crops, pests: filters.pests,
-      valueSegments: filters.valueSegments, lifecycleSegments: filters.lifecycleSegments,
-      spendTiers: filters.spendTiers, fyStarts: filters.fyStarts,
-    };
-    const enc = encodeURIComponent(btoa(JSON.stringify(f)));
-    window.location.href = `/api/analytics/export?f=${enc}`;
-  };
+  const fmtBytes = (n: number) => (n < 1024 * 1024 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 
   const apply = (patch: Partial<WbFilters>) => {
     const f = { ...filters, ...patch };
@@ -190,15 +203,17 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
         <BarCard title="Sales-crop breakdown" bars={data.cropBreakdown.map((b) => ({ ...b, label: cropLabel(b.label) }))} fmt={n} accent="#F9A825" />
 
         <MergedMatrixCard matrix={data.matrix} valueCols={data.valueCols} lifecycleCols={data.lifecycleCols} onCell={openCell} by={treeBy} onFlip={flipTree} filters={filters}
-          right={<div className="flex items-center gap-2">
-            <button type="button" onClick={exportXlsx} disabled={exporting}
-              className="rounded-[8px] border border-[#2E7D32] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9] disabled:opacity-40"
-              title="Excel summary: Value×Lifecycle matrix + up to 100k sale lines">
-              {exporting ? "Exporting…" : "⬇ Excel (summary)"}</button>
-            <button type="button" onClick={exportAllCsv}
-              className="rounded-[8px] border border-[#1565C0] px-3 py-1.5 text-[12px] font-semibold text-[#1565C0] hover:bg-[#E3F2FD]"
-              title="Every matching sale line, streamed as CSV — no size limit (use this for the whole dataset)">
-              ⬇ All lines (CSV)</button>
+          right={<div className="flex items-center gap-2.5">
+            {exporting && (
+              <span className="flex items-center gap-2 rounded-full bg-[#E3F2FD] px-2.5 py-1 text-[11px] font-semibold text-[#1565C0]">
+                <span className="h-3 w-3 animate-spin rounded-full border-2 border-[#90CAF9] border-t-[#1565C0]" />
+                Preparing Excel… {fmtBytes(exportBytes)}
+              </span>
+            )}
+            <button type="button" onClick={exportExcel} disabled={exporting}
+              className="rounded-[8px] border border-[#2E7D32] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9] disabled:opacity-50"
+              title="Full workbook: Value×Lifecycle matrix + every matching sale line + filters (streamed, any size)">
+              {exporting ? "Exporting…" : "⬇ Export to Excel"}</button>
           </div>} />
       </div>
       ) : (
