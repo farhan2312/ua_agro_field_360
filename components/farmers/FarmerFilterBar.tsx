@@ -2,25 +2,27 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { segMeta } from "@/lib/campaign-segments";
+import { VALUE_TITLE, LIFECYCLE_TITLE } from "@/lib/campaign-segments";
 import { cropLabel } from "@/lib/crops";
 import { tagLabel } from "@/lib/crop-pest";
-import type { SegFilterVM, FarmerFacetsVM, FarmerSelectedVM } from "./types";
+import type { SegChipVM, FarmerFacetsVM, FarmerSelectedVM } from "./types";
 
 /**
- * Search box (debounced → writes `?q=`) + campaign-segment filter chips
- * (`All` + HNI/Potential HNI/Regular/At Risk/New/Lapsed → writes `?segment=<key>`)
- * + dropdown filters: store, region (zone), crop, spend tier.
- * Every change resets `?page=` and preserves the other filters.
+ * Search box (debounced → writes `?q=`) + TWO independent multi-select segment groups —
+ * Value tier (HNI/Potential/Regular → `?value=`) and Lifecycle (New/Recent/At Risk/Lapsed →
+ * `?lifecycle=`), each a comma list of keys — plus dropdown filters (store, region, crop, pest,
+ * spend). Every change resets `?page=` and preserves the other filters.
  */
 export function FarmerFilterBar({
   search,
-  filters,
+  valueChips,
+  lifecycleChips,
   facets,
   selected,
 }: {
   search: string;
-  filters: SegFilterVM[];
+  valueChips: SegChipVM[];
+  lifecycleChips: SegChipVM[];
   facets: FarmerFacetsVM;
   selected: FarmerSelectedVM;
 }) {
@@ -33,12 +35,14 @@ export function FarmerFilterBar({
   useEffect(() => setValue(search), [search]);
 
   /** Build the URL from the current selections, applying one override. */
-  function push(overrides: Partial<FarmerSelectedVM & { q: string; segment: string | null }>) {
+  function push(overrides: Partial<FarmerSelectedVM & { q: string }>) {
     const params = new URLSearchParams();
     const q = overrides.q !== undefined ? overrides.q : value;
     if (q.trim()) params.set("q", q.trim());
-    const seg = overrides.segment !== undefined ? overrides.segment : filters.find((f) => f.active)?.value ?? null;
-    if (seg) params.set("segment", seg);
+    const values = overrides.values !== undefined ? overrides.values : selected.values;
+    if (values.length) params.set("value", values.join(","));
+    const lifecycles = overrides.lifecycles !== undefined ? overrides.lifecycles : selected.lifecycles;
+    if (lifecycles.length) params.set("lifecycle", lifecycles.join(","));
     const store = overrides.store !== undefined ? overrides.store : selected.store;
     if (store) params.set("store", store);
     const zone = overrides.zone !== undefined ? overrides.zone : selected.zone;
@@ -59,8 +63,34 @@ export function FarmerFilterBar({
     debounce.current = setTimeout(() => push({ q: next }), 300);
   }
 
-  const anyFilter = selected.store || selected.zone || selected.crop || selected.pest || selected.spend || filters.some((f) => f.active && f.value !== null);
+  /** Toggle a single key within its dimension's selection. */
+  const toggle = (list: string[], key: string) => (list.includes(key) ? list.filter((k) => k !== key) : [...list, key]);
+
+  const anyFilter = selected.store || selected.zone || selected.crop || selected.pest || selected.spend || selected.values.length || selected.lifecycles.length;
   const select = "rounded-xl border-[1.5px] border-[#E0E0E0] bg-white px-3 py-[9px] text-[12.5px] text-[#424242] outline-none focus:border-[#2E7D32]";
+
+  const ChipGroup = ({ title, chips, dim }: { title: string; chips: SegChipVM[]; dim: "values" | "lifecycles" }) => (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="mr-0.5 text-[10.5px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">{title}</span>
+      {chips.map((c) => {
+        const style = c.active
+          ? { background: c.color, color: "#fff", borderColor: "transparent" }
+          : { background: "#fff", color: c.color, borderColor: "#E0E0E0" };
+        return (
+          <button
+            key={c.value}
+            type="button"
+            title={c.title}
+            onClick={() => push({ [dim]: toggle(selected[dim], c.value) } as Partial<FarmerSelectedVM>)}
+            style={style}
+            className="px-3.5 py-[6px] rounded-full text-[11.5px] font-semibold cursor-pointer border-[1.5px] transition-opacity hover:opacity-85"
+          >
+            {c.label}
+          </button>
+        );
+      })}
+    </div>
+  );
 
   return (
     <div className="mb-4 flex flex-col gap-2.5">
@@ -72,33 +102,8 @@ export function FarmerFilterBar({
           onChange={(e) => onSearchChange(e.target.value)}
           className="flex-1 max-w-[420px] px-[18px] py-[11px] border-[1.5px] border-[#E0E0E0] rounded-xl text-[13px] bg-white box-border outline-none focus:border-[#2E7D32] focus:shadow-[0_0_0_3px_rgba(46,125,50,0.1)]"
         />
-        {filters.map((f) => {
-          const meta = f.value ? segMeta(f.value) : null;
-          // active: All → dark grey bg; segment → its colour. text white, no border.
-          // inactive: white bg, segment colour (or #616161 for All) text, #E0E0E0 border.
-          const style = f.active
-            ? {
-                background: meta ? meta.color : "#424242",
-                color: "#fff",
-                borderColor: "transparent",
-              }
-            : {
-                background: "#fff",
-                color: meta?.color ?? "#616161",
-                borderColor: "#E0E0E0",
-              };
-          return (
-            <button
-              key={f.label}
-              type="button"
-              onClick={() => push({ segment: f.value })}
-              style={style}
-              className="px-4 py-[7px] rounded-full text-[11.5px] font-semibold cursor-pointer border-[1.5px] transition-opacity hover:opacity-85"
-            >
-              {f.label}
-            </button>
-          );
-        })}
+        <ChipGroup title={VALUE_TITLE} chips={valueChips} dim="values" />
+        <ChipGroup title={LIFECYCLE_TITLE} chips={lifecycleChips} dim="lifecycles" />
       </div>
 
       {/* Dropdown filters: store · region · crop · spend tier */}

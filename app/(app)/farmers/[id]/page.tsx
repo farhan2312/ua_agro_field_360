@@ -3,13 +3,8 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getRole } from "@/lib/session";
 import { getScope, farmerScopeWhere } from "@/lib/scope";
-import {
-  SEGMENT_ENUM_TO_LABEL,
-  LEAD_ENUM_TO_LABEL,
-  SEGMENT_BGS,
-  SEGMENT_COLORS,
-  type SegmentLabel,
-} from "@/lib/segments";
+import { LEAD_ENUM_TO_LABEL } from "@/lib/segments";
+import { segMeta } from "@/lib/campaign-segments";
 import { inr } from "@/lib/format";
 import { storeColor } from "@/lib/store-utils";
 import { BackLink } from "@/components/farmer-detail/BackLink";
@@ -38,9 +33,8 @@ function fmtFollowUp(iso: string | null | undefined): string {
 function buildDetail(
   farmer: NonNullable<Awaited<ReturnType<typeof loadFarmer>>>,
 ): FarmerDetail {
-  const segmentLabel: SegmentLabel | "" = farmer.segment
-    ? SEGMENT_ENUM_TO_LABEL[farmer.segment] ?? ""
-    : "";
+  const vMeta = farmer.valueSegment ? segMeta(farmer.valueSegment) : null;
+  const lMeta = farmer.lifecycleSegment ? segMeta(farmer.lifecycleSegment) : null;
   const statusLabel = farmer.leadStatus
     ? LEAD_ENUM_TO_LABEL[farmer.leadStatus] ?? ""
     : farmer.status ?? "";
@@ -87,9 +81,12 @@ function buildDetail(
     season: "",
     soil: "",
     status: statusLabel,
-    segment: segmentLabel,
-    segBg: segmentLabel ? SEGMENT_BGS[segmentLabel] : FALLBACK_SEG_BG,
-    segColor: segmentLabel ? SEGMENT_COLORS[segmentLabel] : FALLBACK_SEG_COLOR,
+    segment: vMeta?.label ?? "",
+    segBg: vMeta?.bg ?? FALLBACK_SEG_BG,
+    segColor: vMeta?.color ?? FALLBACK_SEG_COLOR,
+    lifecycle: lMeta?.label ?? "",
+    lifeBg: lMeta?.bg ?? FALLBACK_SEG_BG,
+    lifeColor: lMeta?.color ?? FALLBACK_SEG_COLOR,
     salesCrops: farmer.salesCropTags ?? [],
     visitCrops: farmer.visitCropTags ?? [],
     ltv: inr(ltvNum),

@@ -3,9 +3,9 @@ import { EmptyState } from "@/components/ui";
 import { cropLabel } from "@/lib/crops";
 import type { FarmerRowVM } from "./types";
 
-/** Shared 8-column grid template (header + rows must stay aligned). */
+/** Shared 9-column grid template (header + rows must stay aligned). */
 const GRID =
-  "grid [grid-template-columns:1.3fr_0.7fr_0.5fr_0.5fr_0.6fr_0.6fr_0.8fr_0.5fr]";
+  "grid [grid-template-columns:1.3fr_0.7fr_0.5fr_0.6fr_0.6fr_0.6fr_0.6fr_0.8fr_0.5fr]";
 
 function StatusPill({
   label,
@@ -60,9 +60,11 @@ function FarmerTableRow({ row }: { row: FarmerRowVM }) {
           ))
         )}
       </div>
-      {/* Col 4 — Segment */}
+      {/* Col 4 — Value segment */}
       <StatusPill label={row.segment} bg={row.segBg} color={row.segColor} />
-      {/* Col 5 — LTV */}
+      {/* Col 5 — Lifecycle */}
+      <StatusPill label={row.lifecycle} bg={row.lifeBg} color={row.lifeColor} />
+      {/* Col 6 — LTV */}
       <div className="text-[12.5px] font-semibold text-[#1A1C1A]">{row.ltv}</div>
       {/* Col 6 — Last Visit */}
       <div className="text-xs text-[#9E9E9E]">{row.lastVisit}</div>
@@ -86,7 +88,7 @@ export function FarmerTable({ rows }: { rows: FarmerRowVM[] }) {
   return (
     <div className="bg-white rounded-2xl shadow-[0_1px_3px_rgba(0,0,0,0.04)] border border-black/[0.03] overflow-hidden">
       <div className="overflow-x-auto">
-      <div className="min-w-[880px] lg:min-w-0">
+      <div className="min-w-[980px] lg:min-w-0">
       {/* Header row */}
       <div
         className={`${GRID} px-[22px] py-3.5 bg-[#FAFAFA] border-b border-[#F0F0F0] text-[10.5px] font-semibold text-[#9E9E9E] uppercase tracking-[0.5px]`}
@@ -95,6 +97,7 @@ export function FarmerTable({ rows }: { rows: FarmerRowVM[] }) {
         <div>Village</div>
         <div>Crop</div>
         <div>Segment</div>
+        <div>Lifecycle</div>
         <div>LTV</div>
         <div>Last Visit</div>
         <div>Store</div>

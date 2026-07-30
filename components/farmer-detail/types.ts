@@ -42,9 +42,12 @@ export interface FarmerDetail {
   season: string;
   soil: string;
   status: string; // lead-status display label
-  segment: string; // segment display label
+  segment: string; // value-tier display label
   segBg: string;
   segColor: string;
+  lifecycle: string; // lifecycle display label
+  lifeBg: string;
+  lifeColor: string;
   salesCrops: string[]; // crops from the sales upload (labelled)
   visitCrops: string[]; // crops from field visits (labelled)
   ltv: string; // computed lifetime value, e.g. "₹0"

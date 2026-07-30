@@ -586,7 +586,7 @@ export async function exportWorkbookXlsx(f: WbFilters): Promise<{ ok: boolean; f
 
   const nameById = new Map(stores.map((s) => [s.id, shortStore(s.name)]));
   const V = [...VALUE_SEGMENTS], L = [...LIFECYCLE_SEGMENTS];
-  // Full 3×3 per store (Value → Lifecycle), matching the on-screen Detailed view.
+  // Full Value × Lifecycle per store (3 tiers × 4 lifecycle stages), matching the on-screen Detailed view.
   const byStore = new Map<number | null, { cross: Record<string, Record<string, number>>; total: number }>();
   const grandCross: Record<string, Record<string, number>> = {};
   let grand = 0;
@@ -601,7 +601,7 @@ export async function exportWorkbookXlsx(f: WbFilters): Promise<{ ok: boolean; f
     storeName: storeId == null ? "Unassigned" : nameById.get(storeId) ?? `Store #${storeId}`, ...s,
   })).sort((a, b) => b.total - a.total).slice(0, 100);
 
-  // Two-row grouped header: each Value group spans its 3 Lifecycle sub-columns (merged), like the UI.
+  // Two-row grouped header: each Value group spans its Lifecycle sub-columns (merged), like the UI.
   const nSub = L.length, totalCol = 1 + V.length * nSub;
   const groupHeader: (string | number)[] = ["Store", ...V.flatMap((v) => [segMeta(v).label, ...Array(nSub - 1).fill("")]), "Total"];
   const subHeader: (string | number)[] = ["", ...V.flatMap(() => L.map((l) => segMeta(l).label)), ""];

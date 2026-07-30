@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getScope, farmerScopeWhere, storeScopeWhere } from "@/lib/scope";
 import { getGlobalCropFacet, getGlobalPestFacet } from "@/lib/stats";
-import { SEGMENT_COLUMNS, segMeta } from "@/lib/campaign-segments";
+import { VALUE_SEGMENTS, LIFECYCLE_SEGMENTS, segMeta, segDef } from "@/lib/campaign-segments";
 import { SPEND_TIERS } from "@/lib/spend-tiers";
 import { statusColor } from "@/lib/status";
 import { initials, inr, avatarColor } from "@/lib/format";
@@ -10,7 +10,7 @@ import { shortStoreName, storeColor } from "@/lib/store-utils";
 import { FarmerFilterBar } from "@/components/farmers/FarmerFilterBar";
 import { FarmerTable } from "@/components/farmers/FarmerTable";
 import { FarmerPagination } from "@/components/farmers/FarmerPagination";
-import type { FarmerRowVM, SegFilterVM, FarmerFacetsVM, FarmerSelectedVM } from "@/components/farmers/types";
+import type { FarmerRowVM, SegChipVM, FarmerFacetsVM, FarmerSelectedVM } from "@/components/farmers/types";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +18,8 @@ const PAGE_SIZE = 25;
 
 type SearchParams = {
   q?: string;
-  segment?: string;
+  value?: string;
+  lifecycle?: string;
   store?: string;
   zone?: string;
   crop?: string;
@@ -26,6 +27,12 @@ type SearchParams = {
   spend?: string;
   page?: string;
 };
+
+/** Parse a comma-separated URL param into the subset of keys that are valid segment keys. */
+function parseSegList(raw: string | undefined, allowed: readonly string[]): string[] {
+  if (!raw) return [];
+  return raw.split(",").map((s) => s.trim()).filter((s) => allowed.includes(s));
+}
 
 /** Short month-day label from a Date, e.g. "Jun 18". */
 function shortDate(d: Date): string {
@@ -39,8 +46,9 @@ export default async function FarmersPage({
 }) {
   const sp = searchParams ?? {};
   const q = (sp.q ?? "").trim();
-  // Normalise the campaign-segment key from the URL (HNI | POTENTIAL_HNI | …).
-  const segKey = sp.segment && SEGMENT_COLUMNS.includes(sp.segment) ? sp.segment : null;
+  // The two independent dimensions, each multi-select (comma lists in the URL).
+  const valueKeys = parseSegList(sp.value, VALUE_SEGMENTS);
+  const lifecycleKeys = parseSegList(sp.lifecycle, LIFECYCLE_SEGMENTS);
   const storeId = Number.parseInt(sp.store ?? "", 10) || null;
   const zone = (sp.zone ?? "").trim() || null;
   const crop = (sp.crop ?? "").trim() || null;
@@ -69,7 +77,8 @@ export default async function FarmersPage({
   try {
     // ── Paginated, filtered farmer table (campaign segments + crop tags)
     const where: Prisma.FarmerWhereInput = {};
-    if (segKey) where.campaignSegment = segKey;
+    if (valueKeys.length) where.valueSegment = { in: valueKeys };
+    if (lifecycleKeys.length) where.lifecycleSegment = { in: lifecycleKeys };
     if (storeId) where.storeId = storeId;
     if (zone) where.store = { zone };
     if (crop) where.cropTags = { has: crop };
@@ -150,7 +159,8 @@ export default async function FarmersPage({
           mobile: true,
           village: true,
           cropTags: true,
-          campaignSegment: true,
+          valueSegment: true,
+          lifecycleSegment: true,
           status: true,
           store: { select: { id: true, name: true } },
           visits: {
@@ -176,7 +186,8 @@ export default async function FarmersPage({
     const ltvById = new Map(ltvRows.map((r) => [r.farmerId, r._sum.amountNum ?? 0]));
 
     rows = farmers.map((f): FarmerRowVM => {
-      const seg = f.campaignSegment && f.campaignSegment !== "OTHER" ? segMeta(f.campaignSegment) : null;
+      const seg = f.valueSegment ? segMeta(f.valueSegment) : null;
+      const life = f.lifecycleSegment ? segMeta(f.lifecycleSegment) : null;
 
       const ltvNum = ltvById.get(f.id) ?? 0;
       const lastVisit = f.visits[0];
@@ -196,6 +207,9 @@ export default async function FarmersPage({
         segment: seg?.label ?? null,
         segBg: seg?.bg ?? "#F5F5F5",
         segColor: seg?.color ?? "#757575",
+        lifecycle: life?.label ?? null,
+        lifeBg: life?.bg ?? "#F5F5F5",
+        lifeColor: life?.color ?? "#757575",
         ltv: ltvNum > 0 ? inr(ltvNum) : "—",
         lastVisit: lastVisitLabel,
         storeName: storeShort || "—",
@@ -213,14 +227,12 @@ export default async function FarmersPage({
     total = 0;
   }
 
-  const filters: SegFilterVM[] = [
-    { label: "All", value: null, active: segKey === null },
-    ...SEGMENT_COLUMNS.map((k) => ({
-      label: segMeta(k).label,
-      value: k,
-      active: segKey === k,
-    })),
-  ];
+  const valueChips: SegChipVM[] = VALUE_SEGMENTS.map((k) => ({
+    label: segMeta(k).label, value: k, color: segMeta(k).color, title: segDef(k), active: valueKeys.includes(k),
+  }));
+  const lifecycleChips: SegChipVM[] = LIFECYCLE_SEGMENTS.map((k) => ({
+    label: segMeta(k).label, value: k, color: segMeta(k).color, title: segDef(k), active: lifecycleKeys.includes(k),
+  }));
 
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const selected: FarmerSelectedVM = {
@@ -229,11 +241,13 @@ export default async function FarmersPage({
     crop,
     pest,
     spend: spendTier ? String(spendIdx) : null,
+    values: valueKeys,
+    lifecycles: lifecycleKeys,
   };
 
   return (
     <div className="animate-[fadeUp_0.4s_ease-out]">
-      <FarmerFilterBar search={q} filters={filters} facets={facets} selected={selected} />
+      <FarmerFilterBar search={q} valueChips={valueChips} lifecycleChips={lifecycleChips} facets={facets} selected={selected} />
       <FarmerTable rows={rows} />
       <FarmerPagination
         page={Math.min(page, pageCount)}

@@ -1,8 +1,12 @@
-/** Filter chip view-model. `null` value === the "All" chip. */
-export interface SegFilterVM {
+/** A multi-select segment chip (one Value tier or one Lifecycle stage). */
+export interface SegChipVM {
   label: string;
-  /** campaignSegment key this chip filters to (HNI | AT_RISK | …), or null for "All". */
-  value: string | null;
+  /** The segment key (HNI | POTENTIAL_HNI | REGULAR, or NEW | RECENT | AT_RISK | LAPSED). */
+  value: string;
+  /** Chip colour (from segMeta). */
+  color: string;
+  /** One-line hover definition (thresholds). */
+  title: string;
   active: boolean;
 }
 
@@ -26,6 +30,10 @@ export interface FarmerSelectedVM {
   crop: string | null;
   pest: string | null;
   spend: string | null;
+  /** Selected value-segment keys (multi-select). */
+  values: string[];
+  /** Selected lifecycle keys (multi-select). */
+  lifecycles: string[];
 }
 
 /** A single farmer table row view-model (plain, serialisable). */
@@ -36,10 +44,14 @@ export interface FarmerRowVM {
   village: string;
   /** Canonical crop tags (sales ∪ visit), first few. */
   crops: string[];
-  /** Campaign-segment display label (HNI, At Risk, …), or null when unsegmented. */
+  /** Value-tier display label (HNI, Potential HNI, Regular), or null. */
   segment: string | null;
   segBg: string;
   segColor: string;
+  /** Lifecycle display label (New, Recent, At Risk, Lapsed), or null. */
+  lifecycle: string | null;
+  lifeBg: string;
+  lifeColor: string;
   /** Formatted lifetime value, e.g. "₹26,200" or "—". */
   ltv: string;
   /** Formatted last visit date, e.g. "Jun 18" or "—". */

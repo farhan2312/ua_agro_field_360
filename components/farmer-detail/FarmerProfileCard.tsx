@@ -37,7 +37,7 @@ export function FarmerProfileCard({ farmer }: { farmer: FarmerDetail }) {
           {farmer.name ? initials(farmer.name) : ""}
         </div>
         <div className="flex-1">
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2.5">
             <div className="text-[18px] font-bold text-[#1A1C1A]">{farmer.name}</div>
             {farmer.segment && (
               <div
@@ -45,6 +45,14 @@ export function FarmerProfileCard({ farmer }: { farmer: FarmerDetail }) {
                 style={{ background: farmer.segBg, color: farmer.segColor }}
               >
                 {farmer.segment}
+              </div>
+            )}
+            {farmer.lifecycle && (
+              <div
+                className="px-2.5 py-[3px] rounded-[20px] text-[10px] font-bold"
+                style={{ background: farmer.lifeBg, color: farmer.lifeColor }}
+              >
+                {farmer.lifecycle}
               </div>
             )}
           </div>
