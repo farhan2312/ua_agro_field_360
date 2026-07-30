@@ -5,6 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { VALUE_TITLE, LIFECYCLE_TITLE } from "@/lib/campaign-segments";
 import { cropLabel } from "@/lib/crops";
 import { tagLabel } from "@/lib/crop-pest";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import type { SegChipVM, FarmerFacetsVM, FarmerSelectedVM } from "./types";
 
 /**
@@ -108,30 +109,18 @@ export function FarmerFilterBar({
 
       {/* Dropdown filters: store · region · crop · spend tier */}
       <div className="flex flex-wrap items-center gap-2">
-        <select className={select} value={selected.store ?? ""} onChange={(e) => push({ store: e.target.value || null })}>
-          <option value="">All stores</option>
-          {facets.stores.map((s) => (
-            <option key={s.id} value={String(s.id)}>{s.name}</option>
-          ))}
-        </select>
-        <select className={select} value={selected.zone ?? ""} onChange={(e) => push({ zone: e.target.value || null })}>
-          <option value="">All districts</option>
-          {facets.zones.map((z) => (
-            <option key={z} value={z}>{z}</option>
-          ))}
-        </select>
-        <select className={select} value={selected.crop ?? ""} onChange={(e) => push({ crop: e.target.value || null })}>
-          <option value="">All crops</option>
-          {facets.crops.map((c) => (
-            <option key={c.crop} value={c.crop}>{cropLabel(c.crop)} ({c.count.toLocaleString("en-IN")})</option>
-          ))}
-        </select>
-        <select className={select} value={selected.pest ?? ""} onChange={(e) => push({ pest: e.target.value || null })}>
-          <option value="">All pests / diseases</option>
-          {facets.pests.map((p) => (
-            <option key={p.pest} value={p.pest} className="capitalize">{tagLabel(p.pest)} ({p.count.toLocaleString("en-IN")})</option>
-          ))}
-        </select>
+        <SearchableSelect className={`${select} min-w-[150px]`} placeholder="All stores" searchPlaceholder="Search stores…"
+          value={selected.store} onChange={(v) => push({ store: v })}
+          options={facets.stores.map((s) => ({ value: String(s.id), label: s.name }))} />
+        <SearchableSelect className={`${select} min-w-[140px]`} placeholder="All districts" searchPlaceholder="Search districts…"
+          value={selected.zone} onChange={(v) => push({ zone: v })}
+          options={facets.zones.map((z) => ({ value: z, label: z }))} />
+        <SearchableSelect className={`${select} min-w-[150px]`} placeholder="All crops" searchPlaceholder="Search crops…"
+          value={selected.crop} onChange={(v) => push({ crop: v })}
+          options={facets.crops.map((c) => ({ value: c.crop, label: `${cropLabel(c.crop)} (${c.count.toLocaleString("en-IN")})` }))} />
+        <SearchableSelect className={`${select} min-w-[160px]`} placeholder="All pests / diseases" searchPlaceholder="Search pests…"
+          value={selected.pest} onChange={(v) => push({ pest: v })}
+          options={facets.pests.map((p) => ({ value: p.pest, label: `${tagLabel(p.pest)} (${p.count.toLocaleString("en-IN")})` }))} />
         <select className={select} value={selected.spend ?? ""} onChange={(e) => push({ spend: e.target.value || null })}>
           <option value="">All spend</option>
           {facets.spendTiers.map((t, i) => (

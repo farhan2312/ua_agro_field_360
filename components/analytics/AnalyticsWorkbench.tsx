@@ -232,23 +232,34 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
 function MultiSel({ ph, options, selected, onToggle, onClear, accent = "#2E7D32", titleOf }: {
   ph: string; options: [string, string][]; selected: string[]; onToggle: (v: string) => void; onClear: () => void; accent?: string; titleOf?: (v: string) => string;
 }) {
+  const [q, setQ] = useState("");
   const text = selected.length === 0 ? ph : selected.length === 1 ? (options.find((o) => o[0] === selected[0])?.[1] ?? selected[0]) : `${selected.length} selected`;
+  const showSearch = options.length > 5; // search box only when the list is long
+  const shown = showSearch && q.trim() ? options.filter(([, l]) => l.toLowerCase().includes(q.trim().toLowerCase())) : options;
   return (
     <details className="group relative">
       <summary className="flex w-[150px] cursor-pointer list-none items-center justify-between gap-1.5 rounded-lg border border-[#E0E0E0] bg-white px-2.5 py-2 text-[12.5px] text-[#424242]">
         <span className={`truncate ${selected.length ? "font-semibold" : ""}`} style={selected.length ? { color: accent } : undefined}>{text}</span>
         <span className="shrink-0 text-[10px] text-[#9E9E9E] transition-transform group-open:rotate-180">▾</span>
       </summary>
-      <div className="absolute left-0 z-30 mt-1 max-h-[280px] w-[220px] overflow-y-auto rounded-lg border border-[#E0E0E0] bg-white p-1 shadow-[0_6px_20px_rgba(0,0,0,0.12)]">
-        <button type="button" onClick={onClear}
-          className={`w-full rounded px-2 py-1.5 text-left text-[12.5px] font-semibold hover:bg-[#F5F7F5] ${selected.length === 0 ? "" : "text-[#616161]"}`}
-          style={selected.length === 0 ? { color: accent } : undefined}>{ph}</button>
-        {options.map(([v, l]) => (
-          <label key={v} title={titleOf ? titleOf(v) : l} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[12.5px] text-[#424242] hover:bg-[#F5F7F5]">
-            <input type="checkbox" checked={selected.includes(v)} onChange={() => onToggle(v)} style={{ accentColor: accent }} />
-            <span className="truncate">{l}</span>
-          </label>
-        ))}
+      <div className="absolute left-0 z-30 mt-1 max-h-[300px] w-[220px] overflow-hidden rounded-lg border border-[#E0E0E0] bg-white shadow-[0_6px_20px_rgba(0,0,0,0.12)]">
+        {showSearch && (
+          <div className="border-b border-[#F0F0F0] p-1.5">
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…"
+              className="w-full rounded border border-[#E0E0E0] px-2 py-1 text-[12px] outline-none focus:border-[#2E7D32]" />
+          </div>
+        )}
+        <div className="max-h-[248px] overflow-y-auto p-1">
+          <button type="button" onClick={onClear}
+            className={`w-full rounded px-2 py-1.5 text-left text-[12.5px] font-semibold hover:bg-[#F5F7F5] ${selected.length === 0 ? "" : "text-[#616161]"}`}
+            style={selected.length === 0 ? { color: accent } : undefined}>{ph}</button>
+          {shown.length === 0 ? <div className="px-2 py-1.5 text-[12px] text-[#9E9E9E]">No matches</div> : shown.map(([v, l]) => (
+            <label key={v} title={titleOf ? titleOf(v) : l} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[12.5px] text-[#424242] hover:bg-[#F5F7F5]">
+              <input type="checkbox" checked={selected.includes(v)} onChange={() => onToggle(v)} style={{ accentColor: accent }} />
+              <span className="truncate">{l}</span>
+            </label>
+          ))}
+        </div>
       </div>
     </details>
   );

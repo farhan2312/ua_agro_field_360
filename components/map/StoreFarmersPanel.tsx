@@ -8,6 +8,7 @@ import { cropLabel } from "@/lib/crops";
 import { tagLabel } from "@/lib/crop-pest";
 import { SPEND_TIERS } from "@/lib/spend-tiers";
 import { Badge } from "@/components/ui";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { Modal, ModalHeader } from "@/components/interactive";
 import { getStoreFarmers, createClusterFromSelection } from "@/app/actions/cluster-builder";
 import { ChainNext } from "@/components/ChainNext";
@@ -208,30 +209,18 @@ export function StoreFarmersPanel({
           placeholder="Search name / mobile / village…"
           className="min-w-[220px] flex-1 rounded-lg border border-line bg-white px-3 py-2 text-[12.5px] text-ink outline-none focus:border-brand-400"
         />
-        <select value={filters.category ?? ""} onChange={(e) => setFilter("category", e.target.value)} className={selectClass}>
-          <option value="">Any purchase</option>
-          {(data?.categories ?? []).map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </select>
-        <select value={filters.crop ?? ""} onChange={(e) => setFilter("crop", e.target.value)} className={selectClass}>
-          <option value="">Any crop</option>
-          {(data?.crops ?? []).map((c) => (
-            <option key={c.crop} value={c.crop}>{cropLabel(c.crop)} ({grouped(c.count)})</option>
-          ))}
-        </select>
-        <select value={filters.pest ?? ""} onChange={(e) => setFilter("pest", e.target.value)} className={selectClass}>
-          <option value="">Any pest / disease</option>
-          {(data?.pests ?? []).map((p) => (
-            <option key={p.pest} value={p.pest}>{tagLabel(p.pest)} ({grouped(p.count)})</option>
-          ))}
-        </select>
-        <select value={filters.campaignSegment ?? ""} onChange={(e) => setFilter("campaignSegment", e.target.value)} className={selectClass}>
-          <option value="">Any segment</option>
-          {SEGMENT_COLUMNS.map((s) => (
-            <option key={s} value={s}>{segMeta(s).label}</option>
-          ))}
-        </select>
+        <SearchableSelect className={selectClass} placeholder="Any purchase" searchPlaceholder="Search category…"
+          value={filters.category ?? null} onChange={(v) => setFilter("category", v ?? "")}
+          options={(data?.categories ?? []).map((c) => ({ value: c, label: c }))} />
+        <SearchableSelect className={selectClass} placeholder="Any crop" searchPlaceholder="Search crops…"
+          value={filters.crop ?? null} onChange={(v) => setFilter("crop", v ?? "")}
+          options={(data?.crops ?? []).map((c) => ({ value: c.crop, label: `${cropLabel(c.crop)} (${grouped(c.count)})` }))} />
+        <SearchableSelect className={selectClass} placeholder="Any pest / disease" searchPlaceholder="Search pests…"
+          value={filters.pest ?? null} onChange={(v) => setFilter("pest", v ?? "")}
+          options={(data?.pests ?? []).map((p) => ({ value: p.pest, label: `${tagLabel(p.pest)} (${grouped(p.count)})` }))} />
+        <SearchableSelect className={selectClass} placeholder="Any segment" searchPlaceholder="Search segment…"
+          value={filters.campaignSegment ?? null} onChange={(v) => setFilter("campaignSegment", v ?? "")}
+          options={SEGMENT_COLUMNS.map((s) => ({ value: s, label: segMeta(s).label }))} />
         <select value={filters.spendTier != null ? String(filters.spendTier) : ""} onChange={(e) => setSpendTier(e.target.value)} className={selectClass}>
           <option value="">Any spend (P12M)</option>
           {SPEND_TIERS.map((t, i) => (
