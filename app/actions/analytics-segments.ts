@@ -280,22 +280,42 @@ export async function getWorkbench(f: WbFilters): Promise<WbData> {
     };
   }
 
-  // ── Sales lens: FY-dynamic value×lifecycle (tiers computed live from Sale within the selected FY). ──
-  const cte = tiersCte(f), tf = tierFilter(f);
-  const [cross, histRows, zoneRows, cropRows] = await Promise.all([
-    prisma.$queryRaw<{ storeId: number | null; vseg: string; lseg: string; n: number; spendsum: bigint }[]>(Prisma.sql`
-      WITH ${cte} SELECT "storeId", vseg, lseg, COUNT(*)::int n, COALESCE(SUM(spend),0)::bigint spendsum FROM tiers WHERE ${tf} GROUP BY 1,2,3`),
-    prisma.$queryRaw<{ bucket: string; n: number }[]>(Prisma.sql`
-      WITH ${cte} SELECT CASE
-        WHEN spend>=50000 THEN '₹50K+' WHEN spend>=20000 THEN '₹20–50K' WHEN spend>=12000 THEN '₹12–20K'
-        WHEN spend>=10000 THEN '₹10–12K' WHEN spend>=8000 THEN '₹8–10K' WHEN spend>=5000 THEN '₹5–8K'
-        WHEN spend>=2500 THEN '₹2.5–5K' WHEN spend>0 THEN '< ₹2.5K' ELSE 'No spend' END bucket, COUNT(*)::int n FROM tiers WHERE ${tf} GROUP BY 1`),
-    prisma.$queryRaw<{ zone: string; spend: bigint }[]>(Prisma.sql`
-      WITH ${cte} SELECT "zone" AS zone, COALESCE(SUM(spend),0)::bigint spend FROM tiers WHERE ${tf} AND "zone" IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10`),
-    prisma.$queryRaw<{ crop: string; n: number }[]>(Prisma.sql`
-      WITH ${cte} SELECT crop, COUNT(*)::int n FROM (SELECT unnest(f."salesCropTags") crop FROM tiers t JOIN "Farmer" f ON f.id=t.id WHERE ${tf}) u
-      ${f.crops?.length ? Prisma.sql`WHERE crop = ANY(${f.crops}::text[])` : Prisma.empty} GROUP BY 1 ORDER BY 2 DESC LIMIT 12`),
-  ]);
+  // ── Sales lens: value×lifecycle. Shared spend-histogram bucketing (used by both paths). ──
+  type CrossRow = { storeId: number | null; vseg: string; lseg: string; n: number; spendsum: bigint };
+  type HistRow = { bucket: string; n: number };
+  type ZoneRow = { zone: string; spend: bigint };
+  type CropRow = { crop: string; n: number };
+  const histCase = (e: Prisma.Sql) => Prisma.sql`CASE
+    WHEN ${e}>=50000 THEN '₹50K+' WHEN ${e}>=20000 THEN '₹20–50K' WHEN ${e}>=12000 THEN '₹12–20K'
+    WHEN ${e}>=10000 THEN '₹10–12K' WHEN ${e}>=8000 THEN '₹8–10K' WHEN ${e}>=5000 THEN '₹5–8K'
+    WHEN ${e}>=2500 THEN '₹2.5–5K' WHEN ${e}>0 THEN '< ₹2.5K' ELSE 'No spend' END`;
+
+  let cross: CrossRow[], histRows: HistRow[], zoneRows: ZoneRow[], cropRows: CropRow[];
+  if (!f.fyStarts?.length && !f.crops?.length) {
+    // FAST PATH — no FY & no crop ⇒ the tiers equal the stored Farmer columns (value tier, lifecycle,
+    // all-time base spend). Read them directly and skip the ~4× heavy SaleLine/Sale re-aggregation.
+    const conds = staticConds(f, "f");
+    if (f.valueSegments?.length) conds.push(Prisma.sql`f."valueSegment" = ANY(${f.valueSegments})`);
+    if (f.lifecycleSegments?.length) conds.push(Prisma.sql`f."lifecycleSegment" = ANY(${f.lifecycleSegments})`);
+    const sp = spendTierOr(f.spendTiers, Prisma.sql`f."lifetimeSpend"`); if (sp) conds.push(sp);
+    const w = Prisma.join(conds, " AND ");
+    [cross, histRows, zoneRows, cropRows] = await Promise.all([
+      prisma.$queryRaw<CrossRow[]>(Prisma.sql`SELECT f."storeId" "storeId", COALESCE(f."valueSegment",'REGULAR') vseg, COALESCE(f."lifecycleSegment",'LAPSED') lseg, COUNT(*)::int n, COALESCE(SUM(f."lifetimeSpend"),0)::bigint spendsum FROM "Farmer" f WHERE ${w} GROUP BY 1,2,3`),
+      prisma.$queryRaw<HistRow[]>(Prisma.sql`SELECT ${histCase(Prisma.sql`f."lifetimeSpend"`)} bucket, COUNT(*)::int n FROM "Farmer" f WHERE ${w} GROUP BY 1`),
+      prisma.$queryRaw<ZoneRow[]>(Prisma.sql`SELECT f."zone" AS zone, COALESCE(SUM(f."lifetimeSpend"),0)::bigint spend FROM "Farmer" f WHERE ${w} AND f."zone" IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10`),
+      prisma.$queryRaw<CropRow[]>(Prisma.sql`SELECT crop, COUNT(*)::int n FROM (SELECT unnest(f."salesCropTags") crop FROM "Farmer" f WHERE ${w}) u GROUP BY 1 ORDER BY 2 DESC LIMIT 12`),
+    ]);
+  } else {
+    // Full path — FY- and/or crop-scoped tiers computed live from Sale/SaleLine.
+    const cte = tiersCte(f), tf = tierFilter(f);
+    [cross, histRows, zoneRows, cropRows] = await Promise.all([
+      prisma.$queryRaw<CrossRow[]>(Prisma.sql`WITH ${cte} SELECT "storeId", vseg, lseg, COUNT(*)::int n, COALESCE(SUM(spend),0)::bigint spendsum FROM tiers WHERE ${tf} GROUP BY 1,2,3`),
+      prisma.$queryRaw<HistRow[]>(Prisma.sql`WITH ${cte} SELECT ${histCase(Prisma.sql`spend`)} bucket, COUNT(*)::int n FROM tiers WHERE ${tf} GROUP BY 1`),
+      prisma.$queryRaw<ZoneRow[]>(Prisma.sql`WITH ${cte} SELECT "zone" AS zone, COALESCE(SUM(spend),0)::bigint spend FROM tiers WHERE ${tf} AND "zone" IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10`),
+      prisma.$queryRaw<CropRow[]>(Prisma.sql`WITH ${cte} SELECT crop, COUNT(*)::int n FROM (SELECT unnest(f."salesCropTags") crop FROM tiers t JOIN "Farmer" f ON f.id=t.id WHERE ${tf}) u
+        ${f.crops?.length ? Prisma.sql`WHERE crop = ANY(${f.crops}::text[])` : Prisma.empty} GROUP BY 1 ORDER BY 2 DESC LIMIT 12`),
+    ]);
+  }
 
   const byStore = new Map<number | null, { value: Record<string, number>; lifecycle: Record<string, number>; cross: Record<string, Record<string, number>>; total: number }>();
   const valueTotals: Record<string, number> = {}, lifecycleTotals: Record<string, number> = {};

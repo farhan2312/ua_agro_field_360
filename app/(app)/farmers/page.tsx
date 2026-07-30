@@ -106,7 +106,7 @@ export default async function FarmersPage({
 
     // Dropdown option lists (stores · regions · top crops) — independent of the active
     // filters, but never wider than the caller's scope.
-    const [storeOpts, zoneRows, cropRows, pestRows] = await Promise.all([
+    const [storeOpts, zoneRows, cropRows, pestRows, count, farmers] = await Promise.all([
       prisma.store.findMany({
         where: storeWhere && storeWhere !== "none" ? storeWhere : undefined,
         orderBy: { name: "asc" },
@@ -142,16 +142,7 @@ export default async function FarmersPage({
               JOIN "Store" s ON s.id = f."storeId"
               WHERE s."zone" = ${scope.zone} GROUP BY 1 ORDER BY 2 DESC LIMIT 60`).then((r) => r.map((x) => ({ pest: x.pest, count: Number(x.n) })))
           : getGlobalPestFacet(),
-    ]);
-    facets = {
-      stores: storeOpts.map((s) => ({ id: s.id, name: shortStoreName(s.name) || s.name })),
-      zones: zoneRows.map((z) => z.zone!).filter(Boolean),
-      crops: cropRows,
-      pests: pestRows,
-      spendTiers: SPEND_TIERS.map((t) => t.label),
-    };
-
-    const [count, farmers] = await Promise.all([
+      // Count + first page run in the SAME round-trip as the facets (they don't depend on each other).
       prisma.farmer.count({ where: scopedWhere }),
       prisma.farmer.findMany({
         where: scopedWhere,
@@ -176,6 +167,13 @@ export default async function FarmersPage({
         },
       }),
     ]);
+    facets = {
+      stores: storeOpts.map((s) => ({ id: s.id, name: shortStoreName(s.name) || s.name })),
+      zones: zoneRows.map((z) => z.zone!).filter(Boolean),
+      crops: cropRows,
+      pests: pestRows,
+      spendTiers: SPEND_TIERS.map((t) => t.label),
+    };
     total = count;
 
     // LTV (base/pre-tax price) for just this page's farmers — one bounded aggregate over SaleLine.basic.
