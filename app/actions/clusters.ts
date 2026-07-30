@@ -154,12 +154,12 @@ export async function getClusterFarmers(
       where: { id: clusterId },
       select: { farmerIds: true, criteria: true, mode: true },
     });
-    if (!cluster) return { rows: [], total: 0, page, pageSize: CLUSTER_PAGE_SIZE };
+    if (!cluster) return { rows: [], total: 0, page, pageSize: CLUSTER_PAGE_SIZE, ltvLabel: "LTV" };
 
     // RBAC: a scoped viewer (officer→store, RM→region) only ever pages through the
     // members inside their own scope, even for a cluster that spans the country.
     const fScope = farmerScopeWhere(await getScope());
-    if (fScope === "none") return { rows: [], total: 0, page, pageSize: CLUSTER_PAGE_SIZE };
+    if (fScope === "none") return { rows: [], total: 0, page, pageSize: CLUSTER_PAGE_SIZE, ltvLabel: "LTV" };
 
     // Dynamic clusters resolve their rule live; static/legacy use the frozen id snapshot.
     const crit = cluster.mode === "dynamic" ? parseCriteria(cluster.criteria) : null;
@@ -190,7 +190,7 @@ export async function getClusterFarmers(
       total = ids.length;
       pageIds = ids.slice((page - 1) * CLUSTER_PAGE_SIZE, page * CLUSTER_PAGE_SIZE);
     }
-    if (pageIds.length === 0) return { rows: [], total, page, pageSize: CLUSTER_PAGE_SIZE };
+    if (pageIds.length === 0) return { rows: [], total, page, pageSize: CLUSTER_PAGE_SIZE, ltvLabel: selectedCrops.length ? `${selectedCrops.map(cropLabel).join(" + ")} spend` : "LTV" };
 
     const farmers = await prisma.farmer.findMany({
       where: { id: { in: pageIds } },
@@ -239,8 +239,11 @@ export async function getClusterFarmers(
         store: shortStoreName(f.store?.name) || "—",
       }));
 
-    return { rows, total, page, pageSize: CLUSTER_PAGE_SIZE };
+    // When crop-scoped, the spend column is that crop's spend only (not the farmer's overall LTV),
+    // so the header must say so — the value/segment tier is still the farmer's OVERALL tier.
+    const ltvLabel = selectedCrops.length ? `${selectedCrops.map(cropLabel).join(" + ")} spend` : "LTV";
+    return { rows, total, page, pageSize: CLUSTER_PAGE_SIZE, ltvLabel };
   } catch {
-    return { rows: [], total: 0, page, pageSize: CLUSTER_PAGE_SIZE };
+    return { rows: [], total: 0, page, pageSize: CLUSTER_PAGE_SIZE, ltvLabel: "LTV" };
   }
 }

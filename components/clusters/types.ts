@@ -63,6 +63,8 @@ export interface ClusterMembersResult {
   total: number;
   page: number;
   pageSize: number;
+  /** Header for the spend column: "LTV" normally, or "<Crop> spend" when the cluster is crop-scoped. */
+  ltvLabel: string;
 }
 
 /* ── criteriaText helpers (two spacing variants — faithful to the DSL) ── */
