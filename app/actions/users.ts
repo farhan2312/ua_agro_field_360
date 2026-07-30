@@ -195,3 +195,32 @@ export async function deleteUserAction(id: number): Promise<{ ok: boolean; error
     return { ok: false, error: e instanceof Error ? e.message : "Delete failed" };
   }
 }
+
+export interface UserActivityRow { id: number; ts: string; action: string; entity: string; detail: string; ip: string }
+
+/**
+ * Recent audit-trail entries attributed to an employee (matched by actor name — the AuditLog is
+ * keyed by actor name, not user id). Returns [] when none are recorded. NB: granular login history
+ * is not captured by the current AuditLog schema — only actions that write an AuditLog row appear.
+ */
+export async function getUserActivity(actorName: string): Promise<UserActivityRow[]> {
+  const name = actorName?.trim();
+  if (!name) return [];
+  try {
+    const logs = await prisma.auditLog.findMany({
+      where: { actor: { equals: name, mode: "insensitive" } },
+      orderBy: { createdAt: "desc" },
+      take: 40,
+    });
+    return logs.map((l) => ({
+      id: l.id,
+      ts: l.displayTs ?? l.createdAt.toISOString().slice(0, 16).replace("T", " "),
+      action: l.action,
+      entity: l.entity ?? "",
+      detail: l.detail ?? "",
+      ip: l.ip ?? "",
+    }));
+  } catch {
+    return [];
+  }
+}

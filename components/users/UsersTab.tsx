@@ -7,6 +7,7 @@ import { Modal, ModalHeader } from "@/components/interactive";
 import { deleteUserAction } from "@/app/actions/users";
 import { EditPencil } from "./EditPencil";
 import { UserFormModal } from "./UserFormModal";
+import { UserDetailModal } from "./UserDetailModal";
 import type { UserRow } from "./types";
 
 const GRID =
@@ -77,6 +78,7 @@ export function UsersTab({
   canEdit: boolean;
 }) {
   const [editing, setEditing] = useState<UserRow | null>(null);
+  const [viewing, setViewing] = useState<UserRow | null>(null);
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<UserRow | null>(null);
   const [delErr, setDelErr] = useState<string | null>(null);
@@ -233,21 +235,26 @@ export function UsersTab({
                 className={`${GRID} border-b border-[#F8F8F8] py-[14px]`}
                 style={{ opacity }}
               >
-                {/* User */}
-                <div className="flex items-center gap-[10px]">
+                {/* User — click to open the detail + audit-trail popup */}
+                <button
+                  type="button"
+                  onClick={() => setViewing(ur)}
+                  className="flex items-center gap-[10px] rounded-lg -mx-1 px-1 py-0.5 text-left hover:bg-[#F5FBF5]"
+                  title="View employee details & activity"
+                >
                   <div
                     className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-full text-[12px] font-bold text-white"
                     style={{ background: ur.grad }}
                   >
                     {ur.init}
                   </div>
-                  <div>
-                    <div className="text-[13px] font-semibold text-[#1A1C1A]">
+                  <div className="min-w-0">
+                    <div className="truncate text-[13px] font-semibold text-[#1A1C1A]">
                       {ur.name}
                     </div>
-                    <div className="text-[10.5px] text-[#BDBDBD]">{ur.email}</div>
+                    <div className="truncate text-[10.5px] text-[#BDBDBD]">{ur.email}</div>
                   </div>
-                </div>
+                </button>
                 {/* Role */}
                 <div>
                   <span
@@ -333,6 +340,7 @@ export function UsersTab({
 
       {creating && <UserFormModal user={null} onClose={() => setCreating(false)} />}
       {editing && <UserFormModal user={editing} onClose={() => setEditing(null)} />}
+      {viewing && <UserDetailModal user={viewing} onClose={() => setViewing(null)} />}
 
       {deleting && (
         <Modal open onClose={() => setDeleting(null)}>

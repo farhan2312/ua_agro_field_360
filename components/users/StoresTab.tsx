@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { cn } from "@/lib/cn";
 import { STORE_STATUS_META } from "@/lib/status";
 import { EmptyState } from "@/components/ui";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { EditPencil } from "./EditPencil";
 import { StoreFormModal } from "./StoreFormModal";
 import { MapOfficersModal } from "./MapOfficersModal";
@@ -68,6 +69,7 @@ export function StoresTab({ data, canEdit }: { data: StoreMgmtData; canEdit: boo
   const { totals } = data;
   const [filter, setFilter] = useState<Filter>("all");
   const [q, setQ] = useState("");
+  const [fZone, setFZone] = useState("");
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<StoreMgmtRow | null>(null);
   const [mappingId, setMappingId] = useState<number | null>(null);
@@ -93,6 +95,7 @@ export function StoresTab({ data, canEdit }: { data: StoreMgmtData; canEdit: boo
       if (filter === "mapped" && (r.unmapped || !isActive(r.status))) return false;
       if (filter === "unmapped" && !r.unmapped) return false;
       if (filter === "closed" && isActive(r.status)) return false;
+      if (fZone && r.zone !== fZone) return false;
       if (term && !`${r.name} ${r.code} ${r.zone} ${r.regionalManager}`.toLowerCase().includes(term))
         return false;
       return true;
@@ -102,7 +105,7 @@ export function StoresTab({ data, canEdit }: { data: StoreMgmtData; canEdit: boo
       if (a.zone !== b.zone) return a.zone.localeCompare(b.zone);
       return a.name.localeCompare(b.name);
     });
-  }, [data.rows, filter, q]);
+  }, [data.rows, filter, q, fZone]);
 
   const SEGMENTS: { id: Filter; label: string; count: number; accent?: boolean }[] = [
     { id: "all", label: "All", count: totals.total },
@@ -135,8 +138,8 @@ export function StoresTab({ data, canEdit }: { data: StoreMgmtData; canEdit: boo
                 className={cn(
                   "rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-colors",
                   active
-                    ? s.accent ? "bg-[#E65100] text-white" : "bg-[#1A3A1A] text-white"
-                    : s.accent ? "text-[#E65100]" : "text-[#757575]",
+                    ? s.id === "closed" ? "bg-[#C62828] text-white" : s.accent ? "bg-[#E65100] text-white" : "bg-[#1A3A1A] text-white"
+                    : s.id === "closed" ? "text-[#C62828]" : s.accent ? "text-[#E65100]" : "text-[#757575]",
                 )}
               >
                 {s.label} ({s.count})
@@ -147,8 +150,14 @@ export function StoresTab({ data, canEdit }: { data: StoreMgmtData; canEdit: boo
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Search store, code, zone or RM…"
-          className="min-w-[220px] flex-1 rounded-[10px] border border-[#E0E0E0] bg-white px-3.5 py-2 text-[13px] outline-none focus:border-[#2E7D32]"
+          placeholder="Search store, code, district or RM…"
+          className="min-w-[200px] flex-1 rounded-[10px] border border-[#E0E0E0] bg-white px-3.5 py-2 text-[13px] outline-none focus:border-[#2E7D32]"
+        />
+        <SearchableSelect
+          className="min-w-[150px] rounded-[10px] border border-[#E0E0E0] bg-white px-3.5 py-2 text-[13px] text-[#424242] outline-none focus:border-[#2E7D32]"
+          placeholder="All districts" searchPlaceholder="Search districts…"
+          value={fZone || null} onChange={(v) => setFZone(v ?? "")}
+          options={zones.map((z) => ({ value: z, label: z }))}
         />
         {canEdit && (
           <button
