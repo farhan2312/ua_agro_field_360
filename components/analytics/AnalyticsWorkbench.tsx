@@ -62,6 +62,17 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
       .finally(() => setExporting(false));
   };
 
+  // Whole line-level dataset — streamed from a route handler as CSV (no size cap; works with no filters).
+  const exportAllCsv = () => {
+    const f = {
+      storeIds: filters.storeIds, zones: filters.zones, crops: filters.crops, pests: filters.pests,
+      valueSegments: filters.valueSegments, lifecycleSegments: filters.lifecycleSegments,
+      spendTiers: filters.spendTiers, fyStarts: filters.fyStarts,
+    };
+    const enc = encodeURIComponent(btoa(JSON.stringify(f)));
+    window.location.href = `/api/analytics/export?f=${enc}`;
+  };
+
   const apply = (patch: Partial<WbFilters>) => {
     const f = { ...filters, ...patch };
     setFilters(f);
@@ -179,9 +190,16 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
         <BarCard title="Sales-crop breakdown" bars={data.cropBreakdown.map((b) => ({ ...b, label: cropLabel(b.label) }))} fmt={n} accent="#F9A825" />
 
         <MergedMatrixCard matrix={data.matrix} valueCols={data.valueCols} lifecycleCols={data.lifecycleCols} onCell={openCell} by={treeBy} onFlip={flipTree} filters={filters}
-          right={<button type="button" onClick={exportXlsx} disabled={exporting}
-            className="rounded-[8px] border border-[#2E7D32] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9] disabled:opacity-40">
-            {exporting ? "Exporting…" : "⬇ Export to Excel"}</button>} />
+          right={<div className="flex items-center gap-2">
+            <button type="button" onClick={exportXlsx} disabled={exporting}
+              className="rounded-[8px] border border-[#2E7D32] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9] disabled:opacity-40"
+              title="Excel summary: Value×Lifecycle matrix + up to 100k sale lines">
+              {exporting ? "Exporting…" : "⬇ Excel (summary)"}</button>
+            <button type="button" onClick={exportAllCsv}
+              className="rounded-[8px] border border-[#1565C0] px-3 py-1.5 text-[12px] font-semibold text-[#1565C0] hover:bg-[#E3F2FD]"
+              title="Every matching sale line, streamed as CSV — no size limit (use this for the whole dataset)">
+              ⬇ All lines (CSV)</button>
+          </div>} />
       </div>
       ) : (
         <VisitBoard va={visitData} />
