@@ -115,7 +115,7 @@ export function FarmerFilterBar({
           ))}
         </select>
         <select className={select} value={selected.zone ?? ""} onChange={(e) => push({ zone: e.target.value || null })}>
-          <option value="">All regions</option>
+          <option value="">All districts</option>
           {facets.zones.map((z) => (
             <option key={z} value={z}>{z}</option>
           ))}

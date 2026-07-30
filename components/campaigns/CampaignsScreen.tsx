@@ -264,7 +264,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
         <div className="text-[13px] text-[#757575]">
           {canManage
             ? "Run a campaign on a project (all its clusters) or one cluster inside it. Farmers already in another campaign of the same project are skipped — no double-contact."
-            : "Your campaigns — showing only the farmers enrolled from your store / region."}
+            : "Your campaigns — showing only the farmers enrolled from your store / district."}
         </div>
         {canManage && <button type="button" onClick={() => setCreating((v) => !v)} disabled={projects.length === 0} className="rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{creating ? "Close" : "+ New campaign"}</button>}
       </div>
@@ -330,7 +330,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
 
       <div className={`${CARD} overflow-hidden`}>
         {list.length === 0 ? (
-          <div className="px-4 py-10 text-center text-[13px] text-[#9E9E9E]">{canManage ? "No campaigns yet." : "No campaigns assigned to your store / region yet."}</div>
+          <div className="px-4 py-10 text-center text-[13px] text-[#9E9E9E]">{canManage ? "No campaigns yet." : "No campaigns assigned to your store / district yet."}</div>
         ) : list.map((c) => (
           <div key={c.id} className="flex flex-wrap items-center gap-3 border-b border-[#F5F5F5] px-4 py-3">
             <div className="min-w-0 flex-1">

@@ -168,7 +168,7 @@ export function StoresTab({ data, canEdit }: { data: StoreMgmtData; canEdit: boo
         <div className={`${GRID} border-b border-[#F0F0F0] bg-[#FAFAFA] py-[12px] text-[10.5px] font-semibold uppercase tracking-[0.5px] text-[#9E9E9E]`}>
           <div />
           <div>Store</div>
-          <div>Region</div>
+          <div>District</div>
           <div>Regional Manager</div>
           <div>Agri Officers</div>
           <div>Farmers</div>

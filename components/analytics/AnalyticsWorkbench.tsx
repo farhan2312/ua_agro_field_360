@@ -117,7 +117,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
         <span className="text-[11px] font-bold uppercase tracking-[0.5px] text-[#9E9E9E]">{filters.lens === "sales" ? "Sales filters" : "Visit filters"}:</span>
         <MultiSel ph="All stores" options={facets.stores.map((s) => [String(s.id), s.name])}
           selected={(filters.storeIds ?? []).map(String)} onToggle={(v) => toggleInt("storeIds", Number(v))} onClear={() => apply({ storeIds: undefined })} />
-        <MultiSel ph="All zones" options={facets.zones.map((z) => [z, z])}
+        <MultiSel ph="All districts" options={facets.zones.map((z) => [z, z])}
           selected={filters.zones ?? []} onToggle={(v) => toggleStr("zones", v)} onClear={() => apply({ zones: undefined })} />
         <MultiSel ph="All crops" options={cropOpts.map((c) => [c.crop, `${cropLabel(c.crop)} (${n(c.count)})`])}
           selected={filters.crops ?? []} onToggle={(v) => toggleStr("crops", v)} onClear={() => apply({ crops: undefined })} />

@@ -44,7 +44,7 @@ export function ClustersTab({ initial, zones, crops, pests, stores, canChain, ca
         <div className="text-[13px] text-[#757575]">
           {canCreate
             ? "Clusters are dynamic — membership re-resolves live as farmers are added or updated. Build one here, or save one from the Map or Analytics views."
-            : `Clusters are dynamic and built by the central team. Counts below are ${scopeLabel ? `your region (${scopeLabel})` : "your"} members only.`}
+            : `Clusters are dynamic and built by the central team. Counts below are ${scopeLabel ? `your district (${scopeLabel})` : "your"} members only.`}
         </div>
         {canCreate && (
           <button type="button" onClick={() => setBuilding(true)} className="rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white">+ New cluster</button>
@@ -186,11 +186,11 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
         ))}</div>
 
 
-        {/* Regions — multi-select; cascades into the Stores picker below */}
-        <div className="mb-1.5 text-[11px] font-semibold uppercase text-[#9E9E9E]">Regions (any of)</div>
+        {/* Districts — multi-select; cascades into the Stores picker below */}
+        <div className="mb-1.5 text-[11px] font-semibold uppercase text-[#9E9E9E]">Districts (any of)</div>
         <select value="" onChange={(e) => { if (e.target.value) toggleZone(e.target.value); }}
           className="mb-2 w-full rounded-lg border border-[#E0E0E0] bg-white px-3 py-2 text-[13px]">
-          <option value="">+ Add a region…</option>
+          <option value="">+ Add a district…</option>
           {zones.filter((z) => !zoneList.includes(z)).map((z) => <option key={z} value={z}>{z}</option>)}
         </select>
         {zoneList.length > 0 && (
@@ -200,7 +200,7 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
         )}
 
         {/* Stores — cascading multi-select, filtered by the selected regions */}
-        <div className="mb-1.5 text-[11px] font-semibold uppercase text-[#9E9E9E]">Stores (any of){zoneList.length > 0 ? ` · in ${zoneList.length} region${zoneList.length > 1 ? "s" : ""}` : ""}</div>
+        <div className="mb-1.5 text-[11px] font-semibold uppercase text-[#9E9E9E]">Stores (any of){zoneList.length > 0 ? ` · in ${zoneList.length} district${zoneList.length > 1 ? "s" : ""}` : ""}</div>
         <select value="" onChange={(e) => { if (e.target.value) toggleStore(Number(e.target.value)); }}
           className="mb-2 w-full rounded-lg border border-[#E0E0E0] bg-white px-3 py-2 text-[13px]">
           <option value="">+ Add a store…</option>

@@ -140,7 +140,7 @@ export function UsersTab({
             type="text"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search name, employee code, store, region…"
+            placeholder="Search name, employee code, store, district…"
             className="w-full max-w-[380px] rounded-xl border-[1.5px] border-[#E0E0E0] bg-white px-[16px] py-[9px] text-[13px] outline-none focus:border-[#2E7D32] focus:shadow-[0_0_0_3px_rgba(46,125,50,0.1)]"
           />
           <button

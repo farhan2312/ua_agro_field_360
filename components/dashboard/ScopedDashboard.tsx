@@ -14,7 +14,7 @@ const CARD = "rounded-[14px] border border-black/[0.04] bg-white shadow-[0_1px_3
 
 /** Scope header — the greeting + role-scoped context banner (officer→store, RM→region, central→org-wide). */
 export function ScopedDashboard({ data, name }: { data: ScopedDashboardData; name: string }) {
-  const scopeChip = data.kind === "store" ? "My store only" : data.kind === "zone" ? "My region only" : "Organization-wide";
+  const scopeChip = data.kind === "store" ? "My store only" : data.kind === "zone" ? "My district only" : "Organization-wide";
   return (
     <div className={`${CARD} overflow-hidden`}>
       <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-[#1B5E20] to-[#2E7D32] px-5 py-4">

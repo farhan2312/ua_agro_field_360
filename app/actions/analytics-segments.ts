@@ -332,7 +332,7 @@ export async function getWorkbench(f: WbFilters): Promise<WbData> {
     cropBreakdown: cropRows.map((r) => ({ label: r.crop, value: num(r.n) })),
     extra: histRows.map((r) => ({ label: r.bucket, value: num(r.n) })).sort((a, b) => order.indexOf(a.label) - order.indexOf(b.label)),
     extraTitle: "Spend tiers (FY)",
-    secondary: zoneRows.map((r) => ({ label: r.zone, value: Number(r.spend) })), secondaryTitle: "Top zones by FY spend",
+    secondary: zoneRows.map((r) => ({ label: r.zone, value: Number(r.spend) })), secondaryTitle: "Top districts by FY spend",
   };
 }
 
