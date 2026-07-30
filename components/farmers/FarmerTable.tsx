@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { EmptyState } from "@/components/ui";
-import { InfoHint } from "@/components/InfoTip";
+import { InfoHint, InfoTip } from "@/components/InfoTip";
 import { cropLabel } from "@/lib/crops";
 import type { FarmerRowVM } from "./types";
 
@@ -24,7 +24,7 @@ function StatusPill({
         className="inline-flex px-[9px] py-0.5 rounded-full text-[10px] font-semibold"
         style={{ background: bg, color }}
       >
-        {label}
+        <InfoTip term={label}>{label}</InfoTip>
       </div>
     </div>
   );

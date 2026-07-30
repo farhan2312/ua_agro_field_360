@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
+import { InfoTip } from "@/components/InfoTip";
 import { segMeta, segDef, VALUE_SEGMENTS, LIFECYCLE_SEGMENTS, VALUE_TITLE, LIFECYCLE_TITLE } from "@/lib/campaign-segments";
 import { cropLabel } from "@/lib/crops";
 import { tagLabel } from "@/lib/crop-pest";
@@ -250,8 +251,8 @@ function MembersModal({ cluster, onClose }: { cluster: ClusterVM; onClose: () =>
                   <td className="text-[#1565C0]">{f.store}</td>
                   <td className="text-[#616161]">{f.village}</td>
                   <td className="text-[#616161]">{f.crop}</td>
-                  <td className="text-[#616161]">{f.segment}</td>
-                  <td className="text-[#616161]">{f.lifecycle}</td>
+                  <td className="text-[#616161]"><InfoTip term={f.segment}>{f.segment}</InfoTip></td>
+                  <td className="text-[#616161]"><InfoTip term={f.lifecycle}>{f.lifecycle}</InfoTip></td>
                   <td className="text-right font-semibold text-[#1A1C1A]">{f.ltv}</td>
                 </tr>
               ))}</tbody>

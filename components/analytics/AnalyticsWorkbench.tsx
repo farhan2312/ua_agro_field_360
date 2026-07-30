@@ -319,13 +319,13 @@ function SegTree({ tree, by, onFlip }: { tree: TreeCell[]; by: "value" | "lifecy
           return (
             <div key={p} className="rounded-[10px] border border-[#EEE] p-2.5">
               <div className="flex items-baseline justify-between">
-                <span className="text-[12px] font-bold" style={{ color: segMeta(p).color }}>{segMeta(p).label}</span>
+                <span className="text-[12px] font-bold" style={{ color: segMeta(p).color }}><InfoTip term={p}>{segMeta(p).label}</InfoTip></span>
                 <span className="text-[15px] font-bold text-[#1A1C1A]">{n(total)}</span>
               </div>
               <div className="mt-1.5 flex flex-col gap-1">
                 {secondaries.map((s) => (
                   <div key={s} className="flex items-center justify-between text-[11px]">
-                    <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: segMeta(s).color }} />{segMeta(s).label}</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: segMeta(s).color }} /><InfoTip term={s}>{segMeta(s).label}</InfoTip></span>
                     <span className="font-semibold text-[#424242]">{n(cellOf(p, s))}</span>
                   </div>
                 ))}
@@ -612,7 +612,7 @@ function DonutCard({ title, slices, unit = "farmers" }: { title: string; slices:
             {shown.map((s) => (
               <div key={s.label} className="flex items-center gap-2 text-[12px]">
                 <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: s.color ?? "#2E7D32" }} />
-                <span className="truncate font-medium text-[#424242]">{s.label}</span>
+                <span className="truncate font-medium text-[#424242]"><InfoTip term={s.label}>{s.label}</InfoTip></span>
                 <span className="ml-auto shrink-0 text-[#9E9E9E]">{n(s.value)} · {((s.value / total) * 100).toFixed(1)}%</span>
               </div>
             ))}

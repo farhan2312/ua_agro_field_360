@@ -1,4 +1,8 @@
-import { segDef } from "./campaign-segments";
+import { segDef, segMeta, VALUE_SEGMENTS, LIFECYCLE_SEGMENTS } from "./campaign-segments";
+
+/** Resolve a segment display label ("Potential HNI", "At Risk") back to its key so tooltips work on labels too. */
+const LABEL_TO_KEY: Record<string, string> = {};
+for (const k of [...VALUE_SEGMENTS, ...LIFECYCLE_SEGMENTS]) LABEL_TO_KEY[segMeta(k).label.toUpperCase()] = k;
 
 /**
  * One-line, plain-language definitions for the portal's acronyms & attributes — surfaced as hover
@@ -24,7 +28,8 @@ export const GLOSSARY: Record<string, string> = {
 export function glossaryDef(term: string): string {
   const key = (term ?? "").trim();
   if (!key) return "";
-  const seg = segDef(key.toUpperCase());       // HNI | POTENTIAL_HNI | REGULAR | NEW | RECENT | AT_RISK | LAPSED
+  const U = key.toUpperCase();
+  const seg = segDef(U) || segDef(LABEL_TO_KEY[U] ?? ""); // by segment key OR by display label
   if (seg) return seg;
-  return GLOSSARY[key.toUpperCase()] ?? "";
+  return GLOSSARY[U] ?? "";
 }

@@ -1,6 +1,7 @@
 import { Card } from "@/components/ui";
 import { initials } from "@/lib/format";
 import { cropLabel } from "@/lib/crops";
+import { InfoTip } from "@/components/InfoTip";
 import type { FarmerDetail } from "./types";
 
 function DetailRow({
@@ -44,7 +45,7 @@ export function FarmerProfileCard({ farmer }: { farmer: FarmerDetail }) {
                 className="px-2.5 py-[3px] rounded-[20px] text-[10px] font-bold"
                 style={{ background: farmer.segBg, color: farmer.segColor }}
               >
-                {farmer.segment}
+                <InfoTip term={farmer.segment}>{farmer.segment}</InfoTip>
               </div>
             )}
             {farmer.lifecycle && (
@@ -52,7 +53,7 @@ export function FarmerProfileCard({ farmer }: { farmer: FarmerDetail }) {
                 className="px-2.5 py-[3px] rounded-[20px] text-[10px] font-bold"
                 style={{ background: farmer.lifeBg, color: farmer.lifeColor }}
               >
-                {farmer.lifecycle}
+                <InfoTip term={farmer.lifecycle}>{farmer.lifecycle}</InfoTip>
               </div>
             )}
           </div>
