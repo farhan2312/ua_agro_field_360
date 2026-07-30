@@ -24,7 +24,7 @@ const P6 = minusM(ASOF, 6), P12 = minusM(ASOF, 12), P24 = minusM(ASOF, 24);
 
 interface Agg {
   p6: boolean; p712: boolean; p1324: boolean;
-  earliest: Date | null; latest: Date | null; spend12: number;
+  earliest: Date | null; latest: Date | null; spend12: number; spendAll: number;
   maizeItem: string | null; maizeAt: Date | null;
   potatoItem: string | null; potatoAt: Date | null;
 }
@@ -41,7 +41,7 @@ async function main() {
   const agg = new Map<number, Agg>();
   const getA = (id: number): Agg => {
     let a = agg.get(id);
-    if (!a) { a = { p6: false, p712: false, p1324: false, earliest: null, latest: null, spend12: 0, maizeItem: null, maizeAt: null, potatoItem: null, potatoAt: null }; agg.set(id, a); }
+    if (!a) { a = { p6: false, p712: false, p1324: false, earliest: null, latest: null, spend12: 0, spendAll: 0, maizeItem: null, maizeAt: null, potatoItem: null, potatoAt: null }; agg.set(id, a); }
     return a;
   };
 
@@ -65,6 +65,7 @@ async function main() {
       else if (dt > P12) a.p712 = true;
       else if (dt > P24) a.p1324 = true;
       if (dt > P12) a.spend12 += s.amountNum ?? 0;
+      a.spendAll += s.amountNum ?? 0; // lifetime value (LTV) — the value tier is keyed off this
       // Seed-only crop detection (best-effort from the bill's item summary).
       const it = (s.items ?? "").toUpperCase();
       const cat = (s.category ?? "").toUpperCase();
@@ -92,8 +93,9 @@ async function main() {
     const atRisk = a.p712 && !a.p6;
     const isNew = a.earliest != null && a.earliest > P12; // first-ever purchase within P12M
     const lapsed = !a.p6 && !a.p712; // has sales, none in P12M
-    const hni = a.spend12 >= HNI_MIN;
-    const potential = !hni && a.spend12 >= POTENTIAL_MIN;
+    // Value tier keys off LIFETIME value (all-time spend = the LTV shown on Farmer 360), not P12M.
+    const hni = a.spendAll >= HNI_MIN;
+    const potential = !hni && a.spendAll >= POTENTIAL_MIN;
 
     const tags: string[] = [];
     if (regular) tags.push("regular");
@@ -115,7 +117,7 @@ async function main() {
     segCounts[seg] = (segCounts[seg] ?? 0) + 1;
 
     // ── The two split dimensions ──
-    const valueSeg = valueSegmentOf(a.spend12); // HNI | POTENTIAL_HNI | REGULAR
+    const valueSeg = valueSegmentOf(a.spendAll); // HNI | POTENTIAL_HNI | REGULAR — by LTV (lifetime spend)
     const monthsSinceLast = a.latest ? Math.floor((ASOF.getTime() - a.latest.getTime()) / MS_PER_MONTH) : null;
     const monthsSinceFirst = a.earliest ? Math.floor((ASOF.getTime() - a.earliest.getTime()) / MS_PER_MONTH) : null;
     const lifecycleSeg = lifecycleSegmentOf(monthsSinceLast, monthsSinceFirst); // NEW | RECENT | AT_RISK | LAPSED
@@ -128,7 +130,7 @@ async function main() {
     if (a.maizeItem) maizeCount++;
     if (a.potatoItem) potatoCount++;
 
-    const gap = valueSeg === "POTENTIAL_HNI" ? HNI_MIN - a.spend12 : null;
+    const gap = valueSeg === "POTENTIAL_HNI" ? HNI_MIN - a.spendAll : null;
 
     rows.push(
       `(${id}::int, ${txtArr(tags)}, ${q(seg)}::text, ${q(valueSeg)}::text, ${q(lifecycleSeg)}::text, ${ts(a.latest)}, ${int(a.spend12)}, ${int(gap)}, ` +
