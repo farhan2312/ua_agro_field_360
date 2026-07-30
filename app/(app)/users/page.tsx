@@ -42,15 +42,47 @@ async function loadPending(): Promise<PendingUser[]> {
 /** Directory order: admins first, then RMs, then the (many) officers. */
 const ROLE_SORT: Record<string, number> = { sysadmin: 0, central: 1, regional: 2, officer: 3 };
 
+/** Human "last active" label from a real timestamp (sign-in or last visit). */
+function relTime(d: Date | null | undefined): string {
+  if (!d) return "Never";
+  const ms = Date.now() - d.getTime();
+  const min = Math.floor(ms / 60000);
+  if (min < 1) return "Just now";
+  if (min < 60) return `${min} min ago`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h} hr ago`;
+  const days = Math.floor(h / 24);
+  if (days < 7) return `${days} day${days > 1 ? "s" : ""} ago`;
+  return d.toLocaleDateString("en-GB", {
+    day: "numeric", month: "short",
+    ...(d.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}),
+  });
+}
+
 async function loadUsers(): Promise<UserRow[]> {
   try {
-    const [dbUsers, stores] = await Promise.all([
+    const [dbUsers, stores, visitAgg] = await Promise.all([
       prisma.user.findMany({ where: { approvalStatus: "APPROVED" }, orderBy: { id: "asc" } }),
       prisma.store.findMany({ select: { id: true, name: true } }),
+      // Most recent visit each officer recorded — a real activity signal beyond sign-in.
+      prisma.visit.groupBy({
+        by: ["officerName"],
+        where: { officerName: { not: null }, visitedAt: { not: null } },
+        _max: { visitedAt: true },
+      }),
     ]);
     const storeById = new Map(stores.map((s) => [s.id, shortStoreName(s.name) || s.name]));
+    const visitByName = new Map(
+      visitAgg.filter((v) => v.officerName).map((v) => [v.officerName!.trim().toUpperCase(), v._max.visitedAt]),
+    );
     return dbUsers
-      .map((u) => ({
+      .map((u) => {
+        // "Last active" = most recent of a real sign-in and their last recorded visit.
+        const lastVisit = visitByName.get(u.name.trim().toUpperCase()) ?? null;
+        const activeAt = [u.lastLoginAt, lastVisit]
+          .filter((d): d is Date => d != null)
+          .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+        return {
         id: u.id,
         init: u.initials ?? initials(u.name),
         name: u.name,
@@ -65,10 +97,11 @@ async function loadUsers(): Promise<UserRow[]> {
         // storeId is a loose reference — a deleted store leaves a dangling id, so fall back to "—".
         storeName: u.storeId != null ? storeById.get(u.storeId) ?? "—" : "—",
         zone: u.zone ?? "",
-        lastActive: u.lastActive ?? "",
+        lastActive: relTime(activeAt),
         visitsMtd: u.visitsMtd ?? "—",
         status: u.active ? "Active" : "Inactive",
-      }))
+        };
+      })
       // Default order: by role (admins → officers), then alphabetically by name.
       .sort((a, b) =>
         (ROLE_SORT[a.roleKey] ?? 9) - (ROLE_SORT[b.roleKey] ?? 9) ||

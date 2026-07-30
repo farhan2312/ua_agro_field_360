@@ -66,6 +66,8 @@ export async function loginAction(formData: FormData): Promise<AuthResult> {
     const valid = await verifyPassword(password, user.passwordHash);
     if (!valid) return { error: "Invalid employee code or password." };
 
+    // Stamp real last-active time (drives the Users "Last active" column).
+    await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } }).catch(() => {});
     await issueSession(user);
     cookies().delete(ROLE_COOKIE);
     return { ok: true };

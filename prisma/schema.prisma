@@ -113,7 +113,8 @@ model User {
   storeId        Int?
   zone           String?
   territory      String?
-  lastActive     String?
+  lastActive     String? // LEGACY seeded label (unused for display; superseded by lastLoginAt + last visit)
+  lastLoginAt    DateTime? // real last sign-in timestamp (stamped by loginAction)
   visitsMtd      String?
   active         Boolean        @default(true)
   source         DataSource     @default(DEMO)
