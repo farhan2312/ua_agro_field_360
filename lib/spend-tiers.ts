@@ -11,5 +11,6 @@ export const SPEND_TIERS: { label: string; min?: number; max?: number }[] = [
   { label: "₹8–10K", min: 8000, max: 10000 },
   { label: "₹5–8K", min: 5000, max: 8000 },
   { label: "₹2.5–5K", min: 2500, max: 5000 },
-  { label: "< ₹2.5K", max: 2500 },
+  { label: "< ₹2.5K", min: 1, max: 2500 },
+  { label: "No spend", max: 0 }, // no purchases at all (max:0 = the no-spend sentinel)
 ];

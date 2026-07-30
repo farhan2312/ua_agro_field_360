@@ -85,10 +85,14 @@ export default async function FarmersPage({
     if (pest) where.pestTags = { has: pest };
     if (spendTier) {
       // "All spend" = all-time base-price LTV (same brackets as the analytics spend filter).
-      where.lifetimeSpend = {
-        ...(spendTier.min != null ? { gte: spendTier.min } : {}),
-        ...(spendTier.max != null ? { lt: spendTier.max } : {}),
-      };
+      if (spendTier.max === 0 && spendTier.min == null) {
+        where.lifetimeSpend = null; // "No spend" — farmers with no purchases
+      } else {
+        where.lifetimeSpend = {
+          ...(spendTier.min != null ? { gte: spendTier.min } : {}),
+          ...(spendTier.max != null ? { lt: spendTier.max } : {}),
+        };
+      }
     }
     if (q) {
       where.OR = [

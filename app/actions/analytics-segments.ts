@@ -36,6 +36,7 @@ const col = (alias: string, name: string) => Prisma.raw(alias ? `${alias}."${nam
 function spendTierOr(tiers: number[] | undefined, expr: Prisma.Sql): Prisma.Sql | null {
   if (!tiers?.length) return null;
   const ors = tiers.map((i) => SPEND_TIERS[i]).filter(Boolean).map((t) => {
+    if (t.max === 0 && t.min == null) return Prisma.sql`(${expr} <= 0 OR ${expr} IS NULL)`; // "No spend" sentinel
     const parts: Prisma.Sql[] = [];
     if (t.min != null) parts.push(Prisma.sql`${expr} >= ${t.min}`);
     if (t.max != null) parts.push(Prisma.sql`${expr} < ${t.max}`);

@@ -38,7 +38,9 @@ function buildWhere(storeIds: number[], f: FarmerFilters): Prisma.FarmerWhereInp
   if (f.campaignSegment) where.campaignSegment = f.campaignSegment;
   if (f.spendTier != null && SPEND_TIERS[f.spendTier]) {
     const t = SPEND_TIERS[f.spendTier];
-    where.p12mSpend = { ...(t.min != null ? { gte: t.min } : {}), ...(t.max != null ? { lt: t.max } : {}) };
+    // All-time base-price spend (LTV), same brackets as Farmer 360 / analytics.
+    if (t.max === 0 && t.min == null) where.lifetimeSpend = null; // "No spend"
+    else where.lifetimeSpend = { ...(t.min != null ? { gte: t.min } : {}), ...(t.max != null ? { lt: t.max } : {}) };
   }
   if (f.category) where.sales = { some: { category: f.category } };
   if (f.q?.trim()) {
