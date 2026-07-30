@@ -33,3 +33,8 @@ yarn-error.log*
 
 # prisma
 /prisma/*.db
+
+# Stale local build dir (not part of the app; app lives at repo root)
+webapp/
+# Raw data drops
+*.csv
