@@ -7,7 +7,7 @@ export type NavId =
   | "users" | "salesImport" | "settings" | "audit" | "bugs";
 
 /** A "view" can also be a detail variant of a nav id (for header titles). */
-export type ViewId = NavId | "farmerDetail" | "visitDetail" | "projectDetail";
+export type ViewId = NavId | "farmerDetail" | "visitDetail" | "projectDetail" | "training";
 
 export interface NavItem {
   id: NavId;
@@ -87,5 +87,6 @@ export function routeToView(pathname: string): ViewId {
   if (pathname.startsWith("/settings")) return "settings";
   if (pathname.startsWith("/audit")) return "audit";
   if (pathname.startsWith("/bugs")) return "bugs";
+  if (pathname.startsWith("/training")) return "training";
   return "analytics"; // Analytics is the home page (Dashboard was merged into it)
 }

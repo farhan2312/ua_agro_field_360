@@ -3,6 +3,7 @@
 import { useEffect, useState, useTransition, type ReactNode } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
 import { ChainNext } from "@/components/ChainNext";
+import { InfoTip } from "@/components/InfoTip";
 import { VALUE_SEGMENTS, LIFECYCLE_SEGMENTS, VALUE_TITLE, LIFECYCLE_TITLE, segMeta, segDef } from "@/lib/campaign-segments";
 import { cropLabel } from "@/lib/crops";
 import { tagLabel } from "@/lib/crop-pest";
@@ -386,9 +387,9 @@ function MergedMatrixCard({ matrix, valueCols, lifecycleCols, onCell, by, onFlip
           <div className="min-w-[900px]">
             <div className={`${MERGED_GRID} border-b border-[#F0F0F0] bg-[#FAFAFA] px-4 py-2.5 text-[10.5px] font-semibold uppercase tracking-[0.4px] text-[#9E9E9E]`}>
               <div>Store</div>
-              {valueCols.map((s) => <div key={s} className="text-right" style={{ color: segMeta(s).color }}>{segMeta(s).label}</div>)}
+              {valueCols.map((s) => <div key={s} className="text-right" style={{ color: segMeta(s).color }}><InfoTip term={s}>{segMeta(s).label}</InfoTip></div>)}
               <div className="text-right text-[#1A1C1A]">Segment Total</div>
-              {lifecycleCols.map((s) => <div key={s} className="text-right" style={{ color: segMeta(s).color }}>{segMeta(s).label}</div>)}
+              {lifecycleCols.map((s) => <div key={s} className="text-right" style={{ color: segMeta(s).color }}><InfoTip term={s}>{segMeta(s).label}</InfoTip></div>)}
               <div className="text-right text-[#1A1C1A]">Any Spend Total</div>
             </div>
             <div className={`${MERGED_GRID} border-b border-[#EEE] bg-[#F5FBF5] px-4 py-2.5 text-[12px] font-bold text-[#1A1C1A]`}>
@@ -444,13 +445,13 @@ function DetailedMatrix({ matrix, valueCols, lifecycleCols, onCell, by }: {
           <tr className="border-b border-[#F0F0F0] bg-[#FAFAFA]">
             <th rowSpan={2} className="sticky left-0 z-10 bg-[#FAFAFA] px-4 py-1.5 text-left text-[10.5px] font-semibold uppercase tracking-[0.3px] text-[#9E9E9E]">Store</th>
             {groups.map((g, i) => (
-              <th key={g} colSpan={subs.length} className={`px-2.5 py-1.5 text-center text-[11px] font-bold ${i > 0 ? "border-l border-[#EEE]" : ""}`} style={{ color: segMeta(g).color }}>{segMeta(g).label}</th>
+              <th key={g} colSpan={subs.length} className={`px-2.5 py-1.5 text-center text-[11px] font-bold ${i > 0 ? "border-l border-[#EEE]" : ""}`} style={{ color: segMeta(g).color }}><InfoTip term={g}>{segMeta(g).label}</InfoTip></th>
             ))}
             <th rowSpan={2} className="border-l border-[#EEE] px-3 py-1.5 text-right text-[10.5px] font-bold uppercase tracking-[0.3px] text-[#1A1C1A]">Total</th>
           </tr>
           <tr className="border-b border-[#F0F0F0] bg-[#FAFAFA] text-[#9E9E9E]">
             {groups.flatMap((g, gi) => subs.map((s, si) => (
-              <th key={g + s} className={`${th} ${gi > 0 && si === 0 ? "border-l border-[#EEE]" : ""}`}>{SEG_SHORT[s] ?? segMeta(s).label}</th>
+              <th key={g + s} className={`${th} ${gi > 0 && si === 0 ? "border-l border-[#EEE]" : ""}`}><InfoTip term={s}>{SEG_SHORT[s] ?? segMeta(s).label}</InfoTip></th>
             )))}
           </tr>
         </thead>

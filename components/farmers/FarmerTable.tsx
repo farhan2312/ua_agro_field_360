@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { EmptyState } from "@/components/ui";
+import { InfoHint } from "@/components/InfoTip";
 import { cropLabel } from "@/lib/crops";
 import type { FarmerRowVM } from "./types";
 
@@ -96,9 +97,9 @@ export function FarmerTable({ rows }: { rows: FarmerRowVM[] }) {
         <div>Farmer</div>
         <div>Village</div>
         <div>Crop</div>
-        <div>Segment</div>
-        <div>Lifecycle</div>
-        <div>LTV</div>
+        <div className="flex items-center">Segment<InfoHint term="VALUE SEGMENT" /></div>
+        <div className="flex items-center">Lifecycle<InfoHint term="LIFECYCLE" /></div>
+        <div className="flex items-center">LTV<InfoHint term="LTV" /></div>
         <div>Last Visit</div>
         <div>Store</div>
         <div>Status</div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Modal, ModalHeader } from "@/components/interactive";
 import { createBug } from "@/app/actions/bugs";
@@ -53,6 +53,29 @@ export function ReportBugButton() {
     if (!file) return;
     try { setShot(await fileToDataUrl(file)); } catch { setErr("Couldn't read that image."); }
   };
+
+  // While the modal is open, a pasted image (e.g. a clipboard screenshot) becomes the attachment.
+  // Only images are intercepted, so pasting text into the description still works normally.
+  useEffect(() => {
+    if (!open) return;
+    const onPaste = async (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        if (it.type.startsWith("image/")) {
+          const file = it.getAsFile();
+          if (file) {
+            e.preventDefault();
+            try { setShot(await fileToDataUrl(file)); setErr(null); } catch { setErr("Couldn't read the pasted image."); }
+          }
+          return;
+        }
+      }
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [open]);
 
   const submit = async () => {
     if (!title.trim()) { setErr("Please add a short title."); return; }
@@ -123,7 +146,7 @@ export function ReportBugButton() {
                 ) : (
                   <button type="button" onClick={() => fileRef.current?.click()}
                     className="w-full rounded-[10px] border border-dashed border-[#C5CAD3] bg-[#EEF1F6] py-3 text-[12.5px] font-semibold text-[#5A6473] hover:bg-[#E7ECF3]">
-                    📎 Click to attach an image
+                    📎 Click to attach — or paste a screenshot (Ctrl/⌘+V)
                   </button>
                 )}
               </div>

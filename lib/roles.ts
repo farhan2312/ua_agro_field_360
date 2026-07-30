@@ -181,6 +181,8 @@ export function viewTitle(
       return ["Audit Log", "System activity & data changes"];
     case "bugs":
       return ["Bug Tracker", "Reports filed through the portal · triage & resolve"];
+    case "training":
+      return ["Training & Help", "Guides and how-to videos for the portal"];
     case "campaigns":
       return ["Campaigns", "Segmented customer targeting & outreach"];
     case "projects":

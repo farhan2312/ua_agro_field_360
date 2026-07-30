@@ -48,6 +48,15 @@ export function Header({ role, counts }: { role: RoleKey; counts: HeaderCounts }
           <SyncBadge />
         </span>
 
+        <Link
+          href="/training"
+          title="Training documents & videos"
+          className="inline-flex items-center gap-1.5 rounded-[10px] border border-line bg-white px-3 py-[7px] text-[12px] font-semibold text-ink-600 transition-colors hover:border-brand-400 hover:text-brand-700"
+        >
+          <span aria-hidden>🎓</span>
+          <span className="hidden sm:inline">Training</span>
+        </Link>
+
         <ReportBugButton />
 
         {isAdmin && (
