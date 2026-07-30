@@ -111,27 +111,24 @@ export default async function SettingsPage() {
     {
       label: "Crop Master",
       caption: `${grouped(counts.crops)} crops configured`,
-      href: "/master-data",
     },
     {
       label: "Village Directory",
       caption: `${grouped(counts.villages)} villages across ${counts.districts} districts`,
-      href: "/master-data",
     },
     {
       label: "Product Catalog",
       caption: `${grouped(counts.products)} products configured`,
-      href: "/master-data",
+      href: "/products",
     },
     {
       label: "Store Locations",
       caption: `${grouped(counts.stores)} stores configured`,
-      href: "/master-data",
+      href: "/users",
     },
     {
       label: "Problem Categories",
       caption: `${grouped(counts.problemTypes)} problem types · ${grouped(counts.fieldOptions)} field options`,
-      href: "/master-data",
     },
   ];
 

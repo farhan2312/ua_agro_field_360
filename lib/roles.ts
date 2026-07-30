@@ -101,7 +101,6 @@ export const NAV_VISIBILITY: Record<string, (r: RoleKey) => boolean> = {
   farmers: () => true, // Farmer 360 — scoped per role (officer→store, RM→region)
   mapView: (r) => r !== "officer", // officers work a single store; RMs see their region only
   farmerCluster: (r) => r !== "officer", // RMs may view (region-scoped) clusters but not create them
-  masterData: (r) => r === "central" || r === "sysadmin",
   analytics: () => true,
   actions: (r) =>
     r === "regional" || r === "central" || r === "officer" || r === "sysadmin",
@@ -179,8 +178,6 @@ export function viewTitle(
       return ["System Settings", "Configuration & master data"];
     case "audit":
       return ["Audit Log", "System activity & data changes"];
-    case "masterData":
-      return ["Master Data", "Manage stores, farmers, users & reference lists"];
     case "campaigns":
       return ["Campaigns", "Segmented customer targeting & outreach"];
     case "projects":

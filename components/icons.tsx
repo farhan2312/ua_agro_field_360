@@ -40,11 +40,6 @@ export const NavIcons: Record<NavId, (p: P) => JSX.Element> = {
       <line x1="7.5" y1="10" x2="10.5" y2="12" stroke="currentColor" strokeWidth="1.5" />
     </svg>
   ),
-  masterData: ({ className }) => (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" className={className}>
-      <rect x="2" y="3" width="14" height="3" rx="1" /><rect x="2" y="8" width="14" height="3" rx="1" /><rect x="2" y="13" width="14" height="3" rx="1" />
-    </svg>
-  ),
   analytics: ({ className }) => (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor" className={className}>
       <rect x="1" y="10" width="3" height="7" rx="1" /><rect x="5.5" y="6" width="3" height="11" rx="1" />

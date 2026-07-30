@@ -2,7 +2,7 @@ import { canAccess, type RoleKey } from "./roles";
 
 export type NavId =
   | "dashboard" | "newVisit" | "visitRepo" | "farmers" | "mapView"
-  | "farmerCluster" | "masterData" | "analytics" | "actions" | "projects" | "campaigns"
+  | "farmerCluster" | "analytics" | "actions" | "projects" | "campaigns"
   | "products" | "movement"
   | "users" | "salesImport" | "settings" | "audit";
 
@@ -32,7 +32,6 @@ export const SALES_NAV: NavItem[] = [
 ];
 
 export const ADMIN_NAV: NavItem[] = [
-  { id: "masterData", label: "Master Data", href: "/master-data" },
   { id: "users", label: "Users", href: "/users" },
   { id: "salesImport", label: "Sales Import", href: "/imports" },
   { id: "settings", label: "Settings", href: "/settings" },
@@ -81,7 +80,6 @@ export function routeToView(pathname: string): ViewId {
   if (pathname.startsWith("/movement")) return "movement";
   if (pathname.startsWith("/map")) return "mapView";
   if (pathname.startsWith("/clusters")) return "farmerCluster";
-  if (pathname.startsWith("/master-data")) return "masterData";
   if (pathname.startsWith("/analytics")) return "analytics";
   if (pathname.startsWith("/imports")) return "salesImport";
   if (pathname.startsWith("/users")) return "users";
