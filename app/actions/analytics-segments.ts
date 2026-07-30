@@ -81,11 +81,12 @@ function fyBounds(fyStarts: number[]): { window: (alias: string) => Prisma.Sql; 
   return { window, asOfSql };
 }
 /**
- * The scoped→agg→tiers CTE: per-farmer FY spend + last purchase → live value/lifecycle tier.
- * SPEND is always summed from SaleLine.basic — the pre-tax BASE price from the source file (not the
- * GST-inclusive line total). When a crop filter is active, spend counts ONLY that crop's tagged lines
- * (not the whole bill) — so "potato ₹" = potato-item revenue only, and the value tier follows.
- * Lifecycle recency (last_at) always uses ALL sales (a farmer active on other crops isn't "lapsed").
+ * The scoped→agg→tiers CTE: per-farmer FY spend + last purchase → value/lifecycle tier.
+ * VALUE TIER — by default keys off the farmer's stored LIFETIME-value segment (`Farmer.valueSegment`,
+ * = all-time LTV), so the analytics counts match Farmer 360 exactly. ONLY when a crop filter is active
+ * does it fall back to the crop-scoped FY spend (so "potato HNI" = big potato buyers) — the deliberate
+ * crop lens. SPEND (revenue histograms / drill-downs) is always SaleLine.basic (pre-tax), FY- and
+ * crop-scoped. Lifecycle recency (last_at/first_at) always uses ALL sales, relative to the FY asOf.
  */
 function tiersCte(f: WbFilters): Prisma.Sql {
   const { window, asOfSql } = fyBounds(f.fyStarts ?? []);
@@ -93,13 +94,17 @@ function tiersCte(f: WbFilters): Prisma.Sql {
   const recentM = Prisma.raw(String(LIFECYCLE_RECENT_MONTHS)), lapsedM = Prisma.raw(String(LIFECYCLE_LAPSED_MIN_MONTHS));
   // Crop filter → only that crop's tagged lines. No crop → every line.
   const cropCond = f.crops?.length ? Prisma.sql`AND sl."cropTag" = ANY(${f.crops}::text[])` : Prisma.empty;
+  // Value tier: crop lens → crop-scoped FY spend; otherwise → the stored lifetime-LTV segment.
+  const vsegSql = f.crops?.length
+    ? Prisma.sql`CASE WHEN spend >= ${VALUE_HNI_MIN} THEN 'HNI' WHEN spend >= ${VALUE_POTENTIAL_MIN} THEN 'POTENTIAL_HNI' ELSE 'REGULAR' END`
+    : Prisma.sql`COALESCE(vstored, 'REGULAR')`;
   const spendAgg = Prisma.sql`spend_agg AS (
         SELECT sl."farmerId" id, COALESCE(SUM(sl."basic") FILTER (WHERE ${window("sl")}), 0)::bigint spend
         FROM "SaleLine" sl JOIN scoped sc ON sc.id = sl."farmerId"
         WHERE sl.source = 'REAL' AND sl."soldAt" IS NOT NULL ${cropCond}
         GROUP BY 1)`;
   return Prisma.sql`
-    scoped AS (SELECT f.id, f."storeId", f."zone" FROM "Farmer" f ${where}),
+    scoped AS (SELECT f.id, f."storeId", f."zone", f."valueSegment" vstored FROM "Farmer" f ${where}),
     ${spendAgg},
     recency_agg AS (
       SELECT s."farmerId" id,
@@ -109,11 +114,11 @@ function tiersCte(f: WbFilters): Prisma.Sql {
       WHERE s.source = 'REAL' AND s."soldAt" IS NOT NULL
       GROUP BY 1),
     agg AS (
-      SELECT sc.id, sc."storeId", sc."zone", COALESCE(sp.spend, 0)::bigint spend, rc.last_at, rc.first_at
+      SELECT sc.id, sc."storeId", sc."zone", sc.vstored, COALESCE(sp.spend, 0)::bigint spend, rc.last_at, rc.first_at
       FROM scoped sc LEFT JOIN spend_agg sp ON sp.id = sc.id LEFT JOIN recency_agg rc ON rc.id = sc.id),
     tiers AS (
       SELECT id, "storeId", "zone", spend,
-        CASE WHEN spend >= ${VALUE_HNI_MIN} THEN 'HNI' WHEN spend >= ${VALUE_POTENTIAL_MIN} THEN 'POTENTIAL_HNI' ELSE 'REGULAR' END vseg,
+        ${vsegSql} vseg,
         CASE WHEN last_at IS NULL THEN 'LAPSED'
           WHEN last_at > ${asOfSql} - interval '${recentM} months'
             THEN CASE WHEN first_at > ${asOfSql} - interval '${recentM} months' THEN 'NEW' ELSE 'RECENT' END
