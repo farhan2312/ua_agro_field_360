@@ -175,7 +175,7 @@ export const TRAINING: TrainingTopic[] = [
     roles: ["officer", "regional", "central", "sysadmin"],
     minutes: 2,
     steps: [
-      { text: "Open “Visit Repo” from the menu to see recent visits, newest first." },
+      { text: "Open “Visit Repo” from the menu to see recent visits, newest first.", image: "visit-repo.png" },
       { text: "Click a visit to open the full report — date, farmer, notes, photos, audio, and follow-up date." },
       { text: "As an officer you see your store’s visits; a Regional Manager sees their district; Central/Admin see everything." },
     ],
@@ -243,7 +243,7 @@ export const TRAINING: TrainingTopic[] = [
     roles: ["officer", "regional", "sysadmin"],
     minutes: 4,
     steps: [
-      { text: "Open “Campaigns”. You’ll see the campaigns assigned to your store/district and the farmers you need to reach." },
+      { text: "Open “Campaigns”. You’ll see the campaigns assigned to your store/district and the farmers you need to reach.", image: "campaigns.png" },
       { text: "For each farmer, contact them using the suggested approach (Call, WhatsApp, in-person…). You can tick more than one approach." },
       { text: "Mark them as reached, and record their response — interested, not interested, or interested in another crop.", tip: "Use the call-script panel as a ready-made talking point." },
       { text: "Add a short comment if there’s anything worth noting." },
@@ -293,7 +293,7 @@ export const TRAINING: TrainingTopic[] = [
     roles: ["central", "sysadmin"],
     minutes: 4,
     steps: [
-      { text: "Open “Users”. Pending access requests appear at the top — approve or reject each, setting the right role." },
+      { text: "Open “Users”. Pending access requests appear at the top — approve or reject each, setting the right role.", image: "users.png" },
       { text: "Use the search and the role / store / status filters to find any user." },
       { text: "Click a user’s name to open their detail popup: phone, code, role, store, district, last active, and their activity/audit trail." },
       { text: "Use Edit to change a user’s role or store mapping; Delete removes their access.", warn: "Deleting a user removes their login permanently." },
@@ -346,6 +346,125 @@ export const TRAINING: TrainingTopic[] = [
     ],
     outcome: "Reported issues are visibly tracked from filed to fixed.",
     related: ["report-a-bug"],
+  },
+
+  // ─────────────────────────── Farmers (concepts) ───────────────────────────
+  {
+    id: "understanding-segments",
+    title: "Understanding value segments & lifecycle",
+    summary: "What HNI, Potential, Regular, New, Recent, At Risk and Lapsed mean.",
+    section: "Farmers",
+    roles: ["officer", "regional", "central", "sysadmin"],
+    minutes: 3,
+    steps: [
+      { text: "Every farmer has two independent tags. The Value segment is by how much they’ve spent all-time (base price): HNI = ₹12,000+, Potential HNI = ₹8,000–12,000, Regular = under ₹8,000.", image: "farmer-detail.png" },
+      { text: "The Lifecycle is by how recently they bought: New (first purchase in the last 6 months), Recent (bought in the last 6 months and earlier too), At Risk (last bought 6–12 months ago), Lapsed (12+ months, or never)." },
+      { text: "The two are independent — a big spender can still be Lapsed. That’s why campaigns can be broken down by either dimension.", tip: "Anywhere you see a tag like “HNI”, hover it to read its definition." },
+    ],
+    outcome: "You can read any farmer’s worth and recency, and know why the two tags are separate.",
+    related: ["read-a-profile"],
+  },
+
+  // ─────────────────────────── Map & Clusters ───────────────────────────
+  {
+    id: "clusters-page",
+    title: "Viewing saved farmer clusters",
+    summary: "Browse clusters and see who’s inside each one.",
+    section: "Map & Clusters",
+    roles: ["regional", "central", "sysadmin"],
+    minutes: 2,
+    steps: [
+      { text: "Open “Farmer Clusters” to see every saved cluster and its farmer count.", image: "clusters.png" },
+      { text: "Click “View” on a cluster to see its members — with each farmer’s store, village, value segment, lifecycle, and spend.", warn: "If the cluster is crop-scoped, the spend column shows that crop’s spend only, while the segment stays the farmer’s overall tier." },
+    ],
+    outcome: "You can inspect exactly who is in any audience before using it.",
+    related: ["map-clusters", "create-campaign"],
+  },
+
+  // ─────────────────────────── Campaigns ───────────────────────────
+  {
+    id: "projects",
+    title: "Organising work with Projects",
+    summary: "Bundle clusters into a dated project.",
+    section: "Campaigns",
+    roles: ["central", "sysadmin"],
+    minutes: 2,
+    steps: [
+      { text: "Open “Projects”. A project groups one or more clusters together with a start and end date.", image: "projects.png" },
+      { text: "Create a project, add its clusters, and set the dates. You can extend a project’s dates later if needed." },
+      { text: "Campaigns are then created inside a project, so all the outreach for a season sits together." },
+    ],
+    outcome: "Your clusters are organised into dated projects, ready for campaigns.",
+    related: ["create-campaign"],
+  },
+  {
+    id: "comm-plan",
+    title: "Setting up the communication plan",
+    summary: "The message, offer, and channel for each segment.",
+    section: "Campaigns",
+    roles: ["central", "sysadmin"],
+    minutes: 3,
+    steps: [
+      { text: "In Campaigns, open the Comm Plan. Each segment has a recommended channel (Call, WhatsApp, 1:1), an offer, timing, and a ready-made message template.", image: "comm-plan.png" },
+      { text: "Edit any row — change the wording, offer, or channel — and save. Templates use the farmer’s name and crop automatically." },
+    ],
+    outcome: "Every segment has an approved message and offer that officers use during outreach.",
+    related: ["create-campaign", "execute-campaign"],
+  },
+
+  // ─────────────────────────── Administration ───────────────────────────
+  {
+    id: "product-catalog",
+    title: "Browsing the Product Catalog",
+    summary: "Every product with its category, pricing, and sales.",
+    section: "Administration",
+    roles: ["regional", "central", "sysadmin"],
+    minutes: 2,
+    steps: [
+      { text: "Open “Product Catalog” to see all products from the master file, with their category, crop, and pricing columns.", image: "products.png" },
+      { text: "Use it to check which products belong to a crop or category — this is what campaign attribution matches against." },
+    ],
+    outcome: "You know what’s in the catalogue and how products map to crops/categories.",
+  },
+  {
+    id: "stock-movement",
+    title: "Reading Stock / Movement",
+    summary: "Units, revenue, fast movers, and dead stock.",
+    section: "Administration",
+    roles: ["regional", "central", "sysadmin"],
+    minutes: 2,
+    steps: [
+      { text: "Open “Stock / Movement”. The top shows total units and revenue (base price), and a monthly trend.", image: "movement.png" },
+      { text: "See fast-moving products, slow/dead stock, category mix, and a store leaderboard." },
+    ],
+    outcome: "You can see what’s selling, what’s idle, and where.",
+  },
+  {
+    id: "settings",
+    title: "System settings & reference data",
+    summary: "Configuration and the reference-data counts.",
+    section: "Administration",
+    roles: ["sysadmin"],
+    minutes: 2,
+    steps: [
+      { text: "Open “Settings”. The Reference data card shows counts of crops, villages, products, stores, and problem categories.", image: "settings.png" },
+      { text: "Adjust system configuration and data-management options from here." },
+    ],
+    outcome: "The portal’s reference data and configuration are in one place.",
+  },
+  {
+    id: "audit-log",
+    title: "Reviewing the Audit Log",
+    summary: "A record of system activity and data changes.",
+    section: "Administration",
+    roles: ["sysadmin"],
+    minutes: 2,
+    steps: [
+      { text: "Open “Audit Log” to see recent activity — who changed what and when.", image: "audit.png" },
+      { text: "An employee’s own activity also shows on their user detail popup in the Users page." },
+    ],
+    outcome: "You have an activity trail for accountability.",
+    related: ["manage-users"],
   },
 ];
 
