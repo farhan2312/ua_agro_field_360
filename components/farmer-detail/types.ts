@@ -5,6 +5,9 @@ export interface FarmerSale {
   invoice: string;
   date: string;
   items: string;
+  /** Base / pre-tax price for this invoice (the figure used in all calculations). */
+  base: string;
+  /** GST-inclusive final price for this invoice (display only — never used in any calculation). */
   amount: string;
   store: string;
 }
@@ -50,7 +53,8 @@ export interface FarmerDetail {
   lifeColor: string;
   salesCrops: string[]; // crops from the sales upload (labelled)
   visitCrops: string[]; // crops from field visits (labelled)
-  ltv: string; // computed lifetime value, e.g. "₹0"
+  ltv: string; // computed lifetime value on BASE price, e.g. "₹0"
+  ltvGst: string; // lifetime value incl GST (display only — never used in calculations)
   saleCount: number;
   visitCount: number;
   lastPurchaseAmt: string;

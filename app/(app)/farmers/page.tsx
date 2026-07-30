@@ -84,7 +84,8 @@ export default async function FarmersPage({
     if (crop) where.cropTags = { has: crop };
     if (pest) where.pestTags = { has: pest };
     if (spendTier) {
-      where.p12mSpend = {
+      // "All spend" = all-time base-price LTV (same brackets as the analytics spend filter).
+      where.lifetimeSpend = {
         ...(spendTier.min != null ? { gte: spendTier.min } : {}),
         ...(spendTier.max != null ? { lt: spendTier.max } : {}),
       };
@@ -173,17 +174,16 @@ export default async function FarmersPage({
     ]);
     total = count;
 
-    // LTV for just this page's farmers — one bounded aggregate instead of
-    // loading every sale row per farmer via `include`.
+    // LTV (base/pre-tax price) for just this page's farmers — one bounded aggregate over SaleLine.basic.
     const pageIds = farmers.map((f) => f.id);
     const ltvRows = pageIds.length
-      ? await prisma.sale.groupBy({
+      ? await prisma.saleLine.groupBy({
           by: ["farmerId"],
-          where: { farmerId: { in: pageIds } },
-          _sum: { amountNum: true },
+          where: { farmerId: { in: pageIds }, source: "REAL" },
+          _sum: { basic: true },
         })
       : [];
-    const ltvById = new Map(ltvRows.map((r) => [r.farmerId, r._sum.amountNum ?? 0]));
+    const ltvById = new Map(ltvRows.map((r) => [r.farmerId, Math.round(r._sum.basic ?? 0)]));
 
     rows = farmers.map((f): FarmerRowVM => {
       const seg = f.valueSegment ? segMeta(f.valueSegment) : null;

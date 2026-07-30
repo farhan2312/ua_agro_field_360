@@ -207,15 +207,16 @@ export async function getClusterFarmers(
       },
     });
 
-    // LTV: crop-scoped base spend (SaleLine.basic on the cluster's crop-tagged lines) when the cluster
-    // has a crop filter — not the whole-basket bill total. No crop filter → all-time bill total.
+    // LTV = base/pre-tax spend (SaleLine.basic) — crop-scoped to the cluster's crop-tagged lines when it
+    // has a crop filter, else all-time base LTV. Never the GST-inclusive bill total.
     const ltvById = new Map<number, number>();
-    if (selectedCrops.length) {
-      const rows = await prisma.saleLine.groupBy({ by: ["farmerId"], where: { farmerId: { in: pageIds }, source: "REAL", cropTag: { in: selectedCrops } }, _sum: { basic: true } });
+    {
+      const rows = await prisma.saleLine.groupBy({
+        by: ["farmerId"],
+        where: { farmerId: { in: pageIds }, source: "REAL", ...(selectedCrops.length ? { cropTag: { in: selectedCrops } } : {}) },
+        _sum: { basic: true },
+      });
       for (const r of rows) if (r.farmerId != null) ltvById.set(r.farmerId, Math.round(r._sum.basic ?? 0));
-    } else {
-      const rows = await prisma.sale.groupBy({ by: ["farmerId"], where: { farmerId: { in: pageIds } }, _sum: { amountNum: true } });
-      for (const r of rows) ltvById.set(r.farmerId, r._sum.amountNum ?? 0);
     }
     const byId = new Map(farmers.map((f) => [f.id, f]));
 

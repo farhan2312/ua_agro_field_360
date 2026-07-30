@@ -176,12 +176,12 @@ export async function mergeProduct(sourceId: number, targetId: number): Promise<
     await prisma.$transaction(async (tx) => {
       await tx.saleLine.updateMany({ where: { productId: sourceId }, data: { productId: targetId } });
       const agg = await tx.saleLine.aggregate({
-        where: { productId: targetId }, _sum: { qty: true, totalPrice: true }, _count: { _all: true },
+        where: { productId: targetId }, _sum: { qty: true, basic: true }, _count: { _all: true },
         _min: { soldAt: true }, _max: { soldAt: true },
       });
       const last = await tx.saleLine.findFirst({ where: { productId: targetId, soldAt: { not: null }, qty: { gt: 0 } }, orderBy: { soldAt: "desc" }, select: { unitPrice: true } });
       const qty = agg._sum.qty ?? 0;
-      const rev = agg._sum.totalPrice ?? 0;
+      const rev = Math.round(agg._sum.basic ?? 0); // base/pre-tax revenue
       await tx.product.update({
         where: { id: targetId },
         data: { totalQty: qty, totalRevenue: rev, lineCount: agg._count._all, avgPrice: qty > 0 ? rev / qty : null, lastPrice: last?.unitPrice ?? null, firstSoldAt: agg._min.soldAt ?? null, lastSoldAt: agg._max.soldAt ?? null },

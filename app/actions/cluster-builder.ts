@@ -100,17 +100,17 @@ export async function getStoreFarmers(
       }),
     ]);
 
-    // Lifetime value + bill count per farmer on this page.
+    // Lifetime value (base/pre-tax = SaleLine.basic) + bill count (Sale rows) per farmer on this page.
     const ids = rows.map((r) => r.id);
-    const sums = ids.length
-      ? await prisma.sale.groupBy({
-          by: ["farmerId"],
-          where: { farmerId: { in: ids } },
-          _sum: { amountNum: true },
-          _count: { _all: true },
-        })
-      : [];
-    const byId = new Map(sums.map((s) => [s.farmerId, { ltv: s._sum.amountNum ?? 0, bills: s._count._all }]));
+    const [ltvRows, billRows] = ids.length
+      ? await Promise.all([
+          prisma.saleLine.groupBy({ by: ["farmerId"], where: { farmerId: { in: ids }, source: "REAL" }, _sum: { basic: true } }),
+          prisma.sale.groupBy({ by: ["farmerId"], where: { farmerId: { in: ids } }, _count: { _all: true } }),
+        ])
+      : [[], []];
+    const ltvOf = new Map(ltvRows.map((s) => [s.farmerId, Math.round(s._sum.basic ?? 0)]));
+    const billsOf = new Map(billRows.map((s) => [s.farmerId, s._count._all]));
+    const byId = new Map(ids.map((id) => [id, { ltv: ltvOf.get(id) ?? 0, bills: billsOf.get(id) ?? 0 }]));
 
     return {
       rows: rows.map((r) => ({

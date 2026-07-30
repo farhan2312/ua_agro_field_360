@@ -45,7 +45,7 @@ export async function lookupFarmerByMobile(mobile: string): Promise<FarmerLookup
     if (!f) return { found: false };
 
     const [agg, lastVisit] = await Promise.all([
-      prisma.sale.aggregate({ where: { farmerId: f.id }, _sum: { amountNum: true } }),
+      prisma.saleLine.aggregate({ where: { farmerId: f.id, source: "REAL" }, _sum: { basic: true } }),
       prisma.visit.findFirst({
         where: { farmerId: f.id },
         orderBy: [{ visitedAt: "desc" }, { id: "desc" }],
@@ -63,7 +63,7 @@ export async function lookupFarmerByMobile(mobile: string): Promise<FarmerLookup
         mainCrop: f.crop ?? "",
         segmentLabel: f.segment ? SEGMENT_ENUM_TO_LABEL[f.segment] ?? null : null,
         leadStatusLabel: f.leadStatus ? LEAD_ENUM_TO_LABEL[f.leadStatus] ?? null : null,
-        ltv: agg._sum.amountNum ? inr(agg._sum.amountNum) : "—",
+        ltv: agg._sum.basic ? inr(Math.round(agg._sum.basic)) : "—",
         lastVisit: lastVisit?.date ?? "—",
       },
     };

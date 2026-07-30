@@ -133,7 +133,7 @@ export function FarmerFilterBar({
           ))}
         </select>
         <select className={select} value={selected.spend ?? ""} onChange={(e) => push({ spend: e.target.value || null })}>
-          <option value="">All spend (12 mo)</option>
+          <option value="">All spend</option>
           {facets.spendTiers.map((t, i) => (
             <option key={t} value={String(i)}>{t}</option>
           ))}

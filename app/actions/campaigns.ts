@@ -703,13 +703,13 @@ function matchedLineWhere(pf: ProductFilter, farmerIds: number[], start: Date, e
   return { ...base, OR: or };
 }
 
-/** Sum matched line revenue per farmer, chunked to protect the pooled DB. */
+/** Sum matched line revenue (base/pre-tax = SaleLine.basic) per farmer, chunked to protect the pooled DB. */
 async function matchedSpendByFarmer(pf: ProductFilter, farmerIds: number[], start: Date, end: Date): Promise<Map<number, number>> {
   const out = new Map<number, number>();
   for (let i = 0; i < farmerIds.length; i += 15000) {
     const slice = farmerIds.slice(i, i + 15000);
-    const rows = await prisma.saleLine.groupBy({ by: ["farmerId"], where: matchedLineWhere(pf, slice, start, end), _sum: { totalPrice: true } });
-    for (const r of rows) if (r.farmerId != null) out.set(r.farmerId, Math.round(r._sum.totalPrice ?? 0));
+    const rows = await prisma.saleLine.groupBy({ by: ["farmerId"], where: matchedLineWhere(pf, slice, start, end), _sum: { basic: true } });
+    for (const r of rows) if (r.farmerId != null) out.set(r.farmerId, Math.round(r._sum.basic ?? 0));
   }
   return out;
 }

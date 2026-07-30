@@ -30,17 +30,17 @@ export async function getMovementOverview(): Promise<MovementOverview> {
   const asof = await getAsof();
   const [kpiRow, trend, cats] = await Promise.all([
     prisma.$queryRaw<{ units: number; rev: number; products: number; bills: number; stores: number }[]>`
-      SELECT COALESCE(SUM(qty),0)::float AS units, COALESCE(SUM("totalPrice"),0)::float AS rev,
+      SELECT COALESCE(SUM(qty),0)::float AS units, COALESCE(SUM("basic"),0)::float AS rev,
              COUNT(DISTINCT "productId")::int AS products, COUNT(DISTINCT "orderNo")::int AS bills,
              COUNT(DISTINCT "storeId")::int AS stores
       FROM "SaleLine"`,
     prisma.$queryRaw<{ ym: string; units: number; rev: number }[]>`
       SELECT to_char(date_trunc('month', "soldAt"), 'YYYY-MM') AS ym,
-             SUM(qty)::float AS units, SUM("totalPrice")::float AS rev
+             SUM(qty)::float AS units, SUM(COALESCE("basic",0))::float AS rev
       FROM "SaleLine" WHERE "soldAt" IS NOT NULL GROUP BY 1 ORDER BY 1`,
     // Group on the editable Product.mainCategory (single source of truth, matches the catalog & fast movers).
     prisma.$queryRaw<{ cat: string | null; units: number; rev: number }[]>`
-      SELECT p."mainCategory" AS cat, SUM(sl.qty)::float AS units, SUM(sl."totalPrice")::float AS rev
+      SELECT p."mainCategory" AS cat, SUM(sl.qty)::float AS units, SUM(COALESCE(sl."basic",0))::float AS rev
       FROM "SaleLine" sl JOIN "Product" p ON p.id = sl."productId"
       GROUP BY 1 ORDER BY rev DESC NULLS LAST`,
   ]);
@@ -61,7 +61,7 @@ export async function getMovers(days = 90, deadDays = 180): Promise<{ fast: Move
   const deadBefore = new Date(asof); deadBefore.setDate(deadBefore.getDate() - deadDays);
   const [fast, dead] = await Promise.all([
     prisma.$queryRaw<{ id: number; name: string; cat: string | null; units: number; rev: number; last: Date | null }[]>`
-      SELECT p.id, p.name, p."mainCategory" AS cat, SUM(sl.qty)::float AS units, SUM(sl."totalPrice")::float AS rev, MAX(sl."soldAt") AS last
+      SELECT p.id, p.name, p."mainCategory" AS cat, SUM(sl.qty)::float AS units, SUM(COALESCE(sl."basic",0))::float AS rev, MAX(sl."soldAt") AS last
       FROM "SaleLine" sl JOIN "Product" p ON p.id = sl."productId"
       WHERE sl."soldAt" >= ${winStart} AND p.active = true AND p."mergedIntoId" IS NULL
       GROUP BY p.id, p.name, p."mainCategory" ORDER BY units DESC LIMIT 25`,
@@ -83,7 +83,7 @@ export async function getMovers(days = 90, deadDays = 180): Promise<{ fast: Move
 
 export async function getStoreLeaderboard(): Promise<StoreRow[]> {
   const rows = await prisma.$queryRaw<{ name: string | null; units: number; rev: number; bills: number }[]>`
-    SELECT COALESCE(s.name, sl.store) AS name, SUM(sl.qty)::float AS units, SUM(sl."totalPrice")::float AS rev,
+    SELECT COALESCE(s.name, sl.store) AS name, SUM(sl.qty)::float AS units, SUM(COALESCE(sl."basic",0))::float AS rev,
            COUNT(DISTINCT sl."orderNo")::int AS bills
     FROM "SaleLine" sl LEFT JOIN "Store" s ON s.id = sl."storeId"
     GROUP BY 1 ORDER BY rev DESC NULLS LAST LIMIT 40`;
@@ -97,7 +97,7 @@ export interface ProductMovement {
 export async function getProductMovement(productId: number): Promise<ProductMovement> {
   const [monthly, stores] = await Promise.all([
     prisma.$queryRaw<{ ym: string; units: number; rev: number }[]>`
-      SELECT to_char(date_trunc('month', "soldAt"), 'YYYY-MM') AS ym, SUM(qty)::float AS units, SUM("totalPrice")::float AS rev
+      SELECT to_char(date_trunc('month', "soldAt"), 'YYYY-MM') AS ym, SUM(qty)::float AS units, SUM(COALESCE("basic",0))::float AS rev
       FROM "SaleLine" WHERE "productId" = ${productId} AND "soldAt" IS NOT NULL GROUP BY 1 ORDER BY 1`,
     prisma.$queryRaw<{ name: string | null; units: number }[]>`
       SELECT COALESCE(s.name, sl.store) AS name, SUM(sl.qty)::float AS units

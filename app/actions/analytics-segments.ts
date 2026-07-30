@@ -285,7 +285,9 @@ export async function getWorkbench(f: WbFilters): Promise<WbData> {
     prisma.$queryRaw<{ storeId: number | null; vseg: string; lseg: string; n: number; spendsum: bigint }[]>(Prisma.sql`
       WITH ${cte} SELECT "storeId", vseg, lseg, COUNT(*)::int n, COALESCE(SUM(spend),0)::bigint spendsum FROM tiers WHERE ${tf} GROUP BY 1,2,3`),
     prisma.$queryRaw<{ bucket: string; n: number }[]>(Prisma.sql`
-      WITH ${cte} SELECT CASE WHEN spend>=12000 THEN 'HNI ₹12K+' WHEN spend>=10000 THEN '₹10–12K' WHEN spend>=5000 THEN '₹5–10K'
+      WITH ${cte} SELECT CASE
+        WHEN spend>=50000 THEN '₹50K+' WHEN spend>=20000 THEN '₹20–50K' WHEN spend>=12000 THEN '₹12–20K'
+        WHEN spend>=10000 THEN '₹10–12K' WHEN spend>=8000 THEN '₹8–10K' WHEN spend>=5000 THEN '₹5–8K'
         WHEN spend>=2500 THEN '₹2.5–5K' WHEN spend>0 THEN '< ₹2.5K' ELSE 'No spend' END bucket, COUNT(*)::int n FROM tiers WHERE ${tf} GROUP BY 1`),
     prisma.$queryRaw<{ zone: string; spend: bigint }[]>(Prisma.sql`
       WITH ${cte} SELECT "zone" AS zone, COALESCE(SUM(spend),0)::bigint spend FROM tiers WHERE ${tf} AND "zone" IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10`),
@@ -317,7 +319,7 @@ export async function getWorkbench(f: WbFilters): Promise<WbData> {
   const tree = VALUE_SEGMENTS.flatMap((v) => LIFECYCLE_SEGMENTS.map((l) => ({ value: v, lifecycle: l, count: treeMap.get(`${v}|${l}`) ?? 0 })));
   const grandCross: Record<string, Record<string, number>> = {};
   for (const v of VALUE_SEGMENTS) for (const l of LIFECYCLE_SEGMENTS) (grandCross[v] ??= {})[l] = treeMap.get(`${v}|${l}`) ?? 0;
-  const order = ["HNI ₹12K+", "₹10–12K", "₹5–10K", "₹2.5–5K", "< ₹2.5K", "No spend"];
+  const order = ["₹50K+", "₹20–50K", "₹12–20K", "₹10–12K", "₹8–10K", "₹5–8K", "₹2.5–5K", "< ₹2.5K", "No spend"];
 
   return {
     kpis: { farmers, spend: spendTotal, visits: 0 },

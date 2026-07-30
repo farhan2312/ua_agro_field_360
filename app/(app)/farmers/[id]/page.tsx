@@ -32,6 +32,7 @@ function fmtFollowUp(iso: string | null | undefined): string {
 
 function buildDetail(
   farmer: NonNullable<Awaited<ReturnType<typeof loadFarmer>>>,
+  baseBySale: Map<number, number>,
 ): FarmerDetail {
   const vMeta = farmer.valueSegment ? segMeta(farmer.valueSegment) : null;
   const lMeta = farmer.lifecycleSegment ? segMeta(farmer.lifecycleSegment) : null;
@@ -44,7 +45,8 @@ function buildDetail(
     invoice: s.invoice ?? "",
     date: s.date ?? "",
     items: s.items ?? "",
-    amount: s.amount ?? "",
+    base: inr(baseBySale.get(s.id) ?? 0),        // base / pre-tax (used everywhere)
+    amount: s.amount ?? "",                        // GST-inclusive final (display only)
     store: s.store ?? "",
   }));
 
@@ -57,8 +59,9 @@ function buildDetail(
     followUp: fmtFollowUp(v.followUpDate),
   }));
 
-  // Computed lifetime value from numeric amounts (falls back to ₹0).
-  const ltvNum = farmer.sales.reduce((sum, s) => sum + (s.amountNum ?? 0), 0);
+  // Lifetime value on BASE price (used everywhere) + the GST-inclusive total (display only).
+  const ltvBaseNum = farmer.sales.reduce((sum, s) => sum + (baseBySale.get(s.id) ?? 0), 0);
+  const ltvGstNum = farmer.sales.reduce((sum, s) => sum + (s.amountNum ?? 0), 0);
 
   const store = farmer.store
     ? {
@@ -89,10 +92,11 @@ function buildDetail(
     lifeColor: lMeta?.color ?? FALLBACK_SEG_COLOR,
     salesCrops: farmer.salesCropTags ?? [],
     visitCrops: farmer.visitCropTags ?? [],
-    ltv: inr(ltvNum),
+    ltv: inr(ltvBaseNum),
+    ltvGst: inr(ltvGstNum),
     saleCount: sales.length,
     visitCount: visitLog.length,
-    lastPurchaseAmt: sales[0]?.amount || "—",
+    lastPurchaseAmt: sales[0]?.base || "—",
     lastPurchaseDate: sales[0]?.date || "No purchases",
     store,
     sales,
@@ -136,18 +140,35 @@ export default async function FarmerDetailPage({
 
   if (!farmer) notFound();
 
-  const detail = buildDetail(farmer);
-
-  // Accurate lifetime value + invoice count across ALL bills (the list above is capped).
+  // Base (pre-tax) total per shown invoice — from its SaleLine rows.
+  const shownSaleIds = farmer.sales.map((s) => s.id);
+  let baseBySale = new Map<number, number>();
   try {
-    const agg = await prisma.sale.aggregate({
-      where: { farmerId: id },
-      _sum: { amountNum: true },
-      _count: { _all: true },
-    });
-    if (agg._count._all > 0) {
-      detail.ltv = inr(agg._sum.amountNum ?? 0);
-      detail.saleCount = agg._count._all;
+    if (shownSaleIds.length) {
+      const lines = await prisma.saleLine.groupBy({
+        by: ["saleId"],
+        where: { saleId: { in: shownSaleIds }, source: "REAL" },
+        _sum: { basic: true },
+      });
+      baseBySale = new Map(lines.map((l) => [l.saleId as number, Math.round(l._sum.basic ?? 0)]));
+    }
+  } catch {
+    baseBySale = new Map();
+  }
+
+  const detail = buildDetail(farmer, baseBySale);
+
+  // Accurate lifetime value across ALL bills (list above is capped): base LTV from SaleLine.basic,
+  // GST-inclusive total from Sale.amountNum (display only), invoice count from Sale.
+  try {
+    const [baseAgg, gstAgg] = await Promise.all([
+      prisma.saleLine.aggregate({ where: { farmerId: id, source: "REAL" }, _sum: { basic: true } }),
+      prisma.sale.aggregate({ where: { farmerId: id }, _sum: { amountNum: true }, _count: { _all: true } }),
+    ]);
+    if (gstAgg._count._all > 0) {
+      detail.ltv = inr(Math.round(baseAgg._sum.basic ?? 0));
+      detail.ltvGst = inr(gstAgg._sum.amountNum ?? 0);
+      detail.saleCount = gstAgg._count._all;
     }
   } catch {
     // keep the from-list computation on error
@@ -157,18 +178,24 @@ export default async function FarmerDetailPage({
     <div className="animate-fadeUp">
       <BackLink />
 
-      {/* Top grid — Profile + Store + 2 KPI minis */}
+      {/* Top grid — Profile + Store + KPI minis (LTV on base price · GST-inclusive total · last purchase) */}
       <div className="grid grid-cols-1 gap-4 mb-[18px] sm:grid-cols-2 lg:grid-cols-4">
         <FarmerProfileCard farmer={detail} />
         {detail.store && <StoreAssignmentCard store={detail.store} />}
         <KpiMini
-          label="Lifetime Value"
+          label="Lifetime Value (base)"
           value={detail.ltv}
           valueColor="#2E7D32"
           sub={`${detail.saleCount} invoices`}
         />
         <KpiMini
-          label="Last Purchase"
+          label="Lifetime incl. GST"
+          value={detail.ltvGst}
+          valueColor="#1565C0"
+          sub="final price paid (not used in analytics)"
+        />
+        <KpiMini
+          label="Last Purchase (base)"
           value={detail.lastPurchaseAmt}
           valueColor="#1A1C1A"
           sub={detail.lastPurchaseDate}

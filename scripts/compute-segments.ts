@@ -24,7 +24,7 @@ const P6 = minusM(ASOF, 6), P12 = minusM(ASOF, 12), P24 = minusM(ASOF, 24);
 
 interface Agg {
   p6: boolean; p712: boolean; p1324: boolean;
-  earliest: Date | null; latest: Date | null; spend12: number; spendAll: number;
+  earliest: Date | null; latest: Date | null;
   maizeItem: string | null; maizeAt: Date | null;
   potatoItem: string | null; potatoAt: Date | null;
 }
@@ -41,7 +41,7 @@ async function main() {
   const agg = new Map<number, Agg>();
   const getA = (id: number): Agg => {
     let a = agg.get(id);
-    if (!a) { a = { p6: false, p712: false, p1324: false, earliest: null, latest: null, spend12: 0, spendAll: 0, maizeItem: null, maizeAt: null, potatoItem: null, potatoAt: null }; agg.set(id, a); }
+    if (!a) { a = { p6: false, p712: false, p1324: false, earliest: null, latest: null, maizeItem: null, maizeAt: null, potatoItem: null, potatoAt: null }; agg.set(id, a); }
     return a;
   };
 
@@ -52,7 +52,7 @@ async function main() {
     const sales = await prisma.sale.findMany({
       where: { id: { gt: cursor }, soldAt: { not: null }, farmerId: { not: undefined } },
       orderBy: { id: "asc" }, take: TAKE,
-      select: { id: true, farmerId: true, soldAt: true, amountNum: true, items: true, category: true },
+      select: { id: true, farmerId: true, soldAt: true, items: true, category: true },
     });
     if (!sales.length) break;
     for (const s of sales) {
@@ -64,8 +64,6 @@ async function main() {
       if (dt > P6) a.p6 = true;
       else if (dt > P12) a.p712 = true;
       else if (dt > P24) a.p1324 = true;
-      if (dt > P12) a.spend12 += s.amountNum ?? 0;
-      a.spendAll += s.amountNum ?? 0; // lifetime value (LTV) — the value tier is keyed off this
       // Seed-only crop detection (best-effort from the bill's item summary).
       const it = (s.items ?? "").toUpperCase();
       const cat = (s.category ?? "").toUpperCase();
@@ -81,6 +79,31 @@ async function main() {
   process.stdout.write("\n");
   console.log(`  ${agg.size} farmers with dated sales`);
 
+  // ── Base-price money from SaleLine.basic (pre-tax) — ALL money calcs use base price, never incl-GST.
+  //    baseAll = lifetime value (LTV, drives the value tier); base12 = last-12-months spend (spend filter). ──
+  const baseAll = new Map<number, number>();
+  const base12 = new Map<number, number>();
+  let lcursor = 0, lprocessed = 0;
+  for (;;) {
+    const lines = await prisma.saleLine.findMany({
+      where: { id: { gt: lcursor }, source: "REAL", farmerId: { not: null }, soldAt: { not: null } },
+      orderBy: { id: "asc" }, take: TAKE,
+      select: { id: true, farmerId: true, soldAt: true, basic: true },
+    });
+    if (!lines.length) break;
+    for (const l of lines) {
+      lcursor = l.id;
+      if (l.farmerId == null) continue;
+      const v = l.basic ?? 0;
+      baseAll.set(l.farmerId, (baseAll.get(l.farmerId) ?? 0) + v);
+      if ((l.soldAt as Date) > P12) base12.set(l.farmerId, (base12.get(l.farmerId) ?? 0) + v);
+      lprocessed++;
+    }
+    process.stdout.write(`\r  sale-lines scanned: ${lprocessed}`);
+    if (lines.length < TAKE) break;
+  }
+  process.stdout.write("\n");
+
   // ── Compute + build bulk-update rows ──
   const segCounts: Record<string, number> = {};
   const valueCounts: Record<string, number> = {};
@@ -88,14 +111,16 @@ async function main() {
   let maizeCount = 0, potatoCount = 0;
   const rows: string[] = [];
   for (const [id, a] of agg) {
+    const ltv = baseAll.get(id) ?? 0;   // lifetime value on BASE price (pre-tax)
+    const spend12 = base12.get(id) ?? 0; // last-12-months spend on BASE price
     const regular = a.p6 && a.p712;
     const loyal = regular && a.p1324;
     const atRisk = a.p712 && !a.p6;
     const isNew = a.earliest != null && a.earliest > P12; // first-ever purchase within P12M
     const lapsed = !a.p6 && !a.p712; // has sales, none in P12M
-    // Value tier keys off LIFETIME value (all-time spend = the LTV shown on Farmer 360), not P12M.
-    const hni = a.spendAll >= HNI_MIN;
-    const potential = !hni && a.spendAll >= POTENTIAL_MIN;
+    // Value tier keys off LIFETIME value on BASE price (all-time SaleLine.basic = the LTV shown on Farmer 360).
+    const hni = ltv >= HNI_MIN;
+    const potential = !hni && ltv >= POTENTIAL_MIN;
 
     const tags: string[] = [];
     if (regular) tags.push("regular");
@@ -117,7 +142,7 @@ async function main() {
     segCounts[seg] = (segCounts[seg] ?? 0) + 1;
 
     // ── The two split dimensions ──
-    const valueSeg = valueSegmentOf(a.spendAll); // HNI | POTENTIAL_HNI | REGULAR — by LTV (lifetime spend)
+    const valueSeg = valueSegmentOf(ltv); // HNI | POTENTIAL_HNI | REGULAR — by base-price LTV
     const monthsSinceLast = a.latest ? Math.floor((ASOF.getTime() - a.latest.getTime()) / MS_PER_MONTH) : null;
     const monthsSinceFirst = a.earliest ? Math.floor((ASOF.getTime() - a.earliest.getTime()) / MS_PER_MONTH) : null;
     const lifecycleSeg = lifecycleSegmentOf(monthsSinceLast, monthsSinceFirst); // NEW | RECENT | AT_RISK | LAPSED
@@ -130,10 +155,10 @@ async function main() {
     if (a.maizeItem) maizeCount++;
     if (a.potatoItem) potatoCount++;
 
-    const gap = valueSeg === "POTENTIAL_HNI" ? HNI_MIN - a.spendAll : null;
+    const gap = valueSeg === "POTENTIAL_HNI" ? HNI_MIN - ltv : null;
 
     rows.push(
-      `(${id}::int, ${txtArr(tags)}, ${q(seg)}::text, ${q(valueSeg)}::text, ${q(lifecycleSeg)}::text, ${ts(a.latest)}, ${int(a.spend12)}, ${int(gap)}, ` +
+      `(${id}::int, ${txtArr(tags)}, ${q(seg)}::text, ${q(valueSeg)}::text, ${q(lifecycleSeg)}::text, ${ts(a.latest)}, ${int(spend12)}, ${int(ltv)}, ${int(gap)}, ` +
       `${txt(a.maizeItem)}, ${ts(a.maizeAt)}, ${txt(a.potatoItem)}, ${ts(a.potatoAt)})`,
     );
   }
@@ -146,10 +171,10 @@ async function main() {
     const sql =
       `UPDATE "Farmer" AS f SET ` +
       `"segmentTags"=v.tags, "campaignSegment"=v.seg, "valueSegment"=v.vseg, "lifecycleSegment"=v.lseg, "lastPurchaseAt"=v.lastat, ` +
-      `"p12mSpend"=v.spend, "hniGap"=v.gap, ` +
+      `"p12mSpend"=v.spend, "lifetimeSpend"=v.ltv, "hniGap"=v.gap, ` +
       `"lastMaizeItem"=v.mitem, "lastMaizeAt"=v.mat, "lastPotatoItem"=v.pitem, "lastPotatoAt"=v.pat, ` +
       `"segmentComputedAt"=now() ` +
-      `FROM (VALUES ${slice.join(",")}) AS v(id, tags, seg, vseg, lseg, lastat, spend, gap, mitem, mat, pitem, pat) ` +
+      `FROM (VALUES ${slice.join(",")}) AS v(id, tags, seg, vseg, lseg, lastat, spend, ltv, gap, mitem, mat, pitem, pat) ` +
       `WHERE f.id = v.id;`;
     updated += await prisma.$executeRawUnsafe(sql);
     process.stdout.write(`\r  farmers updated: ${updated}/${rows.length}`);

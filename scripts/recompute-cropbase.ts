@@ -32,7 +32,7 @@ async function main() {
       "lastPrice" = (SELECT sl2."unitPrice" FROM "SaleLine" sl2
                      WHERE sl2."productId" = p.id AND sl2.qty > 0 AND sl2."soldAt" IS NOT NULL
                      ORDER BY sl2."soldAt" DESC LIMIT 1)
-    FROM (SELECT "productId" pid, SUM(qty) qty, SUM("totalPrice") rev, COUNT(*) cnt, MIN("soldAt") fst, MAX("soldAt") lst
+    FROM (SELECT "productId" pid, SUM(qty) qty, SUM(COALESCE("basic",0)) rev, COUNT(*) cnt, MIN("soldAt") fst, MAX("soldAt") lst
           FROM "SaleLine" GROUP BY "productId") s
     WHERE p.id = s.pid`);
   console.log(`   products updated: ${Number(r1)}`);

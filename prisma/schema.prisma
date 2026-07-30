@@ -158,14 +158,15 @@ model Farmer {
   // ── CRM segmentation (precomputed by scripts/compute-segments.ts, monthly) ──
   segmentTags       String[]  @default([]) // regular, loyal, at_risk, lapsed, new, hni, potential_hni
   campaignSegment   String? // LEGACY exclusive collapse: HNI|POTENTIAL_HNI|REGULAR|AT_RISK|NEW|LAPSED|OTHER (kept for back-compat)
-  valueSegment      String? // value tier (by p12mSpend): HNI(≥12k) | POTENTIAL_HNI(8–12k) | REGULAR(else)
-  lifecycleSegment  String? // recency (months since last purchase): NEW(<5) | AT_RISK(5–12) | LAPSED(≥12 or never)
+  valueSegment      String? // value tier (by base-price LTV): HNI(≥12k) | POTENTIAL_HNI(8–12k) | REGULAR(else)
+  lifecycleSegment  String? // recency (months since last purchase): NEW | RECENT | AT_RISK | LAPSED
   lastPurchaseAt    DateTime? // most recent Sale.soldAt (drives lifecycleSegment)
   cropTags          String[]  @default([]) // union of sales + visit crops (used by crop filters)
   salesCropTags     String[]  @default([]) // crops from the monthly sales upload (Crops column + item-code Target Crops)
   visitCropTags     String[]  @default([]) // crops recorded during field visits
   pestTags          String[]  @default([]) // Target Pests/Diseases/Weeds — auto-mapped from purchased item codes
-  p12mSpend         Int? // ₹ spend in past 12 months
+  p12mSpend         Int? // ₹ base-price spend in past 12 months
+  lifetimeSpend     Int? // ₹ all-time base-price spend (LTV) — drives the value tier + the "all spend" filter
   hniGap            Int? // ₹ to reach HNI (for Potential HNI)
   lastMaizeItem     String?
   lastMaizeAt       DateTime?
@@ -186,6 +187,7 @@ model Farmer {
   @@index([campaignSegment])
   @@index([valueSegment])
   @@index([lifecycleSegment])
+  @@index([lifetimeSpend])
   @@index([cropTags], type: Gin)
   @@index([salesCropTags], type: Gin)
   @@index([visitCropTags], type: Gin)
