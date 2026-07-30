@@ -111,6 +111,7 @@ export const NAV_VISIBILITY: Record<string, (r: RoleKey) => boolean> = {
   users: (r) => r === "central" || r === "sysadmin",
   salesImport: (r) => r === "sysadmin",
   settings: (r) => r === "sysadmin",
+  bugs: (r) => r === "sysadmin",
   audit: (r) => r === "sysadmin",
 };
 
@@ -178,6 +179,8 @@ export function viewTitle(
       return ["System Settings", "Configuration & master data"];
     case "audit":
       return ["Audit Log", "System activity & data changes"];
+    case "bugs":
+      return ["Bug Tracker", "Reports filed through the portal · triage & resolve"];
     case "campaigns":
       return ["Campaigns", "Segmented customer targeting & outreach"];
     case "projects":

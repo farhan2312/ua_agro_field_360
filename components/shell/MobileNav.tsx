@@ -34,6 +34,7 @@ const SHORT: Record<NavId, string> = {
   salesImport: "Import",
   settings: "Settings",
   audit: "Audit",
+  bugs: "Bugs",
 };
 
 const TAB_COUNT = 4;

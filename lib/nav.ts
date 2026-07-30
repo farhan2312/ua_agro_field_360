@@ -4,7 +4,7 @@ export type NavId =
   | "dashboard" | "newVisit" | "visitRepo" | "farmers" | "mapView"
   | "farmerCluster" | "analytics" | "actions" | "projects" | "campaigns"
   | "products" | "movement"
-  | "users" | "salesImport" | "settings" | "audit";
+  | "users" | "salesImport" | "settings" | "audit" | "bugs";
 
 /** A "view" can also be a detail variant of a nav id (for header titles). */
 export type ViewId = NavId | "farmerDetail" | "visitDetail" | "projectDetail";
@@ -36,6 +36,7 @@ export const ADMIN_NAV: NavItem[] = [
   { id: "salesImport", label: "Sales Import", href: "/imports" },
   { id: "settings", label: "Settings", href: "/settings" },
   { id: "audit", label: "Audit Log", href: "/audit" },
+  { id: "bugs", label: "Bug Tracker", href: "/bugs" },
 ];
 
 /** Nav items visible to a role (RBAC). */
@@ -85,5 +86,6 @@ export function routeToView(pathname: string): ViewId {
   if (pathname.startsWith("/users")) return "users";
   if (pathname.startsWith("/settings")) return "settings";
   if (pathname.startsWith("/audit")) return "audit";
+  if (pathname.startsWith("/bugs")) return "bugs";
   return "analytics"; // Analytics is the home page (Dashboard was merged into it)
 }

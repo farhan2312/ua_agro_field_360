@@ -97,6 +97,12 @@ export const NavIcons: Record<NavId, (p: P) => JSX.Element> = {
       <rect x="5.5" y="7" width="5" height="1.5" rx="0.5" /><rect x="5.5" y="10" width="7" height="1.5" rx="0.5" /><rect x="5.5" y="13" width="4" height="1.5" rx="0.5" />
     </svg>
   ),
+  bugs: ({ className }) => (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <ellipse cx="9" cy="10" rx="3.5" ry="4.5" /><path d="M9 5.5V4a2 2 0 10-4 0M9 5.5V4a2 2 0 114 0" />
+      <path d="M5.5 8.5H2M12.5 8.5H16M5.5 11.5H2.5M12.5 11.5H15.5M5.7 6L3.5 4.5M12.3 6l2.2-1.5" />
+    </svg>
+  ),
 };
 
 /* ── Misc icons ── */

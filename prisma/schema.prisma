@@ -544,3 +544,22 @@ model AuditLog {
 
   @@index([createdAt]) // recent-first ordering (audit log, dashboard events)
 }
+
+/** A bug/issue reported from the portal ("Report a Bug"), worked through a kanban by the admin. */
+model Bug {
+  id           Int       @id @default(autoincrement())
+  title        String
+  description  String?
+  severity     String    @default("MEDIUM") // LOW | MEDIUM | HIGH | CRITICAL
+  status       String    @default("OPEN") // OPEN | IN_PROGRESS | TESTING | FIXED | CLOSED
+  page         String? // where it was reported
+  reporter     String? // reporter's name
+  reporterCode String? // reporter's employee code
+  screenshot   String? // optional screenshot as a (downscaled) data URL
+  resolvedAt   DateTime? // set when moved to FIXED/CLOSED
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt @default(now())
+
+  @@index([status])
+  @@index([createdAt])
+}

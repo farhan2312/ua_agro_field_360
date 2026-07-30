@@ -8,6 +8,7 @@ import { grouped } from "@/lib/format";
 import { canAccess } from "@/lib/roles";
 import { SyncBadge } from "../ui";
 import { PlusIcon, ShieldIcon } from "../icons";
+import { ReportBugButton } from "./ReportBugButton";
 
 export interface HeaderCounts {
   farmers: number;
@@ -46,6 +47,8 @@ export function Header({ role, counts }: { role: RoleKey; counts: HeaderCounts }
         <span className="hidden sm:inline-flex">
           <SyncBadge />
         </span>
+
+        <ReportBugButton />
 
         {isAdmin && (
           <span className="inline-flex items-center gap-1.5 rounded-[20px] border border-gold-200 bg-orange-50 px-2.5 py-1.5 text-[11px] font-semibold text-orange lg:px-3.5">
