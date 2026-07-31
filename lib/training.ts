@@ -23,11 +23,11 @@ export interface TrainingStep {
   warn?: string;    // amber "heads up" callout
 }
 
-/** A slide deck shown in a windowed viewer, with a downloadable source file. */
+/** A slide deck shown in a windowed viewer (the real deck as a PDF), with a downloadable source file. */
 export interface TrainingDeck {
-  file: string;        // downloadable file, path under /public (e.g. /training/deck/intro.pptx)
-  fileLabel: string;   // button label, e.g. "Download PowerPoint"
-  slides: string[];    // slide image paths under /public (in order)
+  pdf: string;         // the actual deck rendered to PDF, shown in the viewer (path under /public)
+  file: string;        // downloadable source file, path under /public (e.g. /training/deck/intro.pptx)
+  fileLabel: string;   // download button label, e.g. "Download PowerPoint"
 }
 
 export interface TrainingTopic {
@@ -65,16 +65,9 @@ export const TRAINING: TrainingTopic[] = [
     minutes: 5,
     steps: [],
     deck: {
+      pdf: "/training/deck/ua-agro-intro.pdf",
       file: "/training/deck/ua-agro-intro.pptx",
       fileLabel: "Download the deck (PowerPoint)",
-      slides: [
-        "/training/deck/slide-1.png",
-        "/training/deck/slide-2.png",
-        "/training/deck/slide-3.png",
-        "/training/deck/slide-4.png",
-        "/training/deck/slide-5.png",
-        "/training/deck/slide-6.png",
-      ],
     },
     related: ["signing-in"],
   },
