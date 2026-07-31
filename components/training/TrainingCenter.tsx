@@ -15,7 +15,7 @@ function StepImage({ file }: { file: string }) {
   const [failed, setFailed] = useState(false);
   if (failed) {
     return (
-      <div className="mt-2 flex items-center gap-2 rounded-[10px] border border-dashed border-[#C5CAD3] bg-[#F4F6FA] px-4 py-6 text-[12px] text-[#7A8699]">
+      <div className="mt-2 flex max-w-[440px] items-center gap-2 rounded-[10px] border border-dashed border-[#C5CAD3] bg-[#F4F6FA] px-4 py-6 text-[12px] text-[#7A8699]">
         <span className="text-[18px]">📷</span>
         <span>Screenshot to be added <span className="text-[#AEB6C4]">({file})</span></span>
       </div>
@@ -24,7 +24,7 @@ function StepImage({ file }: { file: string }) {
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img src={`/training/${file}`} alt="" onError={() => setFailed(true)}
-      className="mt-2 w-full rounded-[10px] border border-[#E8E8E8] shadow-[0_1px_4px_rgba(0,0,0,0.06)]" />
+      className="mt-2 w-full max-w-[440px] rounded-[10px] border border-[#E8E8E8] shadow-[0_1px_4px_rgba(0,0,0,0.06)]" />
   );
 }
 
@@ -155,11 +155,14 @@ export function TrainingCenter({ role, topics }: { role: ViewerRole; topics: Tra
               {(open.related?.length || idx >= 0) && (
                 <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[#F0F0F0] pt-4">
                   <div className="flex flex-wrap items-center gap-1.5">
-                    {open.related?.map((rid) => { const rt = byId(rid); return rt ? (
+                    {open.related?.map((rid) => { const rt = byId(rid); if (!rt) return null;
+                      // ← for a topic earlier in the catalog (a back-reference), → for a later one.
+                      const back = topics.findIndex((t) => t.id === rid) < topics.findIndex((t) => t.id === open.id);
+                      return (
                       <button key={rid} type="button" onClick={() => go(rid)}
                         className="rounded-full border border-[#E0E0E0] bg-white px-3 py-1 text-[11.5px] font-semibold text-[#616161] hover:border-[#2E7D32] hover:text-[#2E7D32]">
-                        {rt.title} →
-                      </button>) : null; })}
+                        {back ? `← ${rt.title}` : `${rt.title} →`}
+                      </button>); })}
                   </div>
                   {idx >= 0 && idx < flatIds.length - 1 && (
                     <button type="button" onClick={() => go(flatIds[idx + 1])}
