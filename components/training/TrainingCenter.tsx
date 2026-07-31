@@ -5,6 +5,7 @@ import {
   TRAINING_SECTIONS, ROLE_LABEL, topicsForRole,
   type TrainingTopic, type TrainingRole, type ViewerRole, type TrainingStep,
 } from "@/lib/training";
+import { DeckViewer } from "./DeckViewer";
 
 const ROLE_COLORS: Record<TrainingRole, string> = {
   officer: "#1565C0", regional: "#2E7D32", central: "#7B1FA2", sysadmin: "#E65100",
@@ -15,7 +16,7 @@ function StepImage({ file }: { file: string }) {
   const [failed, setFailed] = useState(false);
   if (failed) {
     return (
-      <div className="mt-2 flex max-w-[440px] items-center gap-2 rounded-[10px] border border-dashed border-[#C5CAD3] bg-[#F4F6FA] px-4 py-6 text-[12px] text-[#7A8699]">
+      <div className="mt-2 flex max-w-[520px] items-center gap-2 rounded-[10px] border border-dashed border-[#C5CAD3] bg-[#F4F6FA] px-4 py-6 text-[12px] text-[#7A8699]">
         <span className="text-[18px]">📷</span>
         <span>Screenshot to be added <span className="text-[#AEB6C4]">({file})</span></span>
       </div>
@@ -24,7 +25,7 @@ function StepImage({ file }: { file: string }) {
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img src={`/training/${file}`} alt="" onError={() => setFailed(true)}
-      className="mt-2 w-full max-w-[440px] rounded-[10px] border border-[#E8E8E8] shadow-[0_1px_4px_rgba(0,0,0,0.06)]" />
+      className="mt-2 h-auto max-h-[440px] w-auto max-w-[520px] rounded-[10px] border border-[#E8E8E8] object-contain object-left shadow-[0_1px_4px_rgba(0,0,0,0.06)]" />
   );
 }
 
@@ -80,6 +81,7 @@ export function TrainingCenter({ role, topics }: { role: ViewerRole; topics: Tra
   const open = useMemo(() => topics.find((t) => t.id === openId) ?? filtered[0] ?? visible[0] ?? null, [topics, openId, filtered, visible]);
   const flatIds = filtered.map((t) => t.id);
   const idx = open ? flatIds.indexOf(open.id) : -1;
+  const nextId = idx >= 0 && idx < flatIds.length - 1 ? flatIds[idx + 1] : null;
   const go = (id: string) => setOpenId(id);
   const byId = (id: string) => topics.find((t) => t.id === id);
 
@@ -142,7 +144,9 @@ export function TrainingCenter({ role, topics }: { role: ViewerRole; topics: Tra
               <p className="mt-1 text-[13.5px] text-[#616161]">{open.summary}</p>
 
               <div className="mt-5 border-t border-[#F0F0F0] pt-5">
-                {open.steps.map((s, i) => <Step key={i} n={i + 1} step={s} />)}
+                {open.deck
+                  ? <DeckViewer deck={open.deck} title={open.title} />
+                  : open.steps.map((s, i) => <Step key={i} n={i + 1} step={s} />)}
               </div>
 
               {open.outcome && (
@@ -155,7 +159,7 @@ export function TrainingCenter({ role, topics }: { role: ViewerRole; topics: Tra
               {(open.related?.length || idx >= 0) && (
                 <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[#F0F0F0] pt-4">
                   <div className="flex flex-wrap items-center gap-1.5">
-                    {open.related?.map((rid) => { const rt = byId(rid); if (!rt) return null;
+                    {open.related?.filter((rid) => rid !== nextId).map((rid) => { const rt = byId(rid); if (!rt) return null;
                       // ← for a topic earlier in the catalog (a back-reference), → for a later one.
                       const back = topics.findIndex((t) => t.id === rid) < topics.findIndex((t) => t.id === open.id);
                       return (

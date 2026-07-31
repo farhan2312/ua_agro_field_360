@@ -23,6 +23,13 @@ export interface TrainingStep {
   warn?: string;    // amber "heads up" callout
 }
 
+/** A slide deck shown in a windowed viewer, with a downloadable source file. */
+export interface TrainingDeck {
+  file: string;        // downloadable file, path under /public (e.g. /training/deck/intro.pptx)
+  fileLabel: string;   // button label, e.g. "Download PowerPoint"
+  slides: string[];    // slide image paths under /public (in order)
+}
+
 export interface TrainingTopic {
   id: string;               // url slug
   title: string;
@@ -33,6 +40,7 @@ export interface TrainingTopic {
   steps: TrainingStep[];
   outcome?: string;         // "What happens next"
   related?: string[];       // topic ids
+  deck?: TrainingDeck;      // when set, the topic opens a windowed slide deck instead of steps
 }
 
 /** Ordered sections (topics render grouped in this order). */
@@ -48,6 +56,28 @@ export const TRAINING_SECTIONS = [
 
 export const TRAINING: TrainingTopic[] = [
   // ─────────────────────────── Getting Started ───────────────────────────
+  {
+    id: "intro-tour",
+    title: "Introduction to the tool",
+    summary: "A short visual tour of what Kisan Sewa Kendra is, the key terms, and how it all fits together. Flip through the slides in the window, or download the deck.",
+    section: "Getting Started",
+    roles: ["officer", "regional", "central", "sysadmin"],
+    minutes: 5,
+    steps: [],
+    deck: {
+      file: "/training/deck/ua-agro-intro.pptx",
+      fileLabel: "Download the deck (PowerPoint)",
+      slides: [
+        "/training/deck/slide-1.png",
+        "/training/deck/slide-2.png",
+        "/training/deck/slide-3.png",
+        "/training/deck/slide-4.png",
+        "/training/deck/slide-5.png",
+        "/training/deck/slide-6.png",
+      ],
+    },
+    related: ["signing-in"],
+  },
   {
     id: "signing-in",
     title: "Signing in for the first time",
