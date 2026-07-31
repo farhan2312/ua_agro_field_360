@@ -57,11 +57,13 @@ const MONTHS: Record<string, string> = {
   jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
 };
 function toIso(billDate: string): string | null {
-  const m = billDate.trim().match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/);
+  // Accepts 2- or 4-digit years ("01-Apr-26" or "01-Apr-2026"); 2-digit → 20YY.
+  const m = billDate.trim().match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2,4})$/);
   if (!m) return null;
   const mm = MONTHS[m[2].toLowerCase()];
   if (!mm) return null;
-  return `${m[3]}-${mm}-${m[1].padStart(2, "0")}`;
+  const yyyy = m[3].length === 2 ? `20${m[3]}` : m[3];
+  return `${yyyy}-${mm}-${m[1].padStart(2, "0")}`;
 }
 
 const inr = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");

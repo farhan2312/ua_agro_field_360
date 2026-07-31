@@ -14,7 +14,7 @@
 import "dotenv/config";
 import fs from "node:fs";
 import { PrismaClient, Prisma } from "@prisma/client";
-import { cropFromItem } from "./crop-lib";
+import { cropFromItem, cleanCrop } from "./crop-lib";
 
 const prisma = new PrismaClient();
 const DRY = process.env.DRY === "1";
@@ -58,6 +58,7 @@ async function main() {
     store: col("Retailer Name"), order: col("Order No"), item: col("Item Name"), mainCat: col("MainCategory"), subCat: col("SubCategory"),
     qty: col("Qty"), cgstR: col("CGST Rate"), sgstR: col("SGST Rate"), cgstV: col("CGST Value"), sgstV: col("SGST Value"),
     total: col("Total"), taxable: col("Taxable Value"), disc: col("DiscountAmount"), batch: col("Batch No"), uom: col("UOM"),
+    crops: col("CROPS"),
     fy: col("Financial Year"), date: col("BillDate"), name: col("Cus Name"), mobile: col("Cus Mobile"), village: col("Cus Village"), retQty: col("Return Qty"),
   };
 
@@ -89,8 +90,9 @@ async function main() {
     console.log(`  created ${data.length} products`);
   }
 
-  // crop for a line: name-first, then single-crop catalogue fallback (no guess on multi-crop).
-  const lineCrop = (item: string, tc: string[]): string | null => cropFromItem(item) ?? (tc.length === 1 ? tc[0] : null);
+  // crop for a line: SHEET ONLY — cleaned from the CSV's CROPS column (col AE). Client rule:
+  // "only use the tagging given in the sheet, nothing else" (no name inference, no catalogue guess).
+  const lineCrop = (cropsCell: string): string | null => cleanCrop(cropsCell);
 
   // ── Clear existing FY 26-27 lines (idempotent) ──
   if (!DRY) {
@@ -111,7 +113,7 @@ async function main() {
     const qty = parseNum(row[C.qty]);
     const total = parseNum(row[C.total]);
     const soldAt = parseBillDate(row[C.date]); if (!soldAt) badDate++;
-    const crop = lineCrop(item, prod.targetCrops); if (crop) tagged++;
+    const crop = lineCrop(row[C.crops]); if (crop) tagged++;
     buffer.push({
       orderNo: (row[C.order] || "").trim(), productId: prod.id, itemRaw: item,
       store: (row[C.store] || "").trim() || null, storeId: storeByName.get(normName(row[C.store])) ?? null,
