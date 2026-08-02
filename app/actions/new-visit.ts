@@ -3,6 +3,7 @@
 import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { cleanCrop } from "@/lib/crop-clean";
 import { getPersona } from "@/lib/session";
 import { getActor } from "@/lib/scope";
 import { STATS_TAG } from "@/lib/stats";
@@ -192,6 +193,21 @@ export async function submitVisitAction(
       },
     });
     newVisitId = createdVisit.id;
+
+    // Denormalise this visit's crops onto the farmer so the visit-lens crop filter/facets
+    // update live — same cleanCrop canonicalisation as scripts/backfill-crops (Visit.mainCrop
+    // + crops[]). A cheap single-row union; value/lifecycle stay sales-driven (batch).
+    if (farmerId) {
+      const raw = [form.mainCrop, ...form.crop, ...form.otherCrops.split(",")];
+      const visitCrops = [...new Set(raw.map((c) => cleanCrop(c)).filter((c): c is string => !!c))];
+      if (visitCrops.length) {
+        await prisma.$executeRaw`
+          UPDATE "Farmer" SET
+            "visitCropTags" = ARRAY(SELECT DISTINCT e FROM unnest("visitCropTags" || ${visitCrops}::text[]) e WHERE e IS NOT NULL AND btrim(e) <> '' ORDER BY e),
+            "cropTags"      = ARRAY(SELECT DISTINCT e FROM unnest("cropTags"      || ${visitCrops}::text[]) e WHERE e IS NOT NULL AND btrim(e) <> '' ORDER BY e)
+          WHERE id = ${farmerId}`;
+      }
+    }
 
     await prisma.auditLog.create({
       data: {
