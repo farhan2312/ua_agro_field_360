@@ -194,17 +194,28 @@ export async function submitVisitAction(
     });
     newVisitId = createdVisit.id;
 
-    // Denormalise this visit's crops onto the farmer so the visit-lens crop filter/facets
-    // update live — same cleanCrop canonicalisation as scripts/backfill-crops (Visit.mainCrop
-    // + crops[]). A cheap single-row union; value/lifecycle stay sales-driven (batch).
+    // Denormalise this visit's crops + pest/disease/weed problem onto the farmer so the
+    // visit-lens crop filter and the Target Pest filter update live. Crops use the same
+    // cleanCrop canonicalisation as scripts/backfill-crops (Visit.mainCrop + crops[]); the
+    // pest signal comes from the "Current Problem" question, mapped to the same tag keys the
+    // Target Pests/Diseases/Weeds filter uses. A cheap single-row union; value/lifecycle stay
+    // sales-driven (batch).
     if (farmerId) {
-      const raw = [form.mainCrop, ...form.crop, ...form.otherCrops.split(",")];
-      const visitCrops = [...new Set(raw.map((c) => cleanCrop(c)).filter((c): c is string => !!c))];
-      if (visitCrops.length) {
+      const rawCrops = [form.mainCrop, ...form.crop, ...form.otherCrops.split(",")];
+      const visitCrops = [...new Set(rawCrops.map((c) => cleanCrop(c)).filter((c): c is string => !!c))];
+      // Current Problem → Target Pest/Disease/Weed tag (the form has no specific pest name).
+      const PROBLEM_PEST: Record<string, string> = {
+        "pest infestation": "pest", "disease infection": "disease", "weed problem": "weed",
+      };
+      const visitPests = [...new Set(
+        form.currentProblem.map((p) => PROBLEM_PEST[p.trim().toLowerCase()]).filter((p): p is string => !!p),
+      )];
+      if (visitCrops.length || visitPests.length) {
         await prisma.$executeRaw`
           UPDATE "Farmer" SET
             "visitCropTags" = ARRAY(SELECT DISTINCT e FROM unnest("visitCropTags" || ${visitCrops}::text[]) e WHERE e IS NOT NULL AND btrim(e) <> '' ORDER BY e),
-            "cropTags"      = ARRAY(SELECT DISTINCT e FROM unnest("cropTags"      || ${visitCrops}::text[]) e WHERE e IS NOT NULL AND btrim(e) <> '' ORDER BY e)
+            "cropTags"      = ARRAY(SELECT DISTINCT e FROM unnest("cropTags"      || ${visitCrops}::text[]) e WHERE e IS NOT NULL AND btrim(e) <> '' ORDER BY e),
+            "pestTags"      = ARRAY(SELECT DISTINCT e FROM unnest("pestTags"      || ${visitPests}::text[]) e WHERE e IS NOT NULL AND btrim(e) <> '' ORDER BY e)
           WHERE id = ${farmerId}`;
       }
     }
