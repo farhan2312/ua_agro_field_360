@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
-import { updateBugStatus, getBugScreenshot, deleteBug } from "@/app/actions/bugs";
+import { updateBugStatus, getBugScreenshot, deleteBug, saveBugResolution } from "@/app/actions/bugs";
 import { BUG_SEVERITIES, type BugVM } from "@/lib/bug-constants";
 
 const COLUMNS: { key: string; label: string; color: string; hint: string }[] = [
@@ -46,6 +46,10 @@ export function BugTracker({ bugs: initial }: { bugs: BugVM[] }) {
   const [dragId, setDragId] = useState<number | null>(null);
   const [overCol, setOverCol] = useState<string | null>(null);
   const [shot, setShot] = useState<{ id: number; title: string; url: string | null } | null>(null);
+  const [open, setOpen] = useState<BugVM | null>(null); // expanded bug detail
+  const [notes, setNotes] = useState("");
+  const [detailShot, setDetailShot] = useState<string | null | undefined>(undefined); // undefined = loading
+  const [saving, setSaving] = useState(false);
   const [, start] = useTransition();
 
   const kpis = useMemo(() => {
@@ -93,6 +97,35 @@ export function BugTracker({ bugs: initial }: { bugs: BugVM[] }) {
   const viewShot = (b: BugVM) => {
     setShot({ id: b.id, title: b.title, url: null });
     getBugScreenshot(b.id).then((url) => setShot((s) => (s && s.id === b.id ? { ...s, url } : s)));
+  };
+
+  // Expand a bug into the detail window.
+  const openBug = (b: BugVM) => {
+    setOpen(b);
+    setNotes(b.resolution ?? "");
+    setDetailShot(b.hasScreenshot ? undefined : null);
+    if (b.hasScreenshot) getBugScreenshot(b.id).then((u) => setDetailShot(u));
+  };
+
+  const patchBug = (id: number, patch: Partial<BugVM>) => {
+    setBugs((bs) => bs.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+    setOpen((o) => (o && o.id === id ? { ...o, ...patch } : o));
+  };
+
+  // Change status from inside the detail window (reuses the optimistic move()).
+  const setStatusIn = (status: string) => { if (open) { move(open.id, status); setOpen((o) => (o ? { ...o, status } : o)); } };
+
+  // Save the resolution notes; optionally close the bug at the same time.
+  const saveRes = (close: boolean) => {
+    if (!open) return;
+    const id = open.id, text = notes.trim();
+    setSaving(true);
+    saveBugResolution(id, text, close).then((res) => {
+      setSaving(false);
+      if (!res.ok) { alert(res.error ?? "Save failed."); return; }
+      patchBug(id, { resolution: text, ...(close ? { status: "CLOSED", resolvedAt: new Date().toISOString() } : {}) });
+      if (close) setOpen(null);
+    });
   };
 
   return (
@@ -149,17 +182,20 @@ export function BugTracker({ bugs: initial }: { bugs: BugVM[] }) {
                       onDragEnd={() => { setDragId(null); setOverCol(null); }}
                       className={`cursor-grab rounded-[10px] border border-[#EFEFEF] bg-white p-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] active:cursor-grabbing ${dragId === b.id ? "opacity-50" : ""}`}
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="text-[12.5px] font-semibold leading-snug text-[#1A1C1A]">{b.title}</div>
-                        <span className="flex-none rounded-full px-1.5 py-0.5 text-[9px] font-bold" style={{ background: SEV[b.severity]?.bg ?? "#EEE", color: SEV[b.severity]?.c ?? "#616161" }}>
-                          {b.severity[0] + b.severity.slice(1).toLowerCase()}
-                        </span>
-                      </div>
-                      {b.description && <div className="mt-1 line-clamp-2 text-[11px] text-[#757575]">{b.description}</div>}
-                      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10.5px] text-[#9E9E9E]">
-                        <span>{b.reporter}</span><span>·</span><span>{ago(b.createdAt)}</span>
-                        {b.page && <><span>·</span><span className="truncate max-w-[120px]" title={b.page}>{b.page}</span></>}
-                      </div>
+                      <button type="button" onClick={() => openBug(b)} className="block w-full text-left" title="Open bug">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="text-[12.5px] font-semibold leading-snug text-[#1A1C1A] hover:text-[#2E7D32]">{b.title}</div>
+                          <span className="flex-none rounded-full px-1.5 py-0.5 text-[9px] font-bold" style={{ background: SEV[b.severity]?.bg ?? "#EEE", color: SEV[b.severity]?.c ?? "#616161" }}>
+                            {b.severity[0] + b.severity.slice(1).toLowerCase()}
+                          </span>
+                        </div>
+                        {b.description && <div className="mt-1 line-clamp-2 text-[11px] text-[#757575]">{b.description}</div>}
+                        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10.5px] text-[#9E9E9E]">
+                          <span>{b.reporter}</span><span>·</span><span>{ago(b.createdAt)}</span>
+                          {b.page && <><span>·</span><span className="truncate max-w-[120px]" title={b.page}>{b.page}</span></>}
+                          {b.resolution && <span title="Has resolution notes">📝</span>}
+                        </div>
+                      </button>
                       <div className="mt-2 flex items-center gap-1.5 border-t border-[#F5F5F5] pt-2">
                         <select value={b.status} onChange={(e) => move(b.id, e.target.value)}
                           className="flex-1 rounded-md border border-[#E8E8E8] bg-white px-1.5 py-1 text-[10.5px] text-[#616161] outline-none">
@@ -192,6 +228,79 @@ export function BugTracker({ bugs: initial }: { bugs: BugVM[] }) {
             </div>
           </>
         )}
+      </Modal>
+
+      {/* Expanded bug detail */}
+      <Modal open={open != null} onClose={() => setOpen(null)} className="max-w-[760px]">
+        {open && (() => {
+          const st = COLUMNS.find((c) => c.key === open.status);
+          return (
+            <>
+              <ModalHeader eyebrow={`Bug #${open.id}`} eyebrowColor={SEV[open.severity]?.c ?? "#616161"} title={open.title} onClose={() => setOpen(null)} />
+              <div className="max-h-[76vh] overflow-y-auto px-5 py-4">
+                {/* Badges */}
+                <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                  <span className="rounded-full px-2.5 py-1 font-bold text-white" style={{ background: st?.color ?? "#616161" }}>{st?.label ?? open.status}</span>
+                  <span className="rounded-full px-2.5 py-1 font-bold" style={{ background: SEV[open.severity]?.bg ?? "#EEE", color: SEV[open.severity]?.c ?? "#616161" }}>
+                    {open.severity[0] + open.severity.slice(1).toLowerCase()}
+                  </span>
+                  <span className="text-[#9E9E9E]">Reported by <b className="text-[#616161]">{open.reporter}</b>{open.reporterCode ? ` (${open.reporterCode})` : ""} · {ago(open.createdAt)}</span>
+                </div>
+
+                {/* Reported-from link */}
+                <div className="mt-4 text-[12.5px]">
+                  <span className="font-semibold text-[#9E9E9E]">Reported from: </span>
+                  {open.page
+                    ? <a href={open.page} target="_blank" rel="noopener noreferrer" className="font-semibold text-[#1565C0] underline decoration-dotted underline-offset-2 hover:text-[#0D47A1]">{open.page} ↗</a>
+                    : <span className="text-[#BDBDBD]">—</span>}
+                </div>
+
+                {/* Description */}
+                {open.description && (
+                  <div className="mt-4">
+                    <div className="text-[10.5px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Description</div>
+                    <div className="mt-1 whitespace-pre-wrap rounded-[10px] bg-[#FAFAFA] px-3.5 py-3 text-[13px] leading-relaxed text-[#333]">{open.description}</div>
+                  </div>
+                )}
+
+                {/* Screenshot */}
+                {open.hasScreenshot && (
+                  <div className="mt-4">
+                    <div className="text-[10.5px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Screenshot</div>
+                    {detailShot === undefined ? <div className="py-8 text-center text-[12px] text-[#9E9E9E]">Loading…</div>
+                      : detailShot ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={detailShot} alt="bug screenshot" className="mt-1 max-h-[46vh] w-auto rounded-[10px] border border-[#EEE]" />
+                      : <div className="py-4 text-[12px] text-[#BDBDBD]">Screenshot unavailable.</div>}
+                  </div>
+                )}
+
+                {/* Status + Resolution */}
+                <div className="mt-5 border-t border-[#F0F0F0] pt-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10.5px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Status</span>
+                    <select value={open.status} onChange={(e) => setStatusIn(e.target.value)}
+                      className="rounded-[8px] border border-[#E0E0E0] bg-white px-2.5 py-1.5 text-[12px] text-[#424242] outline-none focus:border-[#2E7D32]">
+                      {COLUMNS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+                    </select>
+                  </div>
+                  <div className="mt-3 text-[10.5px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Resolution notes</div>
+                  <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={4}
+                    placeholder="What was the fix / decision? (saved with the bug)"
+                    className="mt-1 w-full resize-y rounded-[10px] border border-[#E0E0E0] bg-white px-3.5 py-2.5 text-[13px] outline-none focus:border-[#2E7D32]" />
+                  <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                    <button type="button" onClick={() => saveRes(false)} disabled={saving}
+                      className="rounded-[10px] border border-[#2E7D32] px-4 py-2 text-[12.5px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9] disabled:opacity-50">
+                      {saving ? "Saving…" : "Save notes"}
+                    </button>
+                    <button type="button" onClick={() => saveRes(true)} disabled={saving || open.status === "CLOSED"}
+                      className="rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[12.5px] font-semibold text-white hover:bg-[#1B5E20] disabled:opacity-50">
+                      {open.status === "CLOSED" ? "Closed" : "Save & mark as closed"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </>
+          );
+        })()}
       </Modal>
     </div>
   );

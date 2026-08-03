@@ -556,6 +556,7 @@ model Bug {
   reporter     String? // reporter's name
   reporterCode String? // reporter's employee code
   screenshot   String? // optional screenshot as a (downscaled) data URL
+  resolution   String? // admin's resolution / fix notes, added when closing
   resolvedAt   DateTime? // set when moved to FIXED/CLOSED
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt @default(now())

@@ -15,6 +15,7 @@ export interface BugVM {
   reporter: string;
   reporterCode: string;
   hasScreenshot: boolean;
+  resolution: string;
   createdAt: string; // ISO
   resolvedAt: string | null;
 }

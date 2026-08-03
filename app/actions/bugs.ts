@@ -55,6 +55,7 @@ export async function listBugs(): Promise<BugVM[]> {
       reporter: b.reporter ?? "—",
       reporterCode: b.reporterCode ?? "",
       hasScreenshot: !!b.screenshot,
+      resolution: b.resolution ?? "",
       createdAt: iso(b.createdAt)!,
       resolvedAt: iso(b.resolvedAt),
     }));
@@ -84,6 +85,22 @@ export async function updateBugStatus(id: number, status: string): Promise<{ ok:
       where: { id },
       data: { status, resolvedAt: resolved ? new Date() : null },
     });
+    revalidatePath("/bugs");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Update failed." };
+  }
+}
+
+/** Save the admin's resolution notes; optionally close the bug in the same action (sysadmin only). */
+export async function saveBugResolution(id: number, resolution: string, close: boolean): Promise<{ ok: boolean; error?: string }> {
+  if ((await getRole()) !== "sysadmin") return { ok: false, error: "Not authorised." };
+  try {
+    const data: { resolution: string | null; status?: string; resolvedAt?: Date } = {
+      resolution: resolution.trim().slice(0, 4000) || null,
+    };
+    if (close) { data.status = "CLOSED"; data.resolvedAt = new Date(); }
+    await prisma.bug.update({ where: { id }, data });
     revalidatePath("/bugs");
     return { ok: true };
   } catch (e) {
