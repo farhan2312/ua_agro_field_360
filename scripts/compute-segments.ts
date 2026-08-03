@@ -181,16 +181,19 @@ async function main() {
   }
   process.stdout.write("\n");
 
-  // REAL farmers with no dated sales → default value=REGULAR, lifecycle=LAPSED (never purchased).
+  // REAL farmers with NO purchase history at all (no sale line, no bill) → LEAD (in the system,
+  // never bought). Forces lifecycle=LEAD (overrides any stale value); value defaults to Regular (₹0).
   const filled = await prisma.$executeRawUnsafe(
-    `UPDATE "Farmer" SET "valueSegment"=COALESCE("valueSegment",'REGULAR'), "lifecycleSegment"=COALESCE("lifecycleSegment",'LAPSED')
-     WHERE "source"='REAL' AND ("valueSegment" IS NULL OR "lifecycleSegment" IS NULL)`,
+    `UPDATE "Farmer" f SET "lifecycleSegment"='LEAD', "valueSegment"=COALESCE("valueSegment",'REGULAR')
+     WHERE f."source"='REAL'
+       AND NOT EXISTS (SELECT 1 FROM "SaleLine" sl WHERE sl."farmerId" = f.id)
+       AND NOT EXISTS (SELECT 1 FROM "Sale" s WHERE s."farmerId" = f.id)`,
   );
 
   console.log("Legacy campaign segments:", JSON.stringify(segCounts));
   console.log("Value segments:", JSON.stringify(valueCounts));
   console.log("Lifecycle segments:", JSON.stringify(lifecycleCounts));
-  console.log(`No-sale REAL farmers defaulted (Regular/Lapsed): ${filled}`);
+  console.log(`Leads (REAL farmers with no purchase) tagged LEAD: ${filled}`);
   console.log(`Crop tags — maize: ${maizeCount}, potato: ${potatoCount}`);
   await prisma.$disconnect();
 }

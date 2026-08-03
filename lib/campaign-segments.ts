@@ -22,6 +22,7 @@ export const SEGMENT_META: Record<string, SegMeta> = {
   AT_RISK:       { label: "At Risk",       priority: 5, color: "#E65100", bg: "#FFF3E0", medium: "Whatsapp + Call" },
   NEW:           { label: "New",           priority: 6, color: "#7B1FA2", bg: "#F3E5F5", medium: "Whatsapp" },
   LAPSED:        { label: "Lapsed",        priority: 7, color: "#616161", bg: "#EEEEEE", medium: "Whatsapp + Call" },
+  LEAD:          { label: "Lead",          priority: 9, color: "#00838F", bg: "#E0F7FA", medium: "Whatsapp" },
   OTHER:         { label: "Other",         priority: 8, color: "#9E9E9E", bg: "#F5F5F5", medium: "Whatsapp" },
 };
 
@@ -41,12 +42,13 @@ export const VALUE_POTENTIAL_MIN = 8000;
 
 /**
  * Lifecycle — by the purchase windows a farmer falls in, relative to the reference date:
+ *   Lead   — in the system but no purchase at all yet (never bought).
  *   New    — bought in the last 6 months AND has NO earlier purchases (first-timer).
  *   Recent — bought in the last 6 months AND also bought before that (active repeat).
  *   At Risk— last purchase 6–12 months ago (nothing in the last 6 months).
- *   Lapsed — last purchase 12+ months ago, or never.
+ *   Lapsed — last purchase 12+ months ago.
  */
-export const LIFECYCLE_SEGMENTS = ["NEW", "RECENT", "AT_RISK", "LAPSED"] as const;
+export const LIFECYCLE_SEGMENTS = ["LEAD", "NEW", "RECENT", "AT_RISK", "LAPSED"] as const;
 export type LifecycleSegment = (typeof LIFECYCLE_SEGMENTS)[number];
 export const LIFECYCLE_RECENT_MONTHS = 6;      // < 6 months since last purchase → New or Recent
 export const LIFECYCLE_LAPSED_MIN_MONTHS = 12; // ≥ 12 months (or never) → Lapsed; 6–12 → At Risk
@@ -66,10 +68,11 @@ export function segDef(k: string): string {
     case "HNI": return `Value tier — spends ${inr(VALUE_HNI_MIN)}+ in the period`;
     case "POTENTIAL_HNI": return `Value tier — spends ${inr(VALUE_POTENTIAL_MIN)}–${inr(VALUE_HNI_MIN)} in the period`;
     case "REGULAR": return `Value tier — spends under ${inr(VALUE_POTENTIAL_MIN)} in the period`;
+    case "LEAD": return `Lifecycle — registered in the system but no purchase yet (a lead)`;
     case "NEW": return `Lifecycle — first & only purchases within the last ${LIFECYCLE_RECENT_MONTHS} months (new customer)`;
     case "RECENT": return `Lifecycle — bought in the last ${LIFECYCLE_RECENT_MONTHS} months and earlier too (active)`;
     case "AT_RISK": return `Lifecycle — last purchase ${LIFECYCLE_RECENT_MONTHS}–${LIFECYCLE_LAPSED_MIN_MONTHS} months ago`;
-    case "LAPSED": return `Lifecycle — last purchase ${LIFECYCLE_LAPSED_MIN_MONTHS}+ months ago, or never`;
+    case "LAPSED": return `Lifecycle — last purchase ${LIFECYCLE_LAPSED_MIN_MONTHS}+ months ago`;
     default: return "";
   }
 }
@@ -88,7 +91,7 @@ export function lifecycleSegmentOf(
   monthsSinceLast: number | null | undefined,
   monthsSinceFirst?: number | null | undefined,
 ): LifecycleSegment {
-  if (monthsSinceLast == null) return "LAPSED";
+  if (monthsSinceLast == null) return "LEAD"; // never purchased → a lead, not lapsed
   if (monthsSinceLast < LIFECYCLE_RECENT_MONTHS) {
     return monthsSinceFirst != null && monthsSinceFirst < LIFECYCLE_RECENT_MONTHS ? "NEW" : "RECENT";
   }
