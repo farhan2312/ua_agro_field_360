@@ -68,12 +68,7 @@ export function FarmerProfileCard({ farmer }: { farmer: FarmerDetail }) {
       <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
         <DetailRow label="Land" value={`${farmer.land || "0"} acres`} />
         <DetailRow label="Season" value={farmer.season} />
-        <DetailRow label="Soil" value={farmer.soil} />
-        <DetailRow
-          label="Lead Status"
-          value={farmer.status}
-          valueClass="text-[#2E7D32]"
-        />
+        <DetailRow label="Soil" value={farmer.soil} border={false} />
         <DetailRow
           label="Total Visits"
           value={String(farmer.visitCount)}
