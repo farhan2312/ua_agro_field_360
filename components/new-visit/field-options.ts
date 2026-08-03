@@ -17,6 +17,7 @@ export const FIELD = {
   waterSource: "Water Source",
   mainCrop: "Main Crop",
   crop: "Crop",
+  pests: "Pest / Disease / Weed",
   season: "Season",
   product: "Product",
   productRequired: "Product Required",
@@ -53,6 +54,17 @@ export const FALLBACK_OPTIONS: Record<FieldKey, string[]> = {
     "Wheat", "Paddy", "Maize", "Mustard", "Potato", "Sugarcane", "Gram",
     "Arhar", "Urad", "Moong", "Soybean", "Groundnut", "Tomato", "Onion",
     "Chilli", "Brinjal", "Okra", "Cabbage", "Cauliflower", "Pea", "Other",
+  ],
+  pests: [
+    // Insect pests
+    "Aphids", "Whitefly", "Thrips", "Jassids", "Stem Borer", "Fruit / Pod Borer", "Bollworm",
+    "Pink Bollworm", "Leaf Folder", "Brown Plant Hopper", "Shoot Borer", "Mealybug", "Mites",
+    "Termite", "Armyworm", "Cutworm",
+    // Diseases
+    "Blast", "Blight", "Leaf Spot", "Rust", "Powdery Mildew", "Downy Mildew", "Wilt", "Root Rot",
+    "Smut", "Sheath Blight", "Yellow Mosaic Virus", "Anthracnose",
+    // Weeds
+    "Grassy Weeds", "Broadleaf Weeds", "Sedges", "Other",
   ],
   season: ["Kharif", "Rabi", "Zaid"],
   product: [

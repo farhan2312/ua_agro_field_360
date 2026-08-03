@@ -3,7 +3,7 @@
 import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { cleanCrop } from "@/lib/crop-clean";
+import { cleanCrop, cleanPest } from "@/lib/crop-clean";
 import { getPersona } from "@/lib/session";
 import { getActor, getScope } from "@/lib/scope";
 import { STATS_TAG } from "@/lib/stats";
@@ -134,7 +134,7 @@ export async function submitVisitAction(
         const created = await prisma.farmer.create({
           data: {
             code: `FARM-NV-${Date.now()}`,
-            name: form.name || "New Farmer",
+            name: (form.name || "New Farmer").toUpperCase(), // name cleansing — store new farmers in CAPS
             mobile,
             village: form.village || null,
             district: form.district || null,
@@ -175,6 +175,7 @@ export async function submitVisitAction(
         mainCrop: form.mainCrop || null,
         crops: form.crop,
         otherCrops: form.otherCrops || null,
+        pests: form.pests,
         season: form.season || null,
         cropInsured: form.cropInsured,
         landHoldingUnit: form.landHolding || null,
@@ -209,28 +210,23 @@ export async function submitVisitAction(
     });
     newVisitId = createdVisit.id;
 
-    // Denormalise this visit's crops + pest/disease/weed problem onto the farmer so the
-    // visit-lens crop filter and the Target Pest filter update live. Crops use the same
-    // cleanCrop canonicalisation as scripts/backfill-crops (Visit.mainCrop + crops[]); the
-    // pest signal comes from the "Current Problem" question, mapped to the same tag keys the
-    // Target Pests/Diseases/Weeds filter uses. A cheap single-row union; value/lifecycle stay
-    // sales-driven (batch).
+    // Denormalise this visit's crops + pests onto the farmer so the visit-lens crop filter and
+    // the Target Pest filter update live. Both are kept SEGREGATED by source (mirrors crops):
+    //   visitCropTags / visitPestTags = from visits · salesCropTags / salesPestTags = from sales
+    //   cropTags / pestTags = the union each filter matches on.
+    // Crops use cleanCrop (Visit.mainCrop + crops[]); pests use cleanPest on the dedicated Pests
+    // field. A cheap single-row union; value/lifecycle stay sales-driven (batch).
     if (farmerId) {
       const rawCrops = [form.mainCrop, ...form.crop, ...form.otherCrops.split(",")];
       const visitCrops = [...new Set(rawCrops.map((c) => cleanCrop(c)).filter((c): c is string => !!c))];
-      // Current Problem → Target Pest/Disease/Weed tag (the form has no specific pest name).
-      const PROBLEM_PEST: Record<string, string> = {
-        "pest infestation": "pest", "disease infection": "disease", "weed problem": "weed",
-      };
-      const visitPests = [...new Set(
-        form.currentProblem.map((p) => PROBLEM_PEST[p.trim().toLowerCase()]).filter((p): p is string => !!p),
-      )];
+      const visitPests = [...new Set(form.pests.map((p) => cleanPest(p)).filter((p): p is string => !!p))];
       if (visitCrops.length || visitPests.length) {
         await prisma.$executeRaw`
           UPDATE "Farmer" SET
             "visitCropTags" = ARRAY(SELECT DISTINCT e FROM unnest("visitCropTags" || ${visitCrops}::text[]) e WHERE e IS NOT NULL AND btrim(e) <> '' ORDER BY e),
             "cropTags"      = ARRAY(SELECT DISTINCT e FROM unnest("cropTags"      || ${visitCrops}::text[]) e WHERE e IS NOT NULL AND btrim(e) <> '' ORDER BY e),
-            "pestTags"      = ARRAY(SELECT DISTINCT e FROM unnest("pestTags"      || ${visitPests}::text[]) e WHERE e IS NOT NULL AND btrim(e) <> '' ORDER BY e)
+            "visitPestTags" = ARRAY(SELECT DISTINCT e FROM unnest("visitPestTags" || ${visitPests}::text[]) e WHERE e IS NOT NULL AND btrim(e) <> '' ORDER BY e),
+            "pestTags"      = ARRAY(SELECT DISTINCT e FROM unnest("salesPestTags" || "visitPestTags" || ${visitPests}::text[]) e WHERE e IS NOT NULL AND btrim(e) <> '' ORDER BY e)
           WHERE id = ${farmerId}`;
       }
     }

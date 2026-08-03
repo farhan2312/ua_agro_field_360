@@ -165,7 +165,9 @@ model Farmer {
   cropTags          String[]  @default([]) // union of sales + visit crops (used by crop filters)
   salesCropTags     String[]  @default([]) // crops from the monthly sales upload (Crops column + item-code Target Crops)
   visitCropTags     String[]  @default([]) // crops recorded during field visits
-  pestTags          String[]  @default([]) // Target Pests/Diseases/Weeds — auto-mapped from purchased item codes
+  pestTags          String[]  @default([]) // union of sales + visit pests (used by pest filters)
+  salesPestTags     String[]  @default([]) // pests from sales (currently item-code Target Pests; reserved for a future sales pest column)
+  visitPestTags     String[]  @default([]) // Pests/Diseases/Weeds recorded during field visits
   p12mSpend         Int? // ₹ base-price spend in past 12 months
   lifetimeSpend     Int? // ₹ all-time base-price spend (LTV) — drives the value tier + the "all spend" filter
   hniGap            Int? // ₹ to reach HNI (for Potential HNI)
@@ -193,6 +195,8 @@ model Farmer {
   @@index([salesCropTags], type: Gin)
   @@index([visitCropTags], type: Gin)
   @@index([pestTags], type: Gin)
+  @@index([salesPestTags], type: Gin)
+  @@index([visitPestTags], type: Gin)
   @@index([segmentTags], type: Gin)
 }
 
@@ -440,6 +444,7 @@ model Visit {
   mainCrop        String?
   crops           String[] @default([])
   otherCrops      String?
+  pests           String[] @default([]) // Pests/Diseases/Weeds seen on the visit (→ Farmer.visitPestTags)
   season          String?
   cropInsured     Boolean  @default(false)
   landHoldingUnit String?

@@ -313,6 +313,8 @@ export function NewVisitWizard({
     form.name.trim() !== "" &&
     form.village.trim() !== "" &&
     (!visitReasonRequired || form.visitPurpose.trim() !== "");
+  // Land & Crops step: at least one crop is mandatory (main crop or a crop chip).
+  const step1Valid = form.mainCrop.trim() !== "" || form.crop.length > 0;
 
   const next = () => setStep((s) => Math.min(s + 1, 4));
   const prev = () => setStep((s) => Math.max(s - 1, 0));
@@ -330,6 +332,7 @@ export function NewVisitWizard({
       waterSource: foldArr(form.waterSource, ot.waterSource),
       mainCrop: foldOne(form.mainCrop, ot.crop),
       crop: foldArr(form.crop, ot.crop),
+      pests: foldArr(form.pests, ot.pests),
       product: foldArr(form.product, ot.product),
       productRequired: foldArr(form.productRequired, ot.productRequired),
       currentProblem: foldArr(form.currentProblem, ot.currentProblem),
@@ -780,6 +783,18 @@ export function NewVisitWizard({
                   onDetail={(t) => setOtherText("currentProblem", t)}
                 />
               </SectionCard>
+              <SectionCard title="Pests / Diseases Seen">
+                <ChipGroupWithOther
+                  multi
+                  size="sm"
+                  fieldKey="pests"
+                  options={options.pests}
+                  value={form.pests}
+                  onChange={setChip("pests", "pests")}
+                  detail={form.otherText.pests ?? ""}
+                  onDetail={(t) => setOtherText("pests", t)}
+                />
+              </SectionCard>
               <SectionCard title="Crop Risk">
                 <ChipGroupWithOther
                   multi
@@ -959,11 +974,13 @@ export function NewVisitWizard({
             <button
               type="button"
               onClick={next}
-              disabled={step === 0 && !step0Valid}
+              disabled={(step === 0 && !step0Valid) || (step === 1 && !step1Valid)}
               title={
                 step === 0 && !step0Valid
                   ? "Enter a valid mobile, farmer name, village and visit reason to continue."
-                  : undefined
+                  : step === 1 && !step1Valid
+                    ? "Select at least one crop to continue."
+                    : undefined
               }
               className="rounded-[10px] bg-[#2E7D32] px-8 py-[11px] text-[13px] font-semibold text-white hover:bg-[#1B5E20] active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-[#2E7D32]"
             >

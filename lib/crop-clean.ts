@@ -130,3 +130,19 @@ export function cleanCrop(raw?: string | null): string | null {
   for (const [re, c] of CROP_CLEAN_RULES) if (re.test(s)) return c;
   return null; // unknown → drop
 }
+
+/**
+ * Canonicalize a Pest/Disease/Weed value from the visit form (or a future sales pest column) into
+ * a lowercase tag key (tagLabel() re-titles it). Unwraps an "Other: <text>" chip, strips
+ * parentheticals, and drops empty/"other"/"none" placeholders. Kept permissive (no fixed catalogue)
+ * so the visit dropdown can grow without a rules table — segregated from crop cleaning on purpose.
+ */
+export function cleanPest(raw?: string | null): string | null {
+  if (!raw) return null;
+  let s = raw.trim();
+  const other = s.match(/^other\s*:\s*(.+)$/i);
+  if (other) s = other[1];
+  s = s.toLowerCase().replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").trim();
+  if (!s || s === "other" || s === "none") return null;
+  return s;
+}

@@ -15,9 +15,12 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log("1) pestTags ← target pests of every purchased product…");
+  console.log("1) salesPestTags ← target pests of every purchased product; pestTags = sales ∪ visit…");
   const p1 = await prisma.$executeRawUnsafe(`
-    UPDATE "Farmer" f SET "pestTags" = t.pests
+    UPDATE "Farmer" f
+    SET "salesPestTags" = t.pests,
+        "pestTags" = ARRAY(SELECT DISTINCT e FROM unnest(t.pests || f."visitPestTags") e
+                           WHERE e IS NOT NULL AND btrim(e) <> '' ORDER BY e)
     FROM (
       SELECT sl."farmerId" fid, array_agg(DISTINCT pest ORDER BY pest) pests
       FROM "SaleLine" sl

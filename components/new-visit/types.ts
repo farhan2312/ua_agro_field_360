@@ -20,6 +20,7 @@ export interface VisitForm {
   mainCrop: string;
   crop: string[];
   otherCrops: string;
+  pests: string[];
   season: string;
   cropInsured: boolean;
   // Step 2 — Products & Issues
@@ -67,6 +68,7 @@ export const INITIAL_FORM: VisitForm = {
   mainCrop: "",
   crop: [],
   otherCrops: "",
+  pests: [],
   season: "Rabi",
   cropInsured: false,
   product: [],
