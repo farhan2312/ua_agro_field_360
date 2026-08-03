@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { cleanCrop } from "@/lib/crop-clean";
 import { getPersona } from "@/lib/session";
-import { getActor } from "@/lib/scope";
+import { getActor, getScope } from "@/lib/scope";
 import { STATS_TAG } from "@/lib/stats";
 import {
   LEAD_LABEL_TO_ENUM,
@@ -86,10 +86,18 @@ export async function submitVisitAction(
   const persona = await getPersona();
   const officerName = persona.name;
   const actor = await getActor(); // audit: the ACTUAL logged-in user (name + employee code)
+  const scope = await getScope(); // the filling user's store (officers/RMs are store/region scoped)
   let newVisitId: number | undefined;
 
   try {
+    // The store of the person filling in the form — stamped on new farmers + this visit.
+    const officerStore = scope.storeId != null
+      ? await prisma.store.findUnique({ where: { id: scope.storeId }, select: { id: true, code: true } })
+      : null;
     let farmerId: number | undefined;
+    // Store recorded on the visit: an existing farmer keeps the store from their record;
+    // a new farmer (or a walk-in with no record) is stamped with the filling officer's store.
+    let visitStoreId: number | null = officerStore?.id ?? null;
     const mobile = form.mobile.trim();
     const lead = leadEnum(form.leadStatus);
 
@@ -104,21 +112,25 @@ export async function submitVisitAction(
     };
 
     if (editingFarmerId) {
-      // Edit the pulled-up record directly.
+      // Edit the pulled-up record directly — keep its own store (show the store from the record).
       const updated = await prisma.farmer.update({
         where: { id: editingFarmerId },
         data: editData,
       });
       farmerId = updated.id;
+      visitStoreId = updated.storeId;
     } else if (mobile.length > 0) {
       const existing = await prisma.farmer.findFirst({ where: { mobile } });
       if (existing) {
+        // Known farmer — keep the store already on their record.
         const updated = await prisma.farmer.update({
           where: { id: existing.id },
           data: editData,
         });
         farmerId = updated.id;
+        visitStoreId = updated.storeId;
       } else {
+        // Brand-new farmer — stamp them with the filling officer's store.
         const created = await prisma.farmer.create({
           data: {
             code: `FARM-NV-${Date.now()}`,
@@ -129,16 +141,19 @@ export async function submitVisitAction(
             crop: form.mainCrop || null,
             issues: form.currentProblem,
             ...(lead ? { leadStatus: lead as never } : {}),
+            ...(officerStore ? { storeId: officerStore.id, storeCode: officerStore.code } : {}),
             source: "REAL",
           },
         });
         farmerId = created.id;
+        visitStoreId = officerStore?.id ?? null;
       }
     }
 
     const createdVisit = await prisma.visit.create({
       data: {
         farmerId,
+        storeId: visitStoreId, // existing farmer → their store; new/walk-in → the officer's store
         officerName,
         recordedBy: actor.name, // audit trail — actual logged-in user (createdAt = fill timestamp)
         recordedByCode: actor.code,
