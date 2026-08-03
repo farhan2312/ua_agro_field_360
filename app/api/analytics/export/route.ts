@@ -22,7 +22,10 @@ export const dynamic = "force-dynamic";
 interface ExportFilters {
   storeIds?: number[]; zones?: string[]; crops?: string[]; pests?: string[];
   valueSegments?: string[]; lifecycleSegments?: string[]; spendTiers?: number[]; fyStarts?: number[];
+  problems?: string[]; // visit lens — Current Problem
 }
+
+const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 function fyWindow(fyStarts?: number[]): Prisma.Sql | null {
   if (!fyStarts?.length) return null;
@@ -57,6 +60,99 @@ export async function GET(req: NextRequest) {
   let f: ExportFilters = {};
   const raw = req.nextUrl.searchParams.get("f");
   if (raw) { try { f = JSON.parse(Buffer.from(decodeURIComponent(raw), "base64").toString("utf8")); } catch { f = {}; } }
+
+  // ─────────── Visits export: every recorded visit attribute, one row per visit ───────────
+  if (req.nextUrl.searchParams.get("type") === "visits") {
+    const vc: Prisma.Sql[] = [];
+    if (scope.role === "officer") {
+      if (scope.storeId == null) return new Response("No store assigned to your account.", { status: 403 });
+      vc.push(Prisma.sql`(v."storeId" = ${scope.storeId} OR (v."storeId" IS NULL AND f."storeId" = ${scope.storeId}))`);
+    } else if (scope.role === "regional") {
+      if (!scope.zone) return new Response("No district assigned to your account.", { status: 403 });
+      vc.push(Prisma.sql`(vs."zone" = ${scope.zone} OR (v."storeId" IS NULL AND fs."zone" = ${scope.zone}))`);
+    }
+    if (f.storeIds?.length) vc.push(Prisma.sql`(v."storeId" = ANY(${f.storeIds}) OR (v."storeId" IS NULL AND f."storeId" = ANY(${f.storeIds})))`);
+    if (f.zones?.length) vc.push(Prisma.sql`(vs."zone" = ANY(${f.zones}) OR (v."storeId" IS NULL AND fs."zone" = ANY(${f.zones})))`);
+    if (f.crops?.length) vc.push(Prisma.sql`f."visitCropTags" && ${f.crops}::text[]`);
+    if (f.pests?.length) vc.push(Prisma.sql`f."pestTags" && ${f.pests}::text[]`);
+    if (f.problems?.length) vc.push(Prisma.sql`v."currentProblem" && ${f.problems}::text[]`);
+    const vWhere = vc.length ? Prisma.join(vc, " AND ") : Prisma.sql`TRUE`;
+
+    const pass = new PassThrough();
+    const wb = new ExcelJS.stream.xlsx.WorkbookWriter({ stream: pass, useStyles: false, useSharedStrings: false });
+    (async () => {
+      try {
+        const ws = wb.addWorksheet("Visits");
+        ws.addRow([
+          "Visit ID", "Date", "Farmer", "Mobile", "Village", "Store", "District", "Officer", "Recorded by", "Emp code",
+          "Visit type", "Visit mode", "GPS lat", "GPS lng", "Follow-up date", "Soil type", "Soil testing", "Water source",
+          "Main crop", "Crops", "Other crops", "Season", "Crop insured", "Land holding", "Products", "Product required",
+          "Current problem", "Crop risk", "Danger zone", "Annual expense", "Purchase freq", "Other shops",
+          "FPO member", "FPO name", "Contract farming", "Contract detail", "Dairy services", "Dairy detail",
+          "WhatsApp", "WhatsApp number", "Photos", "Voice notes", "Notes", "Lead status", "Segment", "Recorded at (UTC)",
+        ]).commit();
+        let cursor = 0, count = 0; const BATCH = 5000;
+        for (;;) {
+          const rows = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
+            SELECT v.id,
+              COALESCE(to_char(v."visitedAt",'YYYY-MM-DD'), v."date") AS date,
+              f.name AS farmer, f.mobile, f.village,
+              btrim(regexp_replace(COALESCE(vs.name, fs.name), '\\s*\\(.*?\\)\\s*', '', 'g')) AS store,
+              COALESCE(vs.zone, fs.zone) AS district,
+              v."officerName" AS officer, v."recordedBy" AS recordedby, v."recordedByCode" AS empcode,
+              COALESCE(v.type, v.purpose) AS visittype, v."visitMode" AS visitmode, v."gpsLat" AS lat, v."gpsLng" AS lng,
+              v."followUpDate" AS followup, v."soilType" AS soiltype, v."soilTesting" AS soiltesting,
+              array_to_string(v."waterSource", '; ') AS water, v."mainCrop" AS maincrop,
+              array_to_string(v.crops, '; ') AS crops, v."otherCrops" AS othercrops, v.season,
+              v."cropInsured" AS insured, v."landHoldingUnit" AS land,
+              array_to_string(v.products, '; ') AS products, array_to_string(v."productRequired", '; ') AS prodreq,
+              array_to_string(v."currentProblem", '; ') AS problem, array_to_string(v."cropRisk", '; ') AS croprisk,
+              array_to_string(v."dangerZone", '; ') AS danger, v."annualExpense" AS expense, v."purchaseFreq" AS freq,
+              v."otherShops" AS othershops, v."fpoMember" AS fpo, v."fpoName" AS fponame,
+              v."contractFarming" AS contract, v."contractDetail" AS contractdetail,
+              v."dairyServices" AS dairy, v."dairyDetail" AS dairydetail, v."whatsappAvail" AS wa, v."whatsappNumber" AS wanum,
+              COALESCE(array_length(v.photos,1),0) AS photos, COALESCE(array_length(v."voiceNotes",1),0) AS voices,
+              v.notes, v."leadStatus"::text AS lead, v.segment::text AS segment,
+              to_char(v."createdAt",'YYYY-MM-DD HH24:MI') AS createdat
+            FROM "Visit" v
+            LEFT JOIN "Farmer" f ON f.id = v."farmerId"
+            LEFT JOIN "Store" vs ON vs.id = v."storeId"
+            LEFT JOIN "Store" fs ON fs.id = f."storeId"
+            WHERE ${vWhere} AND v.id > ${cursor}
+            ORDER BY v.id LIMIT ${BATCH}`);
+          if (!rows.length) break;
+          const yn = (b: unknown) => (b ? "Yes" : "No");
+          const s = (x: unknown) => (x == null ? "" : String(x));
+          for (const r of rows) {
+            cursor = Number(r.id); count++;
+            ws.addRow([
+              Number(r.id), s(r.date), s(r.farmer), s(r.mobile), s(r.village), s(r.store), s(r.district),
+              s(r.officer), s(r.recordedby), s(r.empcode), s(r.visittype), s(r.visitmode),
+              r.lat ?? "", r.lng ?? "", s(r.followup), s(r.soiltype), s(r.soiltesting), s(r.water),
+              s(r.maincrop), s(r.crops), s(r.othercrops), s(r.season), yn(r.insured), s(r.land),
+              s(r.products), s(r.prodreq), s(r.problem), s(r.croprisk), s(r.danger), s(r.expense), s(r.freq), s(r.othershops),
+              yn(r.fpo), s(r.fponame), yn(r.contract), s(r.contractdetail), yn(r.dairy), s(r.dairydetail),
+              yn(r.wa), s(r.wanum), Number(r.photos ?? 0), Number(r.voices ?? 0), s(r.notes), s(r.lead), s(r.segment), s(r.createdat),
+            ]).commit();
+          }
+          if (rows.length < BATCH) break;
+        }
+        await ws.commit();
+        await wb.commit();
+      } catch (e) {
+        pass.destroy(e as Error);
+      }
+    })();
+    const filename = `visits-export-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    return new Response(Readable.toWeb(pass) as unknown as ReadableStream, {
+      headers: {
+        "Content-Type": XLSX_MIME,
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "X-Export-Filename": filename,
+        "Cache-Control": "no-store",
+      },
+    });
+  }
 
   let storeIds = f.storeIds, zones = f.zones;
   if (scope.role === "officer") {

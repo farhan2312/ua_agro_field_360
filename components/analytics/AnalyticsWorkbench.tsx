@@ -53,16 +53,16 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
   }, []);
 
   // One streaming Excel export (matrix + all sale lines + filters) — any size, with live progress.
-  const exportExcel = async () => {
+  const exportExcel = async (type: "sales" | "visits" = "sales") => {
     if (exporting) return;
     setExporting(true); setExportBytes(0);
     try {
       const f = {
         storeIds: filters.storeIds, zones: filters.zones, crops: filters.crops, pests: filters.pests,
         valueSegments: filters.valueSegments, lifecycleSegments: filters.lifecycleSegments,
-        spendTiers: filters.spendTiers, fyStarts: filters.fyStarts,
+        spendTiers: filters.spendTiers, fyStarts: filters.fyStarts, problems: filters.problems,
       };
-      const url = `/api/analytics/export?f=${encodeURIComponent(btoa(JSON.stringify(f)))}`;
+      const url = `/api/analytics/export?f=${encodeURIComponent(btoa(JSON.stringify(f)))}${type === "visits" ? "&type=visits" : ""}`;
       const res = await fetch(url);
       if (!res.ok || !res.body) throw new Error((await res.text().catch(() => "")) || "Export failed.");
       const reader = res.body.getReader();
@@ -211,14 +211,28 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
                 Preparing Excel… {fmtBytes(exportBytes)}
               </span>
             )}
-            <button type="button" onClick={exportExcel} disabled={exporting}
+            <button type="button" onClick={() => exportExcel("sales")} disabled={exporting}
               className="rounded-[8px] border border-[#2E7D32] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9] disabled:opacity-50"
               title="Full workbook: Value×Lifecycle matrix + every matching sale line + filters (streamed, any size)">
               {exporting ? "Exporting…" : "⬇ Export to Excel"}</button>
           </div>} />
       </div>
       ) : (
-        <VisitBoard va={visitData} />
+        <div className="flex flex-col gap-[14px]">
+          <div className="flex items-center justify-end gap-2.5">
+            {exporting && (
+              <span className="flex items-center gap-2 rounded-full bg-[#E3F2FD] px-2.5 py-1 text-[11px] font-semibold text-[#1565C0]">
+                <span className="h-3 w-3 animate-spin rounded-full border-2 border-[#90CAF9] border-t-[#1565C0]" />
+                Preparing Excel… {fmtBytes(exportBytes)}
+              </span>
+            )}
+            <button type="button" onClick={() => exportExcel("visits")} disabled={exporting}
+              className="rounded-[8px] border border-[#2E7D32] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9] disabled:opacity-50"
+              title="Every visit in scope with all recorded attributes (streamed, any size)">
+              {exporting ? "Exporting…" : "⬇ Export visits to Excel"}</button>
+          </div>
+          <VisitBoard va={visitData} />
+        </div>
       )}
 
       {/* Drill modal */}
