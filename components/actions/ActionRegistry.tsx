@@ -39,6 +39,8 @@ export function ActionRegistry({
   const [q, setQ] = useState("");
   const [storeFilter, setStoreFilter] = useState<number | "">("");
   const [adding, setAdding] = useState(false);
+  const [completing, setCompleting] = useState<ActionVM | null>(null);
+  const [doneNote, setDoneNote] = useState("");
   const [, start] = useTransition();
 
   const isOfficer = role === "officer";
@@ -57,10 +59,13 @@ export function ActionRegistry({
       (!t || `${a.farmerName} ${a.reason} ${a.farmerMobile} ${a.storeName}`.toLowerCase().includes(t)));
   }, [actions, tab, q, storeFilter]);
 
-  const markDone = (id: number) => {
+  const confirmDone = () => {
+    if (!completing) return;
+    const id = completing.id, note = doneNote.trim();
     const prev = actions;
-    setActions((as) => as.map((a) => a.id === id ? { ...a, status: "DONE", overdue: false, completedAt: new Date().toISOString() } : a));
-    start(async () => { const r = await completeAction(id); if (!r.ok) { setActions(prev); alert(r.error ?? "Failed."); } });
+    setActions((as) => as.map((a) => a.id === id ? { ...a, status: "DONE", overdue: false, completedAt: new Date().toISOString(), completionNote: note } : a));
+    setCompleting(null); setDoneNote("");
+    start(async () => { const r = await completeAction(id, note); if (!r.ok) { setActions(prev); alert(r.error ?? "Failed."); } });
   };
   const reopen = (id: number) => {
     const prev = actions;
@@ -143,13 +148,13 @@ export function ActionRegistry({
                   <td className="px-4 py-3 text-[#9E9E9E]">{a.createdBy || "—"}</td>
                   <td className="px-4 py-3">
                     {a.status === "DONE"
-                      ? <span className="rounded-full bg-[#E8F5E9] px-2 py-0.5 text-[10.5px] font-bold text-[#2E7D32]">Done</span>
+                      ? <span className="rounded-full bg-[#E8F5E9] px-2 py-0.5 text-[10.5px] font-bold text-[#2E7D32]" title={a.completionNote || undefined}>Done{a.completionNote ? " 📝" : ""}</span>
                       : <span className="rounded-full bg-[#E3F2FD] px-2 py-0.5 text-[10.5px] font-bold text-[#1565C0]">Open</span>}
                   </td>
                   <td className="px-4 py-3 text-right">
                     {a.status === "DONE"
                       ? <button type="button" onClick={() => reopen(a.id)} className="rounded-md bg-[#F5F5F5] px-2.5 py-1 text-[11px] font-semibold text-[#616161] hover:bg-[#EEE]">Reopen</button>
-                      : <button type="button" onClick={() => markDone(a.id)} className="rounded-md bg-[#2E7D32] px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-[#1B5E20]">Mark done</button>}
+                      : <button type="button" onClick={() => { setCompleting(a); setDoneNote(""); }} className="rounded-md bg-[#2E7D32] px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-[#1B5E20]">Mark done</button>}
                   </td>
                 </tr>
               ))}
@@ -165,6 +170,29 @@ export function ActionRegistry({
           onCreated={() => { setAdding(false); router.refresh(); }}
         />
       )}
+
+      {/* Mark done — capture an optional completion note */}
+      <Modal open={completing != null} onClose={() => setCompleting(null)} className="max-w-[480px]">
+        {completing && (
+          <>
+            <ModalHeader eyebrow="Complete action" eyebrowColor="#2E7D32" title={`Mark done — ${completing.farmerName}`} onClose={() => setCompleting(null)} />
+            <div className="px-5 py-4">
+              <div className="mb-3 text-[12.5px] text-[#616161]">
+                {completing.reason || "Follow-up"} · due {fmtDate(completing.dueDate)}
+                {completing.storeName ? ` · ${completing.storeName}` : ""}
+              </div>
+              <label className="text-[11px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Completion note (optional)</label>
+              <textarea value={doneNote} onChange={(e) => setDoneNote(e.target.value)} rows={3} autoFocus
+                placeholder="What was the outcome? (saved with the action)"
+                className="mt-1 w-full resize-y rounded-[10px] border border-[#E0E0E0] px-3.5 py-2.5 text-[13px] outline-none focus:border-[#2E7D32]" />
+              <div className="mt-4 flex items-center justify-end gap-2">
+                <button type="button" onClick={() => setCompleting(null)} className="rounded-[10px] border border-[#E0E0E0] px-4 py-2 text-[12.5px] font-semibold text-[#616161] hover:bg-[#F5F5F5]">Cancel</button>
+                <button type="button" onClick={confirmDone} className="rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[12.5px] font-semibold text-white hover:bg-[#1B5E20]">Mark done</button>
+              </div>
+            </div>
+          </>
+        )}
+      </Modal>
     </div>
   );
 }

@@ -63,6 +63,18 @@ export async function listActions(): Promise<ActionVM[]> {
   }
 }
 
+/** Count of overdue (OPEN + past-due) actions in the viewer's scope — for the sidebar badge. */
+export async function countOverdueActions(): Promise<number> {
+  const scope = await getScope();
+  const sw = actionScope(scope);
+  if (sw === "none") return 0;
+  try {
+    return await prisma.action.count({ where: { AND: [sw ?? {}, { status: "OPEN", dueDate: { lt: startOfToday() } }] } });
+  } catch {
+    return 0;
+  }
+}
+
 /** Farmer search for the manual "New action" form — scoped, by name or mobile. */
 export async function searchFarmersForAction(q: string): Promise<FarmerPick[]> {
   const term = q.trim();
