@@ -142,8 +142,7 @@ export async function submitVisitAction(
             issues: form.currentProblem,
             ...(lead ? { leadStatus: lead as never } : {}),
             ...(officerStore ? { storeId: officerStore.id, storeCode: officerStore.code } : {}),
-            // No sales yet → a lead (compute-segments keeps this until they buy).
-            valueSegment: "REGULAR",
+            // No sales yet → a lead with no value tier (compute-segments keeps this until they buy).
             lifecycleSegment: "LEAD",
             source: "REAL",
           },

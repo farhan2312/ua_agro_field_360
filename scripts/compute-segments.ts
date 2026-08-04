@@ -182,9 +182,9 @@ async function main() {
   process.stdout.write("\n");
 
   // REAL farmers with NO purchase history at all (no sale line, no bill) → LEAD (in the system,
-  // never bought). Forces lifecycle=LEAD (overrides any stale value); value defaults to Regular (₹0).
+  // never bought). Leads have NO value tier — a value tier is meaningless before any purchase.
   const filled = await prisma.$executeRawUnsafe(
-    `UPDATE "Farmer" f SET "lifecycleSegment"='LEAD', "valueSegment"=COALESCE("valueSegment",'REGULAR')
+    `UPDATE "Farmer" f SET "lifecycleSegment"='LEAD', "valueSegment"=NULL
      WHERE f."source"='REAL'
        AND NOT EXISTS (SELECT 1 FROM "SaleLine" sl WHERE sl."farmerId" = f.id)
        AND NOT EXISTS (SELECT 1 FROM "Sale" s WHERE s."farmerId" = f.id)`,
