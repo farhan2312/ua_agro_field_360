@@ -13,6 +13,7 @@ import { StoreAssignmentCard } from "@/components/farmer-detail/StoreAssignmentC
 import { KpiMini } from "@/components/farmer-detail/KpiMini";
 import { SalesHistoryCard } from "@/components/farmer-detail/SalesHistoryCard";
 import { VisitReportsCard } from "@/components/farmer-detail/VisitReportsCard";
+import { CropHistoryCard } from "@/components/farmer-detail/CropHistoryCard";
 import { ConcernsCard } from "@/components/farmer-detail/ConcernsCard";
 import type { FarmerDetail } from "@/components/farmer-detail/types";
 
@@ -59,6 +60,22 @@ function buildDetail(
     followUp: fmtFollowUp(v.followUpDate),
   }));
 
+  // Crop history from visits — one entry per visit that recorded a crop, newest first, flagging
+  // where the primary crop changed from the previous (older) visit (e.g. Potato → Paddy).
+  const cropEntries = farmer.visits
+    .map((v) => {
+      const primary = (v.mainCrop || v.crops?.[0] || "").trim();
+      const others = (v.crops ?? []).filter((c) => c && c.trim() && c !== primary);
+      return { id: v.id, date: v.date ?? "", primary, others, season: v.season ?? "", by: v.officerName ?? "", sortKey: v.visitedAt ? v.visitedAt.getTime() : v.id };
+    })
+    .filter((e) => e.primary || e.others.length)
+    .sort((a, b) => b.sortKey - a.sortKey);
+  const cropHistory = cropEntries.map((e, i) => {
+    const older = cropEntries[i + 1];
+    const changedFrom = older && older.primary && older.primary !== e.primary ? older.primary : null;
+    return { id: e.id, date: e.date, primary: e.primary, others: e.others, season: e.season, by: e.by, changedFrom };
+  });
+
   // Lifetime value on BASE price (used everywhere) + the GST-inclusive total (display only).
   const ltvBaseNum = farmer.sales.reduce((sum, s) => sum + (baseBySale.get(s.id) ?? 0), 0);
   const ltvGstNum = farmer.sales.reduce((sum, s) => sum + (s.amountNum ?? 0), 0);
@@ -101,6 +118,7 @@ function buildDetail(
     store,
     sales,
     visitLog,
+    cropHistory,
     concerns: farmer.concerns ?? "",
     issues: farmer.issues ?? [],
   };
@@ -207,6 +225,12 @@ export default async function FarmerDetailPage({
         <SalesHistoryCard sales={detail.sales} />
         <VisitReportsCard visits={detail.visitLog} count={detail.visitCount} />
       </div>
+
+      {detail.cropHistory.length > 0 && (
+        <div className="mb-[18px]">
+          <CropHistoryCard history={detail.cropHistory} />
+        </div>
+      )}
 
       {(detail.concerns || detail.issues.length > 0 || isAdmin) && (
         <ConcernsCard concerns={detail.concerns} issues={detail.issues} />

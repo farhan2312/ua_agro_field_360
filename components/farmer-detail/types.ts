@@ -22,6 +22,16 @@ export interface FarmerVisitLog {
   followUp: string;
 }
 
+export interface CropHistoryEntry {
+  id: number;
+  date: string;        // display date of the visit
+  primary: string;     // primary crop recorded on that visit
+  others: string[];    // secondary crops
+  season: string;
+  by: string;          // officer who logged it
+  changedFrom: string | null; // previous visit's primary crop, if it changed at this visit
+}
+
 export interface StoreOfficer {
   name: string;
 }
@@ -62,6 +72,7 @@ export interface FarmerDetail {
   store: FarmerStore | null;
   sales: FarmerSale[];
   visitLog: FarmerVisitLog[];
+  cropHistory: CropHistoryEntry[]; // primary crop per visit, newest first, with change flags
   concerns: string;
   issues: string[];
 }
