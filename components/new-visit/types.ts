@@ -40,6 +40,7 @@ export interface VisitForm {
   // Step 4 — Review & Submit
   leadStatus: string;
   followUpDate: string;
+  followUpReason: string;
   /** Captured photos, as JPEG data-URL strings. */
   photos: string[];
   /** Recorded voice notes, as audio data-URL strings. */
@@ -85,6 +86,7 @@ export const INITIAL_FORM: VisitForm = {
   whatsappAvail: false,
   leadStatus: "New",
   followUpDate: "",
+  followUpReason: "",
   photos: [],
   voiceNotes: [],
   otherText: {},

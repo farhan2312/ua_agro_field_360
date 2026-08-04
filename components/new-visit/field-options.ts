@@ -9,6 +9,7 @@
  * `FIELD` keys map 1:1 to the `FieldOption.fieldName` values produced by the
  * data import (scripts/import-data.ts).
  */
+import { FOLLOWUP_REASONS } from "@/lib/action-constants";
 
 export const FIELD = {
   landHolding: "Land Holding",
@@ -27,6 +28,7 @@ export const FIELD = {
   annualExpense: "Annual Agriculture Expense",
   purchaseFreq: "Purchase Frequency",
   leadStatus: "Lead Status",
+  followUpReason: "Follow-up Reason",
 } as const;
 
 export type FieldKey = keyof typeof FIELD;
@@ -97,6 +99,7 @@ export const FALLBACK_OPTIONS: Record<FieldKey, string[]> = {
     "New", "Contacted", "Recommendation Given",
     "Follow-up Scheduled", "Converted", "Lost",
   ],
+  followUpReason: [...FOLLOWUP_REASONS],
 };
 
 /** Step-0 geo fallbacks (used only when the DB has no farmers to derive from). */

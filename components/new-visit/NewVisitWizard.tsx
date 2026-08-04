@@ -906,15 +906,33 @@ export function NewVisitWizard({
           <div>
             <div className="mb-5 text-[18px] font-bold text-[#1A1C1A]">Review & Submit</div>
 
-            <div className="mb-6">
-              <FieldLabel>Follow-up Date</FieldLabel>
-              <input
-                type="date"
-                value={form.followUpDate}
-                onChange={onText("followUpDate")}
-                className="rounded-[10px] border-[1.5px] border-[#E0E0E0] px-3.5 py-[11px] text-[14px] outline-none focus:border-[#2E7D32]"
-              />
+            <div className="mb-2 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <FieldLabel>Next Follow-up Date</FieldLabel>
+                <input
+                  type="date"
+                  value={form.followUpDate}
+                  onChange={onText("followUpDate")}
+                  className="w-full rounded-[10px] border-[1.5px] border-[#E0E0E0] px-3.5 py-[11px] text-[14px] outline-none focus:border-[#2E7D32]"
+                />
+              </div>
+              <div>
+                <FieldLabel>Follow-up Reason</FieldLabel>
+                <select
+                  value={form.followUpReason}
+                  onChange={onText("followUpReason")}
+                  className="w-full rounded-[10px] border-[1.5px] border-[#E0E0E0] bg-white px-3.5 py-[11px] text-[14px] outline-none focus:border-[#2E7D32]"
+                >
+                  <option value="">Select a reason…</option>
+                  {options.followUpReason.map((r) => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
+              </div>
             </div>
+            <p className="mb-6 text-[12px] text-[#9E9E9E]">
+              Setting a date adds a follow-up to the Action Registry, assigned to your store.
+            </p>
 
             <div className="mb-5 rounded-xl bg-[#F5F7F5] p-[18px]">
               <div className="mb-3 text-[13px] font-bold text-[#1A1C1A]">Visit Summary</div>

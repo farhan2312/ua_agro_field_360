@@ -75,6 +75,7 @@ model Store {
   employees Employee[]
   visits    Visit[]
   saleLines SaleLine[]
+  actions   Action[]
 
   @@index([zone])
 }
@@ -180,6 +181,7 @@ model Farmer {
   sales     Sale[]
   saleLines SaleLine[]
   visits    Visit[]
+  actions   Action[]
 
   @@index([storeCode])
   @@index([storeId])
@@ -424,6 +426,7 @@ model Visit {
   date        String? // display string
   visitedAt   DateTime?
   followUpDate String? // next-visit date the officer set on the form (ISO "YYYY-MM-DD")
+  followUpReason String? // why the next follow-up is needed (drives the Action registry)
   purpose     String?
   notes       String?
   type        String? // visit type / reason
@@ -470,11 +473,41 @@ model Visit {
 
   source    DataSource @default(DEMO)
   createdAt DateTime   @default(now())
+  actions   Action[]
 
   @@index([farmerId])
   @@index([storeId])
   @@index([visitedAt]) // recent-visit sorts (dashboard, visit repository)
   @@index([officerName]) // per-officer dashboard + repository filters
+}
+
+// ─────────────────── Action Registry (follow-ups) ───────────────────
+// A follow-up task assigned to a store, tagged to a farmer, with a due date. Auto-created from a
+// visit's Next Follow-up Date, or added manually on the registry. Scoped like the rest (store/region).
+model Action {
+  id             Int       @id @default(autoincrement())
+  farmerId       Int?
+  farmer         Farmer?   @relation(fields: [farmerId], references: [id])
+  storeId        Int? // assigned store (the filling officer's store)
+  store          Store?    @relation(fields: [storeId], references: [id])
+  visitId        Int? // source visit (null for a manually-added action)
+  visit          Visit?    @relation(fields: [visitId], references: [id])
+  reason         String? // follow-up reason (from the visit form dropdown / manual)
+  note           String?
+  dueDate        DateTime // the Next Follow-up Date
+  status         String    @default("OPEN") // OPEN | DONE
+  createdByName  String?
+  createdByCode  String?
+  completedByName String?
+  completedByCode String?
+  completedAt    DateTime?
+  completionNote String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt @default(now())
+
+  @@index([storeId, status])
+  @@index([status, dueDate])
+  @@index([farmerId])
 }
 
 // ─────────────────────────── Action Planner ───────────────────────────

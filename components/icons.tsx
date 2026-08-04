@@ -23,6 +23,12 @@ export const NavIcons: Record<NavId, (p: P) => JSX.Element> = {
       <rect x="2" y="12" width="10" height="3" rx="1" opacity="0.5" />
     </svg>
   ),
+  actionRegistry: ({ className }) => (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <rect x="3" y="2.5" width="12" height="13" rx="2" /><path d="M6.2 6.2h5.6M6.2 9h5.6M6.2 11.8h3.4" />
+      <path d="M12.8 12.2l1.2 1.2 2.2-2.4" />
+    </svg>
+  ),
   farmers: ({ className }) => (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor" className={className}>
       <circle cx="9" cy="5" r="3.5" /><path d="M2 16.5c0-3.87 3.13-7 7-7s7 3.13 7 7" />

@@ -165,6 +165,7 @@ export async function submitVisitAction(
           year: "numeric",
         }),
         followUpDate: form.followUpDate || null, // next-visit date the officer set on Review & Submit
+        followUpReason: form.followUpReason || null,
         purpose: form.visitPurpose || null,
         type: form.visitPurpose || null,
         visitMode: form.visitMode,
@@ -212,6 +213,26 @@ export async function submitVisitAction(
     });
     newVisitId = createdVisit.id;
 
+    // A follow-up date creates an Action for the filling officer's store, tagged to this farmer +
+    // visit, due on that date. It shows up in the Action Registry (scoped by store/district).
+    if (form.followUpDate && farmerId) {
+      const due = new Date(`${form.followUpDate}T00:00:00Z`);
+      if (!Number.isNaN(due.getTime())) {
+        await prisma.action.create({
+          data: {
+            farmerId,
+            storeId: officerStore?.id ?? visitStoreId, // the filling officer's store
+            visitId: createdVisit.id,
+            reason: form.followUpReason || null,
+            dueDate: due,
+            status: "OPEN",
+            createdByName: actor.name,
+            createdByCode: actor.code,
+          },
+        });
+      }
+    }
+
     // Denormalise this visit's crops + pests onto the farmer so the visit-lens crop filter and
     // the Target Pest filter update live. Both are kept SEGREGATED by source (mirrors crops):
     //   visitCropTags / visitPestTags = from visits · salesCropTags / salesPestTags = from sales
@@ -246,6 +267,7 @@ export async function submitVisitAction(
 
     revalidatePath("/visits");
     revalidatePath("/analytics");
+    revalidatePath("/action-registry");
     // Farmer count / segment summary may have changed — bust the cached stats.
     revalidateTag(STATS_TAG);
   } catch {
