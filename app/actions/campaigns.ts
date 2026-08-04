@@ -11,8 +11,10 @@ import {
   hasConditions, type ClusterCriteria,
 } from "@/lib/cluster-rules";
 import { getScope, canManage, getActor, farmerScopeWhere } from "@/lib/scope";
+import { getSession } from "@/lib/auth";
 import { cropLabel } from "@/lib/crops";
 import { buildWorkbookB64 } from "@/lib/xlsx-export";
+import { sendSms, zapConfig } from "@/lib/zapsms";
 
 const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
 async function requireManager(): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -235,6 +237,7 @@ export async function deleteProject(id: number): Promise<{ ok: boolean; error?: 
 export interface CommTemplatePatch {
   name?: string; language?: string; promoType?: string; segment?: string;
   medium?: string; offer?: string; timingLabel?: string; template?: string;
+  dltTemplateId?: string | null;
 }
 
 export async function saveCommTemplate(id: number, patch: CommTemplatePatch): Promise<{ ok: boolean; error?: string }> {
@@ -846,4 +849,120 @@ export async function getCampaignTracker(campaignId: number): Promise<CampaignTr
     },
     upliftByValue, upliftByLifecycle,
   };
+}
+
+/* ─────────────────────────── Campaign SMS (ZapSMS) ─────────────────────────── */
+
+/** Whether the SMS gateway is configured (all env keys present). */
+export async function smsConfigStatus(): Promise<{ ready: boolean; missing: string[] }> {
+  const { ready, missing } = zapConfig();
+  return { ready, missing };
+}
+
+/** Fill the comm-plan placeholders with real data; return the text + which slots had no data. */
+function fillSmsTemplate(
+  template: string,
+  d: { name?: string | null; gap?: number | null; lastItem?: string | null; store?: string | null; number?: string | null; date?: string | null },
+): { text: string; missing: string[] } {
+  const first = (d.name ?? "").trim().split(/\s+/)[0] || "";
+  const gapStr = d.gap != null && d.gap > 0 ? Math.round(d.gap).toLocaleString("en-IN") : "";
+  const tokens: { re: RegExp; val: string; label: string }[] = [
+    { re: /\[Naam\]/g, val: first, label: "farmer name" },
+    { re: /\[gap\]/g, val: gapStr, label: "amount to reach HNI" },
+    { re: /\[last item\]/gi, val: (d.lastItem ?? "").trim(), label: "last purchased item" },
+    { re: /\[Store name\]/gi, val: (d.store ?? "").trim(), label: "store name" },
+    { re: /\[number\]/gi, val: (d.number ?? "").trim(), label: "contact number" },
+    { re: /\[date\]/gi, val: (d.date ?? "").trim(), label: "date" },
+  ];
+  let text = template;
+  const missing: string[] = [];
+  for (const t of tokens) {
+    const present = new RegExp(t.re.source, t.re.flags.replace("g", "")).test(text);
+    if (!present) continue;
+    if (t.val) text = text.replace(t.re, t.val);
+    else if (!missing.includes(t.label)) missing.push(t.label);
+  }
+  return { text, missing };
+}
+
+export interface SmsPrepared {
+  ok: boolean; error?: string;
+  message?: string; missing?: string[]; mobile?: string | null;
+  templateName?: string; smsReady?: boolean; dltReady?: boolean;
+}
+
+/** Load a member + comm template, fill placeholders from real data, and report anything missing. */
+export async function prepareCampaignSms(input: { memberId: number; commTemplateId: number }): Promise<SmsPrepared> {
+  const scope = await memberScopeWhere();
+  if (scope === "none") return { ok: false, error: "Not authorised." };
+  try {
+    const member = await prisma.campaignMember.findFirst({
+      where: { id: input.memberId, ...(scope ?? {}) },
+      select: { farmerId: true, campaign: { select: { endDate: true } } },
+    });
+    if (!member) return { ok: false, error: "Member not found or out of your scope." };
+    const tpl = await prisma.commTemplate.findUnique({ where: { id: input.commTemplateId }, select: { name: true, template: true, dltTemplateId: true } });
+    if (!tpl) return { ok: false, error: "Comm plan not found." };
+
+    const [farmer, lastSale, actorMobileRow] = await Promise.all([
+      prisma.farmer.findUnique({ where: { id: member.farmerId }, select: { name: true, mobile: true, hniGap: true, store: { select: { name: true } } } }),
+      prisma.sale.findFirst({ where: { farmerId: member.farmerId, soldAt: { not: null } }, orderBy: { soldAt: "desc" }, select: { items: true } }),
+      (async () => { const s = await getSession(); return s ? prisma.user.findUnique({ where: { id: s.userId }, select: { mobile: true } }) : null; })(),
+    ]);
+    const store = farmer?.store?.name ? shortStoreName(farmer.store.name) : "";
+    const dateStr = member.campaign?.endDate ? new Date(member.campaign.endDate).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "";
+    const { text, missing } = fillSmsTemplate(tpl.template, {
+      name: farmer?.name, gap: farmer?.hniGap, lastItem: (lastSale?.items ?? "").split(" · ")[0], store, number: actorMobileRow?.mobile, date: dateStr,
+    });
+    return { ok: true, message: text, missing, mobile: farmer?.mobile ?? null, templateName: tpl.name, smsReady: zapConfig().ready, dltReady: !!tpl.dltTemplateId };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not prepare the message." };
+  }
+}
+
+/** Send the SMS via ZapSMS, log it, and mark the member reached-by-SMS on success. */
+export async function sendCampaignSms(input: { memberId: number; commTemplateId?: number | null; message: string }): Promise<{ ok: boolean; error?: string; providerId?: string }> {
+  const scope = await memberScopeWhere();
+  if (scope === "none") return { ok: false, error: "Not authorised." };
+  const message = (input.message ?? "").trim();
+  if (!message) return { ok: false, error: "Message is empty." };
+  try {
+    const member = await prisma.campaignMember.findFirst({
+      where: { id: input.memberId, ...(scope ?? {}) },
+      select: { id: true, farmerId: true, campaignId: true, mediums: true },
+    });
+    if (!member) return { ok: false, error: "Member not found or out of your scope." };
+    const farmer = await prisma.farmer.findUnique({ where: { id: member.farmerId }, select: { mobile: true } });
+    const mobile = farmer?.mobile ?? "";
+    if (!mobile) return { ok: false, error: "No phone number on file for this farmer." };
+
+    const tpl = input.commTemplateId
+      ? await prisma.commTemplate.findUnique({ where: { id: input.commTemplateId }, select: { dltTemplateId: true } })
+      : null;
+
+    const actor = await getActor();
+    const { cfg } = zapConfig();
+    const res = await sendSms({ mobile, message, dltTemplateId: tpl?.dltTemplateId ?? null });
+
+    await prisma.smsLog.create({
+      data: {
+        farmerId: member.farmerId, campaignId: member.campaignId, memberId: member.id, mobile,
+        senderId: cfg.senderId || null, dltTemplateId: tpl?.dltTemplateId ?? null, message,
+        ok: res.ok, providerId: res.providerId ?? null, status: res.status ?? null, error: res.error ?? null,
+        sentByName: actor.name, sentByCode: actor.code,
+      },
+    });
+
+    if (res.ok) {
+      const mediums = member.mediums.includes("SMS") ? member.mediums : [...member.mediums.filter((m) => m !== "UNREACHABLE"), "SMS"];
+      await prisma.campaignMember.update({
+        where: { id: member.id },
+        data: { reached: true, reachedAt: new Date(), mediums, reachedBy: actor.name, reachedByCode: actor.code },
+      });
+      revalidatePath("/campaigns");
+    }
+    return { ok: res.ok, error: res.error, providerId: res.providerId };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Send failed." };
+  }
 }

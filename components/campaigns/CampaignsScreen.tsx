@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Modal, ModalHeader } from "@/components/interactive";
 import { segMeta, fillTemplate, SEGMENT_COLUMNS, VALUE_TITLE, LIFECYCLE_TITLE } from "@/lib/campaign-segments";
+import { SmsSender } from "./SmsSender";
 import { cropLabel } from "@/lib/crops";
 import { inr } from "@/lib/format";
 import {
@@ -21,6 +22,7 @@ export interface PestOption { pest: string; count: number }
 export interface CommTemplateVM {
   id: number; name: string; language: string; promoType: string;
   segment: string; priority: number; medium: string; offer: string; timingLabel: string; template: string;
+  dltTemplateId?: string | null;
 }
 export interface StoreLite { id: number; name: string }
 
@@ -67,11 +69,13 @@ function CommPlanForm({ draft, setDraft }: { draft: CommTemplateVM; setDraft: (t
         <input className={`${input} w-full`} value={draft.offer} onChange={(e) => setDraft({ ...draft, offer: e.target.value })} placeholder="Offer" /></div>
       <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Message ([Naam] [gap] [last item] [Store] [number] [date])</label>
         <textarea className={`${input} min-h-[90px] w-full`} value={draft.template} onChange={(e) => setDraft({ ...draft, template: e.target.value })} /></div>
+      <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">DLT Template ID <span className="normal-case text-[#BDBDBD]">(required for SMS delivery in India)</span></label>
+        <input className={`${input} w-full`} value={draft.dltTemplateId ?? ""} onChange={(e) => setDraft({ ...draft, dltTemplateId: e.target.value })} placeholder="e.g. 1207xxxxxxxxxxxxx" /></div>
     </div>
   );
 }
 
-const EMPTY_PLAN: CommTemplateVM = { id: 0, name: "", language: "hi", promoType: "General", segment: "REGULAR", priority: 5, medium: "WhatsApp", offer: "", timingLabel: "", template: "" };
+const EMPTY_PLAN: CommTemplateVM = { id: 0, name: "", language: "hi", promoType: "General", segment: "REGULAR", priority: 5, medium: "WhatsApp", offer: "", timingLabel: "", template: "", dltTemplateId: "" };
 
 function CommPlanTab({ templates }: { templates: CommTemplateVM[] }) {
   const [rows, setRows] = useState(templates);
@@ -94,7 +98,7 @@ function CommPlanTab({ templates }: { templates: CommTemplateVM[] }) {
     if (!draft) return;
     setErr(null);
     start(async () => {
-      const patch = { name: draft.name, language: draft.language, promoType: draft.promoType, segment: draft.segment, medium: draft.medium, offer: draft.offer, timingLabel: draft.timingLabel, template: draft.template };
+      const patch = { name: draft.name, language: draft.language, promoType: draft.promoType, segment: draft.segment, medium: draft.medium, offer: draft.offer, timingLabel: draft.timingLabel, template: draft.template, dltTemplateId: (draft.dltTemplateId ?? "").trim() || null };
       if (adding) {
         const res = await createCommTemplate(patch);
         if (res.ok && res.id != null) { setRows((r) => [...r, { ...draft, id: res.id! }]); setAdding(false); setDraft(null); }
@@ -382,7 +386,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
                       </div>
                     </div>
                     {focusMode
-                      ? <FocusMode members={members} crops={crops} onChange={patchMember} onExit={() => setFocusMode(false)} onCurrent={setFocusCurrent} />
+                      ? <FocusMode members={members} crops={crops} onChange={patchMember} onExit={() => setFocusMode(false)} onCurrent={setFocusCurrent} commPlans={membersOf?.commPlans ?? []} templates={templates} />
                       : (() => {
                           // List view: un-contacted first, reached/unreachable sink to the bottom.
                           const sorted = [...members].sort((a, b) => rank(a) - rank(b));
@@ -393,7 +397,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
                           return (
                             <>
                               <div className="flex flex-col gap-2.5">
-                                {slice.map((m) => <MemberRow key={m.id} member={m} crops={crops} onChange={patchMember} />)}
+                                {slice.map((m) => <MemberRow key={m.id} member={m} crops={crops} onChange={patchMember} commPlans={membersOf?.commPlans ?? []} templates={templates} />)}
                               </div>
                               {pages > 1 && (
                                 <div className="mt-3 flex items-center justify-center gap-3">
@@ -524,17 +528,23 @@ export function StatusBadge({ member }: { member: CampaignMemberVM }) {
 }
 
 /** Prominent, tappable phone number — what officers dial from. */
-function PhoneBlock({ mobile, big }: { mobile: string | null; big?: boolean }) {
+function PhoneBlock({ mobile, big, extra }: { mobile: string | null; big?: boolean; extra?: ReactNode }) {
   const d10 = digits10(mobile);
-  if (!d10) return <div className="rounded-[12px] bg-[#FFF8E1] px-4 py-3 text-[13px] font-semibold text-[#8D6E00]">No phone number on file</div>;
+  if (!d10) return (
+    <div className="flex flex-wrap items-center gap-3 rounded-[12px] bg-[#FFF8E1] px-4 py-3">
+      <span className="text-[13px] font-semibold text-[#8D6E00]">No phone number on file</span>
+      {extra && <div className="ml-auto flex gap-2">{extra}</div>}
+    </div>
+  );
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-[12px] bg-[#F5F8FF] px-4 py-3">
       <a href={`tel:+91${d10}`} className={`flex items-center gap-2 font-bold leading-none tracking-wide text-[#0D47A1] hover:underline ${big ? "text-[32px]" : "text-[24px]"}`}>
         <span className={big ? "text-[24px]" : "text-[18px]"}>📞</span>{mobile}
       </a>
-      <div className="ml-auto flex gap-2">
+      <div className="ml-auto flex flex-wrap gap-2">
         <a href={`tel:+91${d10}`} className={`rounded-[10px] bg-[#1565C0] font-bold text-white ${big ? "px-5 py-3 text-[14px]" : "px-4 py-2.5 text-[13px]"}`}>Call</a>
         <a href={`https://wa.me/91${d10}`} target="_blank" rel="noopener noreferrer" className={`rounded-[10px] bg-[#1B8A4B] font-bold text-white ${big ? "px-5 py-3 text-[14px]" : "px-4 py-2.5 text-[13px]"}`}>WhatsApp</a>
+        {extra}
       </div>
     </div>
   );
@@ -753,7 +763,7 @@ export function useOutreach(member: CampaignMemberVM) {
   return { mediums, comment, response, crop, setComment, setCrop, toggleChannel, pickResponse, dirty, cropMissing, patch, optimistic };
 }
 
-function MemberRow({ member, crops, onChange }: { member: CampaignMemberVM; crops: CropOption[]; onChange: (m: CampaignMemberVM) => void }) {
+function MemberRow({ member, crops, onChange, commPlans, templates }: { member: CampaignMemberVM; crops: CropOption[]; onChange: (m: CampaignMemberVM) => void; commPlans: string[]; templates: CommTemplateVM[] }) {
   const o = useOutreach(member);
   const [pending, start] = useTransition();
   const [saved, setSaved] = useState(false);
@@ -779,7 +789,7 @@ function MemberRow({ member, crops, onChange }: { member: CampaignMemberVM; crop
         <ResponseBadge member={member} />
         <span className="text-[12px] text-[#9E9E9E]">{member.village ?? "—"}{member.store ? ` · ${member.store}` : ""}</span>
       </div>
-      <div className="mb-3"><PhoneBlock mobile={member.mobile} /></div>
+      <div className="mb-3"><PhoneBlock mobile={member.mobile} extra={<SmsSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} />} /></div>
       <div className="flex flex-col gap-2.5 rounded-[12px] border border-[#EAEAEA] bg-[#FBFBFB] p-3">
         <ResponsePicker value={o.response} crop={o.crop} crops={crops} onPick={o.pickResponse} onCrop={o.setCrop} disabled={pending} />
         <ApproachPicker value={o.mediums} onToggle={o.toggleChannel} disabled={pending} />
@@ -798,7 +808,7 @@ function MemberRow({ member, crops, onChange }: { member: CampaignMemberVM; crop
 }
 
 /* ── Focus mode: one farmer at a time (queue: head = current; skip requeues; back re-opens last) ── */
-function FocusMode({ members, crops, onChange, onExit, onCurrent }: { members: CampaignMemberVM[]; crops: CropOption[]; onChange: (m: CampaignMemberVM) => void; onExit: () => void; onCurrent?: (m: CampaignMemberVM | null) => void }) {
+function FocusMode({ members, crops, onChange, onExit, onCurrent, commPlans, templates }: { members: CampaignMemberVM[]; crops: CropOption[]; onChange: (m: CampaignMemberVM) => void; onExit: () => void; onCurrent?: (m: CampaignMemberVM | null) => void; commPlans: string[]; templates: CommTemplateVM[] }) {
   const [queue, setQueue] = useState<number[]>(() => members.filter((m) => statusOf(m) === "pending").map((m) => m.id));
   const [history, setHistory] = useState<number[]>([]);
   const currentId = queue[0];
@@ -814,7 +824,7 @@ function FocusMode({ members, crops, onChange, onExit, onCurrent }: { members: C
   return (
     <div className="mt-3">
       {member
-        ? <FocusCard key={member.id} member={member} crops={crops} onChange={onChange} onHandled={handled} onSkip={skip} onBack={history.length ? back : undefined} remaining={queue.length} />
+        ? <FocusCard key={member.id} member={member} crops={crops} onChange={onChange} onHandled={handled} onSkip={skip} onBack={history.length ? back : undefined} remaining={queue.length} commPlans={commPlans} templates={templates} />
         : (
           <div className="rounded-[18px] border-2 border-[#A5D6A7] bg-[#F6FFF4] p-10 text-center">
             <div className="text-[20px] font-bold text-[#1B5E20]">All done 🎉</div>
@@ -826,8 +836,8 @@ function FocusMode({ members, crops, onChange, onExit, onCurrent }: { members: C
   );
 }
 
-function FocusCard({ member, crops, onChange, onHandled, onSkip, onBack, remaining }: {
-  member: CampaignMemberVM; crops: CropOption[]; onChange: (m: CampaignMemberVM) => void; onHandled: () => void; onSkip: () => void; onBack?: () => void; remaining: number;
+function FocusCard({ member, crops, onChange, onHandled, onSkip, onBack, remaining, commPlans, templates }: {
+  member: CampaignMemberVM; crops: CropOption[]; onChange: (m: CampaignMemberVM) => void; onHandled: () => void; onSkip: () => void; onBack?: () => void; remaining: number; commPlans: string[]; templates: CommTemplateVM[];
 }) {
   const o = useOutreach(member);
   const [pending, start] = useTransition();
@@ -856,7 +866,7 @@ function FocusCard({ member, crops, onChange, onHandled, onSkip, onBack, remaini
         <span className="ml-auto rounded-full bg-[#F5F7F5] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#616161]">{remaining} left</span>
       </div>
       <div className="mb-3 text-[12.5px] text-[#9E9E9E]">{member.village ?? "—"}{member.store ? ` · ${member.store}` : ""}</div>
-      <div className="mb-4"><PhoneBlock mobile={member.mobile} big /></div>
+      <div className="mb-4"><PhoneBlock mobile={member.mobile} big extra={<SmsSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} onSent={onHandled} big />} /></div>
       <div className="flex flex-col gap-3 rounded-[12px] border border-[#EAEAEA] bg-[#FBFBFB] p-3.5">
         <ResponsePicker value={o.response} crop={o.crop} crops={crops} onPick={o.pickResponse} onCrop={o.setCrop} disabled={pending} />
         <ApproachPicker value={o.mediums} onToggle={o.toggleChannel} disabled={pending} />

@@ -409,10 +409,34 @@ model CommTemplate {
   offer       String
   timingLabel String
   template    String   @db.Text // message with [Naam] [gap] [last item] [Store] [number] [date] slots
+  dltTemplateId String? // ZapSMS/DLT approved Template ID for this message (required for real delivery)
   active      Boolean  @default(true)
   updatedAt   DateTime @updatedAt
 
   @@index([segment])
+}
+
+/// One SMS send attempt (via the ZapSMS gateway) — the outreach audit log.
+model SmsLog {
+  id            Int      @id @default(autoincrement())
+  farmerId      Int?
+  campaignId    Int?
+  memberId      Int?
+  mobile        String
+  senderId      String?
+  dltTemplateId String?
+  message       String   @db.Text
+  ok            Boolean  @default(false)
+  providerId    String? // gateway message id, when returned
+  status        String? // gateway status / short result
+  error         String?
+  sentByName    String?
+  sentByCode    String?
+  createdAt     DateTime @default(now())
+
+  @@index([campaignId])
+  @@index([farmerId])
+  @@index([createdAt])
 }
 
 // A Visit doubles as the per-farmer visit log entry and the Visit Repository record.
