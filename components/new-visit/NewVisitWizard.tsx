@@ -206,18 +206,28 @@ export function NewVisitWizard({
           setFoundFarmer(fa);
           setEditingFarmerId(fa.id);
           setLookupStatus("found");
-          // Autofill the identity fields from the existing record (editable).
+          // Autofill identity + the last visit's descriptive fields (all editable). Media,
+          // follow-up and visit purpose are left blank — they belong to this new visit.
+          const p = res.prefill ?? {};
           setForm((prev) => {
-            const nextMain = fa.mainCrop || prev.mainCrop;
+            const merged = { ...prev, ...p };
+            const nextMain = fa.mainCrop || p.mainCrop || prev.mainCrop;
             return {
-              ...prev,
+              ...merged,
               name: fa.name || prev.name,
               village: fa.village || prev.village,
               district: fa.district || prev.district,
               mainCrop: nextMain,
               // Keep the CropSelector invariant: main is never also an "other".
-              crop: prev.crop.filter((c) => c !== nextMain),
+              crop: (p.crop ?? prev.crop).filter((c) => c !== nextMain),
               leadStatus: fa.leadStatusLabel || prev.leadStatus,
+              serviceDetail: { ...prev.serviceDetail, ...(p.serviceDetail ?? {}) },
+              // Never carry event-only fields between visits.
+              visitPurpose: prev.visitPurpose,
+              photos: prev.photos,
+              voiceNotes: prev.voiceNotes,
+              followUpDate: prev.followUpDate,
+              followUpReason: prev.followUpReason,
             };
           });
         } else {

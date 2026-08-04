@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import type { RecCard } from "@/lib/visit-types";
 
@@ -120,6 +121,22 @@ export function VisitDetailView({ data }: { data: VisitDetailData }) {
     data.contractFarming ||
     data.dairyServices ||
     data.whatsappAvail;
+
+  // In-page photo lightbox (no new tab). The thumbnails are already decoded, so it opens instantly.
+  const [photoIdx, setPhotoIdx] = useState<number | null>(null);
+  const nPhotos = data.photos.length;
+  const stepPhoto = useCallback((d: number) => setPhotoIdx((i) => (i == null ? i : (i + d + nPhotos) % nPhotos)), [nPhotos]);
+  useEffect(() => {
+    if (photoIdx == null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPhotoIdx(null);
+      else if (e.key === "ArrowRight") stepPhoto(1);
+      else if (e.key === "ArrowLeft") stepPhoto(-1);
+    };
+    window.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = ""; };
+  }, [photoIdx, stepPhoto]);
 
   return (
     <div className="motion-safe:animate-[fadeUp_0.4s_ease-out]">
@@ -396,16 +413,16 @@ export function VisitDetailView({ data }: { data: VisitDetailData }) {
           <SectionTitle>Photos ({data.photos.length})</SectionTitle>
           <div className="flex flex-wrap gap-2.5">
             {data.photos.map((src, i) => (
-              <a
+              <button
                 key={i}
-                href={src}
-                target="_blank"
-                rel="noreferrer"
-                className="block h-24 w-24 overflow-hidden rounded-[10px] border border-[#E0E0E0]"
+                type="button"
+                onClick={() => setPhotoIdx(i)}
+                className="block h-24 w-24 overflow-hidden rounded-[10px] border border-[#E0E0E0] transition-transform hover:scale-[1.03]"
+                aria-label={`Open photo ${i + 1}`}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={src} alt={`Visit photo ${i + 1}`} className="h-full w-full object-cover" />
-              </a>
+              </button>
             ))}
           </div>
         </div>
@@ -421,6 +438,55 @@ export function VisitDetailView({ data }: { data: VisitDetailData }) {
               <audio key={i} src={src} controls className="w-full" />
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Photo lightbox — in-page popup, blurred backdrop, X to close, arrows for multiple */}
+      {photoIdx != null && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          onClick={() => setPhotoIdx(null)}
+        >
+          <button
+            type="button"
+            onClick={() => setPhotoIdx(null)}
+            className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-[22px] leading-none text-white hover:bg-white/30"
+            aria-label="Close"
+          >
+            ×
+          </button>
+          {nPhotos > 1 && (
+            <>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); stepPhoto(-1); }}
+                className="absolute left-3 top-1/2 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-white/15 text-[26px] text-white hover:bg-white/30 sm:left-6"
+                aria-label="Previous photo"
+              >
+                ‹
+              </button>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); stepPhoto(1); }}
+                className="absolute right-3 top-1/2 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-white/15 text-[26px] text-white hover:bg-white/30 sm:right-6"
+                aria-label="Next photo"
+              >
+                ›
+              </button>
+            </>
+          )}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={data.photos[photoIdx]}
+            alt={`Visit photo ${photoIdx + 1}`}
+            onClick={(e) => e.stopPropagation()}
+            className="max-h-[86vh] max-w-[92vw] rounded-[12px] object-contain shadow-2xl"
+          />
+          {nPhotos > 1 && (
+            <div className="absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-3 py-1 text-[12px] font-semibold text-white">
+              {photoIdx + 1} / {nPhotos}
+            </div>
+          )}
         </div>
       )}
     </div>

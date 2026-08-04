@@ -50,12 +50,55 @@ export async function lookupFarmerByMobile(mobile: string): Promise<FarmerLookup
       prisma.visit.findFirst({
         where: { farmerId: f.id },
         orderBy: [{ visitedAt: "desc" }, { id: "desc" }],
-        select: { date: true },
+        select: {
+          date: true, landHoldingUnit: true, soilType: true, soilTesting: true, waterSource: true,
+          mainCrop: true, crops: true, otherCrops: true, pests: true, season: true, cropInsured: true,
+          products: true, productRequired: true, currentProblem: true, cropRisk: true, dangerZone: true,
+          annualExpense: true, purchaseFreq: true, otherShops: true,
+          fpoMember: true, fpoName: true, contractFarming: true, contractDetail: true,
+          dairyServices: true, dairyDetail: true, whatsappAvail: true, whatsappNumber: true,
+        },
       }),
     ]);
 
+    // Prefill the next visit with the last visit's descriptive fields (editable). Media, follow-up
+    // and visit purpose are intentionally left blank — they belong to each individual visit.
+    const prefill = lastVisit
+      ? {
+          landHolding: lastVisit.landHoldingUnit ?? "",
+          soil: lastVisit.soilType ?? "",
+          soilTesting: lastVisit.soilTesting ?? "",
+          waterSource: lastVisit.waterSource ?? [],
+          mainCrop: lastVisit.mainCrop ?? "",
+          crop: lastVisit.crops ?? [],
+          otherCrops: lastVisit.otherCrops ?? "",
+          pests: lastVisit.pests ?? [],
+          season: lastVisit.season ?? "",
+          cropInsured: lastVisit.cropInsured ?? false,
+          product: lastVisit.products ?? [],
+          productRequired: lastVisit.productRequired ?? [],
+          currentProblem: lastVisit.currentProblem ?? [],
+          cropRisk: lastVisit.cropRisk ?? [],
+          dangerZone: lastVisit.dangerZone ?? [],
+          annualExpense: lastVisit.annualExpense ?? "",
+          purchaseFreq: lastVisit.purchaseFreq ?? "",
+          otherShops: lastVisit.otherShops ?? "",
+          fpoMember: lastVisit.fpoMember ?? false,
+          contractFarming: lastVisit.contractFarming ?? false,
+          dairyServices: lastVisit.dairyServices ?? false,
+          whatsappAvail: lastVisit.whatsappAvail ?? false,
+          serviceDetail: {
+            fpoMember: lastVisit.fpoName ?? "",
+            contractFarming: lastVisit.contractDetail ?? "",
+            dairyServices: lastVisit.dairyDetail ?? "",
+            whatsappAvail: lastVisit.whatsappNumber ?? "",
+          },
+        }
+      : undefined;
+
     return {
       found: true,
+      prefill,
       farmer: {
         id: f.id,
         name: f.name,

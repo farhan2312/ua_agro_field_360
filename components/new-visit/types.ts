@@ -109,4 +109,7 @@ export interface FarmerLookup {
 export interface FarmerLookupResult {
   found: boolean;
   farmer?: FarmerLookup;
+  /** Descriptive fields from the farmer's most recent visit, to prefill the form (editable).
+   *  Excludes event-only fields (photos, voice notes, follow-up, visit purpose). */
+  prefill?: Partial<VisitForm>;
 }
