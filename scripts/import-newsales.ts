@@ -159,7 +159,7 @@ async function main() {
     const st = storeByName.get(normName(b.store));
     return {
       code: `FARMQ127-${b.mobile}`,
-      name: b.name || "New Customer",
+      name: (b.name || "New Customer").toUpperCase(), // name cleansing — store farmers in CAPS
       mobile: b.mobile,
       village: b.village || null,
       district: st?.zone || null,
