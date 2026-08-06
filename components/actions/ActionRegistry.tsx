@@ -4,7 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Modal, ModalHeader } from "@/components/interactive";
-import { completeAction, reopenAction, createAction, searchFarmersForAction } from "@/app/actions/action-registry";
+import { completeAction, reopenAction, createAction, searchFarmersForAction, addActionComment, getActionComments, type ActionCommentVM } from "@/app/actions/action-registry";
 import { FOLLOWUP_REASONS, type ActionVM, type FarmerPick } from "@/lib/action-constants";
 import type { RoleKey } from "@/lib/roles";
 
@@ -41,7 +41,28 @@ export function ActionRegistry({
   const [adding, setAdding] = useState(false);
   const [completing, setCompleting] = useState<ActionVM | null>(null);
   const [doneNote, setDoneNote] = useState("");
+  const [commentsFor, setCommentsFor] = useState<ActionVM | null>(null);
+  const [comments, setComments] = useState<ActionCommentVM[]>([]);
+  const [loadingComments, setLoadingComments] = useState(false);
+  const [newComment, setNewComment] = useState("");
+  const [savingComment, startComment] = useTransition();
   const [, start] = useTransition();
+
+  const openComments = (a: ActionVM) => {
+    setCommentsFor(a); setComments([]); setNewComment(""); setLoadingComments(true);
+    getActionComments(a.id).then((c) => { setComments(c); setLoadingComments(false); });
+  };
+  const submitComment = () => {
+    if (!commentsFor || !newComment.trim()) return;
+    const id = commentsFor.id, text = newComment.trim();
+    startComment(async () => {
+      const r = await addActionComment(id, text);
+      if (!r.ok) { alert(r.error ?? "Failed."); return; }
+      if (r.comment) setComments((cs) => [r.comment!, ...cs]);
+      setNewComment("");
+      setActions((as) => as.map((a) => a.id === id ? { ...a, workingComment: text } : a));
+    });
+  };
 
   const isOfficer = role === "officer";
 
@@ -152,9 +173,12 @@ export function ActionRegistry({
                       : <span className="rounded-full bg-[#E3F2FD] px-2 py-0.5 text-[10.5px] font-bold text-[#1565C0]">Open</span>}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    {a.status === "DONE"
-                      ? <button type="button" onClick={() => reopen(a.id)} className="rounded-md bg-[#F5F5F5] px-2.5 py-1 text-[11px] font-semibold text-[#616161] hover:bg-[#EEE]">Reopen</button>
-                      : <button type="button" onClick={() => { setCompleting(a); setDoneNote(""); }} className="rounded-md bg-[#2E7D32] px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-[#1B5E20]">Mark done</button>}
+                    <div className="flex items-center justify-end gap-1.5">
+                      <button type="button" onClick={() => openComments(a)} title="Working comments" className="rounded-md bg-[#F3E5F5] px-2 py-1 text-[11px] font-semibold text-[#6A1B9A] hover:bg-[#E9D5F0]">✎ Edit{a.workingComment ? " 💬" : ""}</button>
+                      {a.status === "DONE"
+                        ? <button type="button" onClick={() => reopen(a.id)} className="rounded-md bg-[#F5F5F5] px-2.5 py-1 text-[11px] font-semibold text-[#616161] hover:bg-[#EEE]">Reopen</button>
+                        : <button type="button" onClick={() => { setCompleting(a); setDoneNote(""); }} className="rounded-md bg-[#2E7D32] px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-[#1B5E20]">Mark done</button>}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -181,13 +205,56 @@ export function ActionRegistry({
                 {completing.reason || "Follow-up"} · due {fmtDate(completing.dueDate)}
                 {completing.storeName ? ` · ${completing.storeName}` : ""}
               </div>
-              <label className="text-[11px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Completion note (optional)</label>
+              <label className="text-[11px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Closing summary <span className="text-[#C62828]">*</span></label>
               <textarea value={doneNote} onChange={(e) => setDoneNote(e.target.value)} rows={3} autoFocus
-                placeholder="What was the outcome? (saved with the action)"
+                placeholder="Required — what was the outcome / how was it resolved?"
                 className="mt-1 w-full resize-y rounded-[10px] border border-[#E0E0E0] px-3.5 py-2.5 text-[13px] outline-none focus:border-[#2E7D32]" />
               <div className="mt-4 flex items-center justify-end gap-2">
                 <button type="button" onClick={() => setCompleting(null)} className="rounded-[10px] border border-[#E0E0E0] px-4 py-2 text-[12.5px] font-semibold text-[#616161] hover:bg-[#F5F5F5]">Cancel</button>
-                <button type="button" onClick={confirmDone} className="rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[12.5px] font-semibold text-white hover:bg-[#1B5E20]">Mark done</button>
+                <button type="button" onClick={confirmDone} disabled={!doneNote.trim()}
+                  className="rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[12.5px] font-semibold text-white hover:bg-[#1B5E20] disabled:opacity-50">Mark done</button>
+              </div>
+            </div>
+          </>
+        )}
+      </Modal>
+
+      {/* Working comments — add + full audit history (who / when) */}
+      <Modal open={commentsFor != null} onClose={() => setCommentsFor(null)} className="max-w-[560px]">
+        {commentsFor && (
+          <>
+            <ModalHeader eyebrow="Working comments" eyebrowColor="#6A1B9A" title={commentsFor.farmerName} onClose={() => setCommentsFor(null)} />
+            <div className="max-h-[76vh] overflow-y-auto px-5 py-4">
+              <div className="mb-3 text-[12.5px] text-[#616161]">
+                {commentsFor.reason || "Follow-up"} · due {fmtDate(commentsFor.dueDate)}{commentsFor.storeName ? ` · ${commentsFor.storeName}` : ""}
+              </div>
+              <label className="text-[11px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Add a comment</label>
+              <textarea value={newComment} onChange={(e) => setNewComment(e.target.value)} rows={2} autoFocus
+                placeholder="Progress note, next step, what you're waiting on…"
+                className="mt-1 w-full resize-y rounded-[10px] border border-[#E0E0E0] px-3.5 py-2.5 text-[13px] outline-none focus:border-[#6A1B9A]" />
+              <div className="mt-2 flex justify-end">
+                <button type="button" onClick={submitComment} disabled={savingComment || !newComment.trim()}
+                  className="rounded-[10px] bg-[#6A1B9A] px-4 py-2 text-[12.5px] font-semibold text-white hover:bg-[#4A148C] disabled:opacity-50">
+                  {savingComment ? "Adding…" : "Add comment"}
+                </button>
+              </div>
+
+              <div className="mt-4 border-t border-[#F0F0F0] pt-3">
+                <div className="mb-2 text-[10.5px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">History</div>
+                {loadingComments ? <div className="py-4 text-center text-[12px] text-[#9E9E9E]">Loading…</div>
+                  : comments.length === 0 ? <div className="py-4 text-[12.5px] text-[#9E9E9E]">No comments yet.</div>
+                  : (
+                    <ol className="flex flex-col gap-2.5">
+                      {comments.map((c) => (
+                        <li key={c.id} className="rounded-[10px] border border-[#EEE] bg-[#FAFAFA] px-3 py-2">
+                          <div className="whitespace-pre-wrap text-[13px] leading-relaxed text-[#333]">{c.text}</div>
+                          <div className="mt-1 text-[10.5px] text-[#9E9E9E]">
+                            {c.author || "—"}{c.authorCode ? ` (${c.authorCode})` : ""} · {new Date(c.at).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true })}
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
               </div>
             </div>
           </>

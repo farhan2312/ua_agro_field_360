@@ -30,6 +30,7 @@ export interface ActionVM {
   visitId: number | null;
   reason: string;
   note: string;
+  workingComment: string; // latest working comment (full history via getActionComments)
   dueDate: string;   // ISO "YYYY-MM-DD"
   status: string;    // OPEN | DONE
   overdue: boolean;  // OPEN and past due

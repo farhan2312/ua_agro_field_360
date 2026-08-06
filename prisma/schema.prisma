@@ -451,6 +451,7 @@ model Visit {
   visitedAt   DateTime?
   followUpDate String? // next-visit date the officer set on the form (ISO "YYYY-MM-DD")
   followUpReason String? // why the next follow-up is needed (drives the Action registry)
+  followUpComment String? // officer's note for the follow-up (mandatory when a date is set)
   purpose     String?
   notes       String?
   type        String? // visit type / reason
@@ -518,6 +519,7 @@ model Action {
   visit          Visit?    @relation(fields: [visitId], references: [id])
   reason         String? // follow-up reason (from the visit form dropdown / manual)
   note           String?
+  workingComment String? // latest working comment (progress note); full history in ActionComment
   dueDate        DateTime // the Next Follow-up Date
   status         String    @default("OPEN") // OPEN | DONE
   createdByName  String?
@@ -525,13 +527,27 @@ model Action {
   completedByName String?
   completedByCode String?
   completedAt    DateTime?
-  completionNote String?
+  completionNote String? // closing summary — mandatory when marking done
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt @default(now())
+  comments       ActionComment[]
 
   @@index([storeId, status])
   @@index([status, dueDate])
   @@index([farmerId])
+}
+
+/// Audit log of an action's working comments — every edit is a row (who + when + text).
+model ActionComment {
+  id         Int      @id @default(autoincrement())
+  actionId   Int
+  action     Action   @relation(fields: [actionId], references: [id], onDelete: Cascade)
+  text       String   @db.Text
+  authorName String?
+  authorCode String?
+  createdAt  DateTime @default(now())
+
+  @@index([actionId])
 }
 
 // ─────────────────────────── Action Planner ───────────────────────────

@@ -31,6 +31,7 @@ function toVM(a: Prisma.ActionGetPayload<{ include: { farmer: { select: { id: tr
     visitId: a.visitId,
     reason: a.reason ?? "",
     note: a.note ?? "",
+    workingComment: a.workingComment ?? "",
     dueDate: due.toISOString().slice(0, 10),
     status: a.status,
     overdue: a.status === "OPEN" && due < startOfToday(),
@@ -134,23 +135,65 @@ export async function createAction(input: {
   }
 }
 
-/** Mark an action done (with an optional completion note). */
+/** Mark an action done — a closing summary is required. */
 export async function completeAction(id: number, note?: string): Promise<{ ok: boolean; error?: string }> {
   const scope = await getScope();
   if (actionScope(scope) === "none") return { ok: false, error: "Not authorised." };
+  const closing = (note ?? "").trim();
+  if (!closing) return { ok: false, error: "A closing summary is required to mark an action done." };
   const actor = await getActor();
   try {
     await prisma.action.update({
       where: { id },
       data: {
         status: "DONE", completedAt: new Date(), completedByName: actor.name, completedByCode: actor.code,
-        completionNote: (note ?? "").trim().slice(0, 2000) || null,
+        completionNote: closing.slice(0, 2000),
       },
     });
     revalidatePath("/action-registry");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Update failed." };
+  }
+}
+
+export interface ActionCommentVM { id: number; text: string; author: string; authorCode: string; at: string }
+
+/** The working-comment audit history for one action (newest first). */
+export async function getActionComments(id: number): Promise<ActionCommentVM[]> {
+  const scope = await getScope();
+  const sw = actionScope(scope);
+  if (sw === "none") return [];
+  try {
+    // Confirm the action is in scope before exposing its comments.
+    const inScope = await prisma.action.findFirst({ where: { AND: [{ id }, sw ?? {}] }, select: { id: true } });
+    if (!inScope) return [];
+    const rows = await prisma.actionComment.findMany({ where: { actionId: id }, orderBy: { id: "desc" }, take: 200 });
+    return rows.map((c) => ({ id: c.id, text: c.text, author: c.authorName ?? "", authorCode: c.authorCode ?? "", at: c.createdAt.toISOString() }));
+  } catch {
+    return [];
+  }
+}
+
+/** Add a working comment to an action (append-only audit log; also updates the latest for the list). */
+export async function addActionComment(id: number, text: string): Promise<{ ok: boolean; error?: string; comment?: ActionCommentVM }> {
+  const scope = await getScope();
+  const sw = actionScope(scope);
+  if (sw === "none") return { ok: false, error: "Not authorised." };
+  const t = (text ?? "").trim();
+  if (!t) return { ok: false, error: "Comment is empty." };
+  try {
+    const inScope = await prisma.action.findFirst({ where: { AND: [{ id }, sw ?? {}] }, select: { id: true } });
+    if (!inScope) return { ok: false, error: "Action not found or out of your scope." };
+    const actor = await getActor();
+    const c = await prisma.actionComment.create({
+      data: { actionId: id, text: t.slice(0, 2000), authorName: actor.name, authorCode: actor.code },
+    });
+    await prisma.action.update({ where: { id }, data: { workingComment: t.slice(0, 2000) } });
+    revalidatePath("/action-registry");
+    return { ok: true, comment: { id: c.id, text: c.text, author: c.authorName ?? "", authorCode: c.authorCode ?? "", at: c.createdAt.toISOString() } };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not add the comment." };
   }
 }
 

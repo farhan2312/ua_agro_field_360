@@ -325,6 +325,9 @@ export function NewVisitWizard({
     (!visitReasonRequired || form.visitPurpose.trim() !== "");
   // Land & Crops step: at least one crop is mandatory (main crop or a crop chip).
   const step1Valid = form.mainCrop.trim() !== "" || form.crop.length > 0;
+  // Review step: if a follow-up date is set, the reason + comment are mandatory (they drive the action).
+  const followUpSet = form.followUpDate.trim() !== "";
+  const followUpValid = !followUpSet || (form.followUpReason.trim() !== "" && form.followUpComment.trim() !== "");
 
   const next = () => setStep((s) => Math.min(s + 1, 4));
   const prev = () => setStep((s) => Math.max(s - 1, 0));
@@ -357,6 +360,10 @@ export function NewVisitWizard({
         `Attachments are too large (~${Math.round(mediaBytes / (1024 * 1024))} MB). ` +
           `Remove some photos or voice notes and try again.`,
       );
+      return;
+    }
+    if (form.followUpDate.trim() && (!form.followUpReason.trim() || !form.followUpComment.trim())) {
+      setSubmitError("Add a follow-up reason and comment — they're required when a follow-up date is set.");
       return;
     }
     setSubmitError(null);
@@ -927,11 +934,11 @@ export function NewVisitWizard({
                 />
               </div>
               <div>
-                <FieldLabel>Follow-up Reason</FieldLabel>
+                <FieldLabel>Follow-up Reason{followUpSet && <span className="text-[#C62828]"> *</span>}</FieldLabel>
                 <select
                   value={form.followUpReason}
                   onChange={onText("followUpReason")}
-                  className="w-full rounded-[10px] border-[1.5px] border-[#E0E0E0] bg-white px-3.5 py-[11px] text-[14px] outline-none focus:border-[#2E7D32]"
+                  className={`w-full rounded-[10px] border-[1.5px] bg-white px-3.5 py-[11px] text-[14px] outline-none focus:border-[#2E7D32] ${followUpSet && !form.followUpReason.trim() ? "border-[#EF9A9A]" : "border-[#E0E0E0]"}`}
                 >
                   <option value="">Select a reason…</option>
                   {options.followUpReason.map((r) => (
@@ -940,8 +947,20 @@ export function NewVisitWizard({
                 </select>
               </div>
             </div>
+            <div className="mb-2">
+              <FieldLabel>Follow-up Comments{followUpSet && <span className="text-[#C62828]"> *</span>}</FieldLabel>
+              <textarea
+                value={form.followUpComment}
+                onChange={(e) => setForm((f) => ({ ...f, followUpComment: e.target.value }))}
+                rows={3}
+                placeholder={followUpSet ? "What is the next visit for? Add context for the action…" : "Only needed if you set a follow-up date"}
+                className={`w-full resize-y rounded-[10px] border-[1.5px] px-3.5 py-[11px] text-[14px] outline-none focus:border-[#2E7D32] ${followUpSet && !form.followUpComment.trim() ? "border-[#EF9A9A]" : "border-[#E0E0E0]"}`}
+              />
+            </div>
             <p className="mb-6 text-[12px] text-[#9E9E9E]">
-              Setting a date adds a follow-up to the Action Registry, assigned to your store.
+              {followUpSet
+                ? "A reason and comment are required — this creates a follow-up in the Action Registry, assigned to your store."
+                : "Set a date to schedule a follow-up in the Action Registry."}
             </p>
 
             <div className="mb-5 rounded-xl bg-[#F5F7F5] p-[18px]">
@@ -1018,8 +1037,9 @@ export function NewVisitWizard({
             <button
               type="button"
               onClick={submit}
-              disabled={pending}
-              className="rounded-[10px] bg-[#2E7D32] px-8 py-[11px] text-[13px] font-semibold text-white hover:bg-[#1B5E20] active:scale-[0.97] disabled:opacity-60"
+              disabled={pending || !followUpValid}
+              title={!followUpValid ? "Add a follow-up reason and comment (required when a follow-up date is set)." : undefined}
+              className="rounded-[10px] bg-[#2E7D32] px-8 py-[11px] text-[13px] font-semibold text-white hover:bg-[#1B5E20] active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {pending ? "Submitting…" : "Submit Visit"}
             </button>

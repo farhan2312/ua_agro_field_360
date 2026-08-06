@@ -209,6 +209,7 @@ export async function submitVisitAction(
         }),
         followUpDate: form.followUpDate || null, // next-visit date the officer set on Review & Submit
         followUpReason: form.followUpReason || null,
+        followUpComment: form.followUpComment || null,
         purpose: form.visitPurpose || null,
         type: form.visitPurpose || null,
         visitMode: form.visitMode,
@@ -267,6 +268,7 @@ export async function submitVisitAction(
             storeId: officerStore?.id ?? visitStoreId, // the filling officer's store
             visitId: createdVisit.id,
             reason: form.followUpReason || null,
+            note: form.followUpComment || null, // the officer's follow-up comment → the action's note
             dueDate: due,
             status: "OPEN",
             createdByName: actor.name,

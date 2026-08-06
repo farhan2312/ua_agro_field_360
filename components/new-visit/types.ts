@@ -41,6 +41,7 @@ export interface VisitForm {
   leadStatus: string;
   followUpDate: string;
   followUpReason: string;
+  followUpComment: string;
   /** Captured photos, as JPEG data-URL strings. */
   photos: string[];
   /** Recorded voice notes, as audio data-URL strings. */
@@ -87,6 +88,7 @@ export const INITIAL_FORM: VisitForm = {
   leadStatus: "New",
   followUpDate: "",
   followUpReason: "",
+  followUpComment: "",
   photos: [],
   voiceNotes: [],
   otherText: {},
