@@ -6,6 +6,11 @@ import { Modal, ModalHeader } from "@/components/interactive";
 import { createBug } from "@/app/actions/bugs";
 import { BUG_SEVERITIES } from "@/lib/bug-constants";
 
+const KIND_TABS: { key: string; label: string; color: string }[] = [
+  { key: "BUG", label: "🐞 Bug", color: "#C62828" },
+  { key: "FEATURE", label: "💡 Feature", color: "#6A1B9A" },
+];
+
 const SEV_LABEL: Record<string, string> = { LOW: "Low", MEDIUM: "Medium", HIGH: "High", CRITICAL: "Critical" };
 
 /** Downscale an image file to a small JPEG data URL (max 1200px, ~0.7 quality) so it fits the action body. */
@@ -35,6 +40,7 @@ export function ReportBugButton() {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [desc, setDesc] = useState("");
+  const [kind, setKind] = useState("BUG");
   const [severity, setSeverity] = useState("MEDIUM");
   const [page, setPage] = useState("");
   const [shot, setShot] = useState<string | null>(null);
@@ -44,7 +50,7 @@ export function ReportBugButton() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const openModal = () => {
-    setTitle(""); setDesc(""); setSeverity("MEDIUM"); setPage(pathname || ""); setShot(null);
+    setTitle(""); setDesc(""); setKind("BUG"); setSeverity("MEDIUM"); setPage(pathname || ""); setShot(null);
     setErr(null); setDone(false); setOpen(true);
   };
 
@@ -80,7 +86,7 @@ export function ReportBugButton() {
   const submit = async () => {
     if (!title.trim()) { setErr("Please add a short title."); return; }
     setBusy(true); setErr(null);
-    const res = await createBug({ title, description: desc, severity, page, screenshot: shot });
+    const res = await createBug({ title, description: desc, kind, severity, page, screenshot: shot });
     setBusy(false);
     if (res.ok) { setDone(true); setTimeout(() => setOpen(false), 1100); }
     else setErr(res.error ?? "Could not submit.");
@@ -113,6 +119,18 @@ export function ReportBugButton() {
             </div>
           ) : (
             <div className="flex flex-col gap-3.5">
+              <div>
+                <span className={label}>Type</span>
+                <div className="inline-flex rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] p-1">
+                  {KIND_TABS.map((k) => (
+                    <button key={k.key} type="button" onClick={() => setKind(k.key)}
+                      className="rounded-[8px] px-4 py-1.5 text-[12.5px] font-semibold transition-colors"
+                      style={{ background: kind === k.key ? "#fff" : "transparent", color: kind === k.key ? k.color : "#9E9E9E", boxShadow: kind === k.key ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}>
+                      {k.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div>
                 <span className={label}>Title <span className="text-[#C62828]">*</span></span>
                 <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Short summary of the issue" className={input} autoFocus />
@@ -156,7 +174,7 @@ export function ReportBugButton() {
                   className="rounded-[10px] border border-[#E0E0E0] bg-white px-[18px] py-[9px] text-[13px] font-semibold text-[#616161] hover:bg-[#F5F5F5] disabled:opacity-50">Cancel</button>
                 <button type="button" onClick={submit} disabled={busy}
                   className="rounded-[10px] bg-[#1E3A5F] px-[22px] py-[9px] text-[13px] font-semibold text-white hover:bg-[#152C49] disabled:opacity-50">
-                  {busy ? "Submitting…" : "Submit Bug"}</button>
+                  {busy ? "Submitting…" : kind === "FEATURE" ? "Submit Feature" : "Submit Bug"}</button>
               </div>
             </div>
           )}

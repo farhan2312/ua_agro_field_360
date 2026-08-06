@@ -2,8 +2,13 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
-import { updateBugStatus, getBugScreenshot, deleteBug, saveBugResolution } from "@/app/actions/bugs";
-import { BUG_SEVERITIES, type BugVM } from "@/lib/bug-constants";
+import { updateBugStatus, getBugScreenshot, deleteBug, saveBugResolution, updateBugKind } from "@/app/actions/bugs";
+import { BUG_SEVERITIES, BUG_KINDS, type BugVM } from "@/lib/bug-constants";
+
+const KIND_META: Record<string, { label: string; bg: string; c: string }> = {
+  BUG: { label: "🐞 Bug", bg: "#FDECEA", c: "#C62828" },
+  FEATURE: { label: "💡 Feature", bg: "#F3E5F5", c: "#6A1B9A" },
+};
 
 const COLUMNS: { key: string; label: string; color: string; hint: string }[] = [
   { key: "OPEN", label: "Open", color: "#1565C0", hint: "Not yet started" },
@@ -115,6 +120,9 @@ export function BugTracker({ bugs: initial }: { bugs: BugVM[] }) {
   // Change status from inside the detail window (reuses the optimistic move()).
   const setStatusIn = (status: string) => { if (open) { move(open.id, status); setOpen((o) => (o ? { ...o, status } : o)); } };
 
+  // Flip Bug ⇄ Feature from the detail window (sysadmin-only, enforced server-side).
+  const setKindIn = (kind: string) => { if (open) { patchBug(open.id, { kind }); updateBugKind(open.id, kind); } };
+
   // Save the resolution notes; optionally close the bug at the same time.
   const saveRes = (close: boolean) => {
     if (!open) return;
@@ -191,6 +199,7 @@ export function BugTracker({ bugs: initial }: { bugs: BugVM[] }) {
                         </div>
                         {b.description && <div className="mt-1 line-clamp-2 text-[11px] text-[#757575]">{b.description}</div>}
                         <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10.5px] text-[#9E9E9E]">
+                          <span className="rounded-full px-1.5 py-0.5 text-[9px] font-bold" style={{ background: KIND_META[b.kind]?.bg ?? "#EEE", color: KIND_META[b.kind]?.c ?? "#616161" }}>{KIND_META[b.kind]?.label ?? b.kind}</span>
                           <span>{b.reporter}</span><span>·</span><span>{ago(b.createdAt)}</span>
                           {b.page && <><span>·</span><span className="truncate max-w-[120px]" title={b.page}>{b.page}</span></>}
                           {b.resolution && <span title="Has resolution notes">📝</span>}
@@ -275,6 +284,18 @@ export function BugTracker({ bugs: initial }: { bugs: BugVM[] }) {
 
                 {/* Status + Resolution */}
                 <div className="mt-5 border-t border-[#F0F0F0] pt-4">
+                  <div className="mb-3 flex items-center gap-2">
+                    <span className="text-[10.5px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Type</span>
+                    <div className="inline-flex rounded-[8px] border border-[#E0E0E0] bg-[#F5F7F5] p-0.5">
+                      {BUG_KINDS.map((k) => (
+                        <button key={k} type="button" onClick={() => setKindIn(k)}
+                          className="rounded-[6px] px-3 py-1 text-[11.5px] font-semibold transition-colors"
+                          style={{ background: open.kind === k ? "#fff" : "transparent", color: open.kind === k ? (KIND_META[k]?.c ?? "#616161") : "#9E9E9E", boxShadow: open.kind === k ? "0 1px 2px rgba(0,0,0,0.12)" : "none" }}>
+                          {KIND_META[k]?.label ?? k}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <div className="flex items-center gap-2">
                     <span className="text-[10.5px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Status</span>
                     <select value={open.status} onChange={(e) => setStatusIn(e.target.value)}

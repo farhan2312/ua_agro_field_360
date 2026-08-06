@@ -4,16 +4,17 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth";
 import { getRole } from "@/lib/session";
-import { BUG_SEVERITIES, BUG_STATUSES, type BugVM } from "@/lib/bug-constants";
+import { BUG_SEVERITIES, BUG_STATUSES, BUG_KINDS, type BugVM } from "@/lib/bug-constants";
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 
 /** File a bug from the "Report a Bug" modal. Any signed-in user may report. */
 export async function createBug(input: {
-  title: string; description?: string; severity?: string; page?: string; screenshot?: string | null;
+  title: string; description?: string; kind?: string; severity?: string; page?: string; screenshot?: string | null;
 }): Promise<{ ok: boolean; error?: string }> {
   const title = (input.title ?? "").trim();
   if (!title) return { ok: false, error: "A title is required." };
+  const kind = BUG_KINDS.includes((input.kind ?? "") as never) ? input.kind! : "BUG";
   const severity = BUG_SEVERITIES.includes((input.severity ?? "") as never) ? input.severity! : "MEDIUM";
   // Guard against oversized screenshots (server-action body limit).
   const screenshot = input.screenshot && input.screenshot.length < 3_500_000 ? input.screenshot : null;
@@ -28,6 +29,7 @@ export async function createBug(input: {
       data: {
         title: title.slice(0, 200),
         description: (input.description ?? "").trim().slice(0, 4000) || null,
+        kind,
         severity,
         page: (input.page ?? "").slice(0, 200) || null,
         reporter, reporterCode, screenshot,
@@ -49,6 +51,7 @@ export async function listBugs(): Promise<BugVM[]> {
       id: b.id,
       title: b.title,
       description: b.description ?? "",
+      kind: b.kind,
       severity: b.severity,
       status: b.status,
       page: b.page ?? "",
@@ -106,6 +109,14 @@ export async function saveBugResolution(id: number, resolution: string, close: b
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Update failed." };
   }
+}
+
+/** Switch a report between Bug and Feature (sysadmin only). */
+export async function updateBugKind(id: number, kind: string): Promise<{ ok: boolean }> {
+  if ((await getRole()) !== "sysadmin") return { ok: false };
+  if (!BUG_KINDS.includes(kind as never)) return { ok: false };
+  try { await prisma.bug.update({ where: { id }, data: { kind } }); revalidatePath("/bugs"); return { ok: true }; }
+  catch { return { ok: false }; }
 }
 
 export async function updateBugSeverity(id: number, severity: string): Promise<{ ok: boolean }> {
