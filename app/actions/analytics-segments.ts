@@ -25,6 +25,8 @@ export interface WbFilters {
   spendTiers?: number[];     // indices into SPEND_TIERS — FY spend, match ANY range
   fyStarts?: number[];       // selected financial-year start years (Apr Y→Mar Y+1); drives the sales segmentation
   problems?: string[];       // visit lens — match ANY
+  visitFrom?: string;        // visit lens — visitedAt >= this date (ISO YYYY-MM-DD)
+  visitTo?: string;          // visit lens — visitedAt <= this date (ISO YYYY-MM-DD)
 }
 
 const num = (x: unknown) => (x == null ? 0 : Number(x));
@@ -161,6 +163,7 @@ export interface WbFacets {
   problems: { problem: string; count: number }[];
   spendTiers: string[];
   years: number[]; // distinct financial-year start years (Apr–Mar) for the crop-trend FY filter, role-scoped
+  visitMinDate: string | null; // earliest scoped visit date (ISO) — lower bound for the visit date slider
 }
 export async function getWorkbenchFacets(): Promise<WbFacets> {
   const { role, storeId, zone } = await getScope();
@@ -186,7 +189,7 @@ export async function getWorkbenchFacets(): Promise<WbFacets> {
     : isRM ? (zone != null ? Prisma.sql`AND EXISTS (SELECT 1 FROM "Store" st WHERE st.id = sl."storeId" AND st."zone" = ${zone})` : Prisma.sql`AND false`)
     : Prisma.empty;
 
-  const [stores, zoneRows, sc, vc, pt, pr, yr] = await Promise.all([
+  const [stores, zoneRows, sc, vc, pt, pr, yr, vmin] = await Promise.all([
     prisma.store.findMany({ where: storeWhere, orderBy: { name: "asc" }, select: { id: true, name: true } }),
     isOfficer || isRM
       ? Promise.resolve([] as { zone: string | null }[])
@@ -197,6 +200,7 @@ export async function getWorkbenchFacets(): Promise<WbFacets> {
     prisma.$queryRaw<{ problem: string; n: number }[]>(Prisma.sql`SELECT unnest(v."currentProblem") problem, COUNT(*)::int n FROM "Visit" v JOIN "Farmer" f ON f.id = v."farmerId" WHERE array_length(v."currentProblem",1) > 0 AND ${vScope} GROUP BY 1 ORDER BY 2 DESC LIMIT 40`),
     // Distinct financial-year START years (Apr–Mar): Jan–Mar count toward the previous FY.
     prisma.$queryRaw<{ y: number }[]>(Prisma.sql`SELECT DISTINCT (EXTRACT(YEAR FROM sl."soldAt")::int - CASE WHEN EXTRACT(MONTH FROM sl."soldAt") < 4 THEN 1 ELSE 0 END) y FROM "SaleLine" sl WHERE sl."soldAt" IS NOT NULL ${slScope} ORDER BY 1`),
+    prisma.$queryRaw<{ d: string | null }[]>(Prisma.sql`SELECT to_char(MIN(v."visitedAt"), 'YYYY-MM-DD') d FROM "Visit" v JOIN "Farmer" f ON f.id = v."farmerId" WHERE v."visitedAt" IS NOT NULL AND ${vScope}`),
   ]);
   const zones = isRM ? (zone != null ? [zone] : []) : isOfficer ? [] : zoneRows.map((z) => z.zone!).filter(Boolean);
   const abc = (a: string, b: string) => a.localeCompare(b); // filter option lists sorted A→Z for scan-ability
@@ -209,6 +213,7 @@ export async function getWorkbenchFacets(): Promise<WbFacets> {
     problems: pr.map((r) => ({ problem: r.problem, count: num(r.n) })).sort((a, b) => abc(a.problem, b.problem)),
     spendTiers: SPEND_TIERS.map((t) => t.label),
     years: yr.map((r) => num(r.y)).filter(Boolean),
+    visitMinDate: vmin[0]?.d ?? null,
   };
 }
 
@@ -404,7 +409,15 @@ export async function getVisitAnalytics(f: WbFilters): Promise<VisitAnalytics> {
   const scoped = await scopeFilters({ ...f, lens: "visit" });
   if (scoped === "none") return EMPTY_VISITS;
   const whereF = whereOf(scoped, "f");
-  const BASE = Prisma.sql`FROM "Visit" v JOIN "Farmer" f ON f.id = v."farmerId" ${whereF}`;
+  // Visit date range (buckets/slider). visitFrom/To are ISO dates; applied on Visit.visitedAt.
+  const dFrom = f.visitFrom && /^\d{4}-\d{2}-\d{2}$/.test(f.visitFrom) ? new Date(`${f.visitFrom}T00:00:00Z`) : null;
+  const dTo = f.visitTo && /^\d{4}-\d{2}-\d{2}$/.test(f.visitTo) ? new Date(`${f.visitTo}T23:59:59Z`) : null;
+  const dateSql = [
+    dFrom ? Prisma.sql`v."visitedAt" >= ${dFrom}` : null,
+    dTo ? Prisma.sql`v."visitedAt" <= ${dTo}` : null,
+  ].filter(Boolean) as Prisma.Sql[];
+  const dateClause = dateSql.length ? Prisma.sql`AND ${Prisma.join(dateSql, " AND ")}` : Prisma.empty;
+  const BASE = Prisma.sql`FROM "Visit" v JOIN "Farmer" f ON f.id = v."farmerId" ${whereF} ${dateClause}`;
   const bars = (rows: { x: string | null; n: number }[]): WbBar[] =>
     rows.filter((r) => r.x != null && r.x !== "").map((r) => ({ label: r.x as string, value: num(r.n) }));
 

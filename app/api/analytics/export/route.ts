@@ -23,6 +23,7 @@ interface ExportFilters {
   storeIds?: number[]; zones?: string[]; crops?: string[]; pests?: string[];
   valueSegments?: string[]; lifecycleSegments?: string[]; spendTiers?: number[]; fyStarts?: number[];
   problems?: string[]; // visit lens — Current Problem
+  visitFrom?: string; visitTo?: string; // visit lens — visitedAt range (ISO YYYY-MM-DD)
 }
 
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -76,6 +77,10 @@ export async function GET(req: NextRequest) {
     if (f.crops?.length) vc.push(Prisma.sql`f."visitCropTags" && ${f.crops}::text[]`);
     if (f.pests?.length) vc.push(Prisma.sql`f."pestTags" && ${f.pests}::text[]`);
     if (f.problems?.length) vc.push(Prisma.sql`v."currentProblem" && ${f.problems}::text[]`);
+    const vDateFrom = f.visitFrom && /^\d{4}-\d{2}-\d{2}$/.test(f.visitFrom) ? new Date(`${f.visitFrom}T00:00:00Z`) : null;
+    const vDateTo = f.visitTo && /^\d{4}-\d{2}-\d{2}$/.test(f.visitTo) ? new Date(`${f.visitTo}T23:59:59Z`) : null;
+    if (vDateFrom) vc.push(Prisma.sql`v."visitedAt" >= ${vDateFrom}`);
+    if (vDateTo) vc.push(Prisma.sql`v."visitedAt" <= ${vDateTo}`);
     const vWhere = vc.length ? Prisma.join(vc, " AND ") : Prisma.sql`TRUE`;
 
     const pass = new PassThrough();
@@ -138,6 +143,28 @@ export async function GET(req: NextRequest) {
           if (rows.length < BATCH) break;
         }
         await ws.commit();
+
+        // ── Sheet 2: filters applied ──
+        const nameById = new Map((await prisma.store.findMany({ select: { id: true, name: true } })).map((st) => [st.id, st.name.replace(/\s*\(.*?\)\s*/g, "").trim() || st.name]));
+        const list = <T,>(arr: T[] | undefined, fn: (x: T) => string, none: string) => (arr?.length ? arr.map(fn).join(", ") : none);
+        const scopeLabel = scope.role === "officer" ? "Your store only" : scope.role === "regional" ? "Your district only" : "All stores / districts";
+        const wf = wb.addWorksheet("Filters applied");
+        const fRows: (string | number)[][] = [
+          ["Filter", "Applied"],
+          ["Date range", f.visitFrom || f.visitTo ? `${f.visitFrom ?? "start"} to ${f.visitTo ?? "today"}` : "All dates"],
+          ["Stores", list(f.storeIds, (id) => nameById.get(id) ?? `#${id}`, "All stores")],
+          ["Districts", list(f.zones, (z) => String(z), "All districts")],
+          ["Crops (visit)", list(f.crops, cropLabel, "All crops")],
+          ["Pests / diseases", list(f.pests, tagLabel, "All")],
+          ["Current problem", list(f.problems, (p) => String(p), "Any")],
+          ["Access scope", scopeLabel],
+          ["", ""],
+          ["Visits in file", count],
+          ["Exported (UTC)", new Date().toISOString().slice(0, 19).replace("T", " ")],
+        ];
+        for (const r of fRows) wf.addRow(r).commit();
+        await wf.commit();
+
         await wb.commit();
       } catch (e) {
         pass.destroy(e as Error);

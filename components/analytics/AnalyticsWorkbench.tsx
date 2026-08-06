@@ -7,6 +7,7 @@ import { InfoTip } from "@/components/InfoTip";
 import { VALUE_SEGMENTS, LIFECYCLE_SEGMENTS, VALUE_TITLE, LIFECYCLE_TITLE, segMeta, segDef } from "@/lib/campaign-segments";
 import { cropLabel } from "@/lib/crops";
 import { tagLabel } from "@/lib/crop-pest";
+import { VisitDateFilter } from "./VisitDateFilter";
 import {
   getWorkbench, getWorkbenchCustomers, saveWorkbenchSegment, getCropTrend, getVisitAnalytics, getSalesRawData,
   type Lens, type WbFilters, type WbData, type WbFacets, type WbBar, type WbCustomer, type CropTrendPoint,
@@ -61,6 +62,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
         storeIds: filters.storeIds, zones: filters.zones, crops: filters.crops, pests: filters.pests,
         valueSegments: filters.valueSegments, lifecycleSegments: filters.lifecycleSegments,
         spendTiers: filters.spendTiers, fyStarts: filters.fyStarts, problems: filters.problems,
+        visitFrom: filters.visitFrom, visitTo: filters.visitTo,
       };
       const url = `/api/analytics/export?f=${encodeURIComponent(btoa(JSON.stringify(f)))}${type === "visits" ? "&type=visits" : ""}`;
       const res = await fetch(url);
@@ -100,7 +102,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
     });
   };
   const setLens = (lens: Lens) => apply({ lens, crops: undefined, valueSegments: undefined, lifecycleSegments: undefined, spendTiers: undefined, problems: undefined });
-  const clearAll = () => apply({ storeIds: undefined, zones: undefined, crops: undefined, pests: undefined, valueSegments: undefined, lifecycleSegments: undefined, spendTiers: undefined, problems: undefined, fyStarts: undefined });
+  const clearAll = () => apply({ storeIds: undefined, zones: undefined, crops: undefined, pests: undefined, valueSegments: undefined, lifecycleSegments: undefined, spendTiers: undefined, problems: undefined, fyStarts: undefined, visitFrom: undefined, visitTo: undefined });
 
   const openCell = (storeId: number | null, storeName: string, dim: SegDim | "cross", seg: string) => {
     setCell({ storeId, storeName, dim, seg }); setRows(null);
@@ -168,6 +170,11 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
         )}
         {activeFilterCount > 0 && <button type="button" onClick={clearAll} className="text-[12px] font-semibold text-[#C62828] hover:underline">Clear ({activeFilterCount})</button>}
       </div>
+
+      {filters.lens === "visit" && (
+        <VisitDateFilter minDate={facets.visitMinDate} from={filters.visitFrom} to={filters.visitTo}
+          onChange={(from, to) => apply({ visitFrom: from, visitTo: to })} />
+      )}
 
       {/* KPIs — sales: Total farmers + Value×Lifecycle cross-tab tree (flippable). Visit: the field metrics. */}
       {filters.lens === "sales" ? (

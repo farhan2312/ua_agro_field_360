@@ -29,7 +29,7 @@ export default async function AnalyticsPage() {
 
   let overview: ScopedDashboardData | null = null;
   let data = EMPTY;
-  let facets: WbFacets = { stores: [], zones: [], salesCrops: [], visitCrops: [], pests: [], problems: [], spendTiers: [], years: [] };
+  let facets: WbFacets = { stores: [], zones: [], salesCrops: [], visitCrops: [], pests: [], problems: [], spendTiers: [], years: [], visitMinDate: null };
   try {
     [overview, data, facets] = await Promise.all([loadOverview(scope), getWorkbench({ lens: "sales" }), getWorkbenchFacets()]);
   } catch {
