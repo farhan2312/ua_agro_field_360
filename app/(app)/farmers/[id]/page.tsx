@@ -76,6 +76,13 @@ function buildDetail(
     return { id: e.id, date: e.date, primary: e.primary, others: e.others, season: e.season, by: e.by, changedFrom };
   });
 
+  // Land + Soil sync from the most recent visit that recorded them (the visit form is the source of
+  // truth; the Farmer row is blank for sales/visit-created farmers). Falls back to the Farmer record.
+  const landVisit = farmer.visits.find((v) => v.landHoldingUnit);
+  const soilVisit = farmer.visits.find((v) => v.soilType);
+  const landStr = landVisit?.landHoldingUnit || (farmer.land != null ? `${farmer.land} acres` : "");
+  const soilStr = soilVisit?.soilType || "";
+
   // Lifetime value on BASE price (used everywhere) + the GST-inclusive total (display only).
   const ltvBaseNum = farmer.sales.reduce((sum, s) => sum + (baseBySale.get(s.id) ?? 0), 0);
   const ltvGstNum = farmer.sales.reduce((sum, s) => sum + (s.amountNum ?? 0), 0);
@@ -96,10 +103,10 @@ function buildDetail(
     village: farmer.village ?? "",
     district: farmer.district ?? "",
     mobile: farmer.mobile ?? "",
-    land: farmer.land != null ? String(farmer.land) : "",
+    land: landStr,
     crop: farmer.crop ?? "",
     season: "",
-    soil: "",
+    soil: soilStr,
     status: statusLabel,
     segment: vMeta?.label ?? "",
     segBg: vMeta?.bg ?? FALLBACK_SEG_BG,
