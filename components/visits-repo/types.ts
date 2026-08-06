@@ -5,12 +5,14 @@ export interface VisitRecord {
   village: string;
   district: string;
   crop: string;
+  land: string;
   officer: string;
   purpose: string;
   storeName: string;
   storeId: number | null;
   avBg: string;
   needsFollowup: boolean;
+  followUp: string; // display date of the scheduled follow-up, or ""
 }
 
 export interface VisitFilterState {

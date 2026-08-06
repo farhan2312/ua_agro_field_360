@@ -3,7 +3,6 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getScope, visitScopeWhere, storeScopeWhere } from "@/lib/scope";
 import { EmptyState } from "@/components/ui";
-import { followupNeeded } from "@/lib/visit-types";
 import { shortStoreName } from "@/lib/store-utils";
 import { avatarColor } from "@/lib/format";
 import { VisitKpiStrip } from "@/components/visits-repo/VisitKpiStrip";
@@ -133,13 +132,17 @@ export default async function VisitRepoPage({
           farmerName: v.farmer?.name ?? "Unknown farmer",
           village: v.farmer?.village ?? "",
           district: v.farmer?.district ?? "",
-          crop: v.farmer?.crop ?? "—",
+          crop: v.mainCrop || v.farmer?.crop || "—",
+          land: v.landHoldingUnit ?? "",
           officer: v.officerName ?? "—",
           purpose: v.purpose ?? "—",
           storeName: storeShort || "—",
           storeId: v.store?.id ?? null,
           avBg: avatarColor(i),
-          needsFollowup: followupNeeded(v.purpose),
+          needsFollowup: !!v.followUpDate,
+          followUp: v.followUpDate
+            ? (() => { const d = new Date(`${v.followUpDate}T00:00:00`); return Number.isNaN(d.getTime()) ? v.followUpDate! : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); })()
+            : "",
         };
       })
       // Store filter matches the short (first-segment) store name, per spec gotcha #1.
@@ -173,14 +176,15 @@ export default async function VisitRepoPage({
 
       <div className="rounded-[14px] border border-black/[0.03] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)] overflow-hidden">
         <div className="overflow-x-auto">
-        <div className="min-w-[860px] lg:min-w-0">
-        <div className="grid grid-cols-[0.5fr_1.4fr_0.8fr_0.8fr_0.8fr_0.7fr_0.6fr_0.6fr] px-[22px] py-[13px] bg-[#FAFAFA] border-b border-[#F0F0F0] text-[10.5px] font-semibold text-[#9E9E9E] uppercase tracking-[0.5px]">
+        <div className="min-w-[960px] lg:min-w-0">
+        <div className="grid grid-cols-[0.5fr_1.4fr_0.8fr_0.8fr_0.8fr_0.6fr_0.6fr_0.7fr_0.5fr] px-[22px] py-[13px] bg-[#FAFAFA] border-b border-[#F0F0F0] text-[10.5px] font-semibold text-[#9E9E9E] uppercase tracking-[0.5px]">
           <div>Date</div>
           <div>Farmer</div>
           <div>Visit Type</div>
           <div>Officer</div>
           <div>Store</div>
           <div>Crop</div>
+          <div>Land</div>
           <div>Follow-up</div>
           <div />
         </div>

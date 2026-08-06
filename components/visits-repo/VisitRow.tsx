@@ -4,13 +4,10 @@ import { storeColor } from "@/lib/store-utils";
 import type { VisitRecord } from "./types";
 
 export function VisitRow({ row }: { row: VisitRecord }) {
-  const followupBg = row.needsFollowup ? "#FFF3E0" : "#E8F5E9";
-  const followupColor = row.needsFollowup ? "#E65100" : "#2E7D32";
-  const followupLabel = row.needsFollowup ? "Needed" : "None";
   const swatch = row.storeId != null ? storeColor(row.storeId) : "#9E9E9E";
 
   return (
-    <div className="grid grid-cols-[0.5fr_1.4fr_0.8fr_0.8fr_0.8fr_0.7fr_0.6fr_0.6fr] px-[22px] py-[13px] border-b border-[#F8F8F8] items-center cursor-pointer hover:bg-[#FAFFFE]">
+    <div className="grid grid-cols-[0.5fr_1.4fr_0.8fr_0.8fr_0.8fr_0.6fr_0.6fr_0.7fr_0.5fr] px-[22px] py-[13px] border-b border-[#F8F8F8] items-center cursor-pointer hover:bg-[#FAFFFE]">
       {/* Date */}
       <div className="text-xs font-semibold text-[#1A1C1A]">{row.date}</div>
 
@@ -60,14 +57,18 @@ export function VisitRow({ row }: { row: VisitRecord }) {
       {/* Crop */}
       <div className="text-xs text-[#616161]">{row.crop}</div>
 
+      {/* Land */}
+      <div className="text-xs text-[#616161]">{row.land || "—"}</div>
+
       {/* Follow-up */}
       <div>
-        <div
-          className="px-[9px] py-[2px] rounded-[20px] text-[10px] font-semibold inline-block"
-          style={{ background: followupBg, color: followupColor }}
-        >
-          {followupLabel}
-        </div>
+        {row.followUp ? (
+          <div className="px-[9px] py-[2px] rounded-[20px] text-[10px] font-semibold inline-block whitespace-nowrap" style={{ background: "#FFF3E0", color: "#E65100" }}>
+            📅 {row.followUp}
+          </div>
+        ) : (
+          <span className="text-[11px] text-[#BDBDBD]">—</span>
+        )}
       </div>
 
       {/* Action */}

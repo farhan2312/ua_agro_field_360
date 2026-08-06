@@ -13,7 +13,8 @@ async function getAuditRows(): Promise<AuditRowData[]> {
     });
     return logs.map((l) => ({
       id: l.id,
-      displayTs: l.displayTs ?? "",
+      // Fall back to the real createdAt when no display string was stored (newer entries).
+      displayTs: l.displayTs || l.createdAt.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true }),
       actor: l.actor ?? "",
       action: l.action,
       detail: l.detail ?? "",

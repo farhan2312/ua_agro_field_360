@@ -94,7 +94,7 @@ export const FALLBACK_OPTIONS: Record<FieldKey, string[]> = {
     "Soil Erosion", "Wild Animal", "Pest Outbreak", "Disease Outbreak", "No Major Risk",
   ],
   annualExpense: ["< ₹10K", "₹10–25K", "₹25–50K", "₹50K–1L", "₹1–2.5L", "₹2.5L+"],
-  purchaseFreq: ["Weekly", "Monthly", "Seasonal", "As Required"],
+  purchaseFreq: ["Weekly", "Monthly", "As Required"],
   leadStatus: [
     "New", "Contacted", "Recommendation Given",
     "Follow-up Scheduled", "Converted", "Lost",
