@@ -18,6 +18,7 @@ export interface WbFilters {
   lens: Lens;
   storeIds?: number[];       // stores — match ANY
   zones?: string[];          // regions — match ANY
+  villages?: string[];       // villages (UPPER-TRIMMED keys) — match ANY; both lenses
   crops?: string[];          // crops (sales or visit depending on lens) — match ANY (array overlap)
   pests?: string[];          // Target Pests/Diseases/Weeds — match ANY (array overlap)
   valueSegments?: string[];  // value tier(s): HNI | POTENTIAL_HNI | REGULAR (FY-dynamic in sales lens)
@@ -51,6 +52,7 @@ function staticConds(f: WbFilters, alias = ""): Prisma.Sql[] {
   const c: Prisma.Sql[] = [Prisma.sql`${col(alias, "source")} = 'REAL'`];
   if (f.storeIds?.length) c.push(Prisma.sql`${col(alias, "storeId")} = ANY(${f.storeIds})`);
   if (f.zones?.length) c.push(Prisma.sql`${col(alias, "zone")} = ANY(${f.zones})`);
+  if (f.villages?.length) c.push(Prisma.sql`upper(btrim(${col(alias, "village")})) = ANY(${f.villages})`);
   if (f.crops?.length) {
     const cc = f.lens === "sales" ? "salesCropTags" : "visitCropTags";
     c.push(Prisma.sql`${col(alias, cc)} && ${f.crops}::text[]`); // array overlap — uses the GIN index
@@ -164,6 +166,7 @@ export interface WbFacets {
   spendTiers: string[];
   years: number[]; // distinct financial-year start years (Apr–Mar) for the crop-trend FY filter, role-scoped
   visitMinDate: string | null; // earliest scoped visit date (ISO) — lower bound for the visit date slider
+  villages: { village: string; count: number }[]; // top villages by farmer count (UPPER-TRIMMED), both lenses
 }
 export async function getWorkbenchFacets(): Promise<WbFacets> {
   const { role, storeId, zone } = await getScope();
@@ -189,7 +192,7 @@ export async function getWorkbenchFacets(): Promise<WbFacets> {
     : isRM ? (zone != null ? Prisma.sql`AND EXISTS (SELECT 1 FROM "Store" st WHERE st.id = sl."storeId" AND st."zone" = ${zone})` : Prisma.sql`AND false`)
     : Prisma.empty;
 
-  const [stores, zoneRows, sc, vc, pt, pr, yr, vmin] = await Promise.all([
+  const [stores, zoneRows, sc, vc, pt, pr, yr, vmin, vil] = await Promise.all([
     prisma.store.findMany({ where: storeWhere, orderBy: { name: "asc" }, select: { id: true, name: true } }),
     isOfficer || isRM
       ? Promise.resolve([] as { zone: string | null }[])
@@ -201,6 +204,7 @@ export async function getWorkbenchFacets(): Promise<WbFacets> {
     // Distinct financial-year START years (Apr–Mar): Jan–Mar count toward the previous FY.
     prisma.$queryRaw<{ y: number }[]>(Prisma.sql`SELECT DISTINCT (EXTRACT(YEAR FROM sl."soldAt")::int - CASE WHEN EXTRACT(MONTH FROM sl."soldAt") < 4 THEN 1 ELSE 0 END) y FROM "SaleLine" sl WHERE sl."soldAt" IS NOT NULL ${slScope} ORDER BY 1`),
     prisma.$queryRaw<{ d: string | null }[]>(Prisma.sql`SELECT to_char(MIN(v."visitedAt"), 'YYYY-MM-DD') d FROM "Visit" v JOIN "Farmer" f ON f.id = v."farmerId" WHERE v."visitedAt" IS NOT NULL AND ${vScope}`),
+    prisma.$queryRaw<{ village: string; n: number }[]>(Prisma.sql`SELECT upper(btrim(village)) village, COUNT(*)::int n FROM "Farmer" WHERE source='REAL' AND village IS NOT NULL AND btrim(village) <> '' AND ${fScope} GROUP BY 1 ORDER BY 2 DESC LIMIT 2000`),
   ]);
   const zones = isRM ? (zone != null ? [zone] : []) : isOfficer ? [] : zoneRows.map((z) => z.zone!).filter(Boolean);
   const abc = (a: string, b: string) => a.localeCompare(b); // filter option lists sorted A→Z for scan-ability
@@ -214,6 +218,7 @@ export async function getWorkbenchFacets(): Promise<WbFacets> {
     spendTiers: SPEND_TIERS.map((t) => t.label),
     years: yr.map((r) => num(r.y)).filter(Boolean),
     visitMinDate: vmin[0]?.d ?? null,
+    villages: vil.map((r) => ({ village: r.village, count: num(r.n) })),
   };
 }
 

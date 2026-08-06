@@ -36,7 +36,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
   const [treeBy, setTreeBy] = useState<"value" | "lifecycle">("value"); // shared primary dimension for the KPI tree AND the detailed matrix
   const flipTree = () => setTreeBy((b) => (b === "value" ? "lifecycle" : "value"));
   const years = filters.fyStarts ?? []; // selected FY start years — drives the whole sales analysis
-  const toggleStr = (key: "zones" | "crops" | "pests" | "problems" | "valueSegments" | "lifecycleSegments", v: string) => {
+  const toggleStr = (key: "zones" | "villages" | "crops" | "pests" | "problems" | "valueSegments" | "lifecycleSegments", v: string) => {
     const cur = (filters[key] as string[] | undefined) ?? [];
     apply({ [key]: cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v] } as Partial<WbFilters>);
   };
@@ -59,7 +59,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
     setExporting(true); setExportBytes(0);
     try {
       const f = {
-        storeIds: filters.storeIds, zones: filters.zones, crops: filters.crops, pests: filters.pests,
+        storeIds: filters.storeIds, zones: filters.zones, villages: filters.villages, crops: filters.crops, pests: filters.pests,
         valueSegments: filters.valueSegments, lifecycleSegments: filters.lifecycleSegments,
         spendTiers: filters.spendTiers, fyStarts: filters.fyStarts, problems: filters.problems,
         visitFrom: filters.visitFrom, visitTo: filters.visitTo,
@@ -102,7 +102,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
     });
   };
   const setLens = (lens: Lens) => apply({ lens, crops: undefined, valueSegments: undefined, lifecycleSegments: undefined, spendTiers: undefined, problems: undefined });
-  const clearAll = () => apply({ storeIds: undefined, zones: undefined, crops: undefined, pests: undefined, valueSegments: undefined, lifecycleSegments: undefined, spendTiers: undefined, problems: undefined, fyStarts: undefined, visitFrom: undefined, visitTo: undefined });
+  const clearAll = () => apply({ storeIds: undefined, zones: undefined, villages: undefined, crops: undefined, pests: undefined, valueSegments: undefined, lifecycleSegments: undefined, spendTiers: undefined, problems: undefined, fyStarts: undefined, visitFrom: undefined, visitTo: undefined });
 
   const openCell = (storeId: number | null, storeName: string, dim: SegDim | "cross", seg: string) => {
     setCell({ storeId, storeName, dim, seg }); setRows(null);
@@ -111,7 +111,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
 
   const cropOpts = filters.lens === "sales" ? facets.salesCrops : facets.visitCrops;
   const activeFilterCount = [
-    filters.storeIds, filters.zones, filters.crops, filters.pests,
+    filters.storeIds, filters.zones, filters.villages, filters.crops, filters.pests,
     filters.valueSegments, filters.lifecycleSegments, filters.spendTiers, filters.problems, filters.fyStarts,
   ].filter((a) => a && a.length).length;
   const k = data.kpis;
@@ -146,6 +146,8 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
           selected={(filters.storeIds ?? []).map(String)} onToggle={(v) => toggleInt("storeIds", Number(v))} onClear={() => apply({ storeIds: undefined })} />
         <MultiSel ph="All districts" options={facets.zones.map((z) => [z, z])}
           selected={filters.zones ?? []} onToggle={(v) => toggleStr("zones", v)} onClear={() => apply({ zones: undefined })} />
+        <MultiSel ph="All villages" options={facets.villages.map((v) => [v.village, `${v.village} (${n(v.count)})`])}
+          selected={filters.villages ?? []} onToggle={(v) => toggleStr("villages", v)} onClear={() => apply({ villages: undefined })} />
         <MultiSel ph="All crops" options={cropOpts.map((c) => [c.crop, `${cropLabel(c.crop)} (${n(c.count)})`])}
           selected={filters.crops ?? []} onToggle={(v) => toggleStr("crops", v)} onClear={() => apply({ crops: undefined })} />
         <MultiSel ph="All pests" options={facets.pests.map((p) => [p.pest, `${tagLabel(p.pest)} (${n(p.count)})`])}

@@ -20,7 +20,7 @@ export const dynamic = "force-dynamic";
  * come from the stored farmer tier; RBAC enforced from the session. Filters arrive base64 in `?f=`.
  */
 interface ExportFilters {
-  storeIds?: number[]; zones?: string[]; crops?: string[]; pests?: string[];
+  storeIds?: number[]; zones?: string[]; villages?: string[]; crops?: string[]; pests?: string[];
   valueSegments?: string[]; lifecycleSegments?: string[]; spendTiers?: number[]; fyStarts?: number[];
   problems?: string[]; // visit lens — Current Problem
   visitFrom?: string; visitTo?: string; // visit lens — visitedAt range (ISO YYYY-MM-DD)
@@ -39,6 +39,7 @@ function farmerConds(f: ExportFilters, storeIds?: number[], zones?: string[]): P
   const c: Prisma.Sql[] = [Prisma.sql`f.source = 'REAL'`];
   if (storeIds?.length) c.push(Prisma.sql`f."storeId" = ANY(${storeIds})`);
   if (zones?.length) c.push(Prisma.sql`st."zone" = ANY(${zones})`);
+  if (f.villages?.length) c.push(Prisma.sql`upper(btrim(f."village")) = ANY(${f.villages})`);
   if (f.pests?.length) c.push(Prisma.sql`f."pestTags" && ${f.pests}::text[]`);
   if (f.valueSegments?.length) c.push(Prisma.sql`f."valueSegment" = ANY(${f.valueSegments})`);
   if (f.lifecycleSegments?.length) c.push(Prisma.sql`f."lifecycleSegment" = ANY(${f.lifecycleSegments})`);
@@ -74,6 +75,7 @@ export async function GET(req: NextRequest) {
     }
     if (f.storeIds?.length) vc.push(Prisma.sql`(v."storeId" = ANY(${f.storeIds}) OR (v."storeId" IS NULL AND f."storeId" = ANY(${f.storeIds})))`);
     if (f.zones?.length) vc.push(Prisma.sql`(vs."zone" = ANY(${f.zones}) OR (v."storeId" IS NULL AND fs."zone" = ANY(${f.zones})))`);
+    if (f.villages?.length) vc.push(Prisma.sql`upper(btrim(f."village")) = ANY(${f.villages})`);
     if (f.crops?.length) vc.push(Prisma.sql`f."visitCropTags" && ${f.crops}::text[]`);
     if (f.pests?.length) vc.push(Prisma.sql`f."pestTags" && ${f.pests}::text[]`);
     if (f.problems?.length) vc.push(Prisma.sql`v."currentProblem" && ${f.problems}::text[]`);
@@ -154,6 +156,7 @@ export async function GET(req: NextRequest) {
           ["Date range", f.visitFrom || f.visitTo ? `${f.visitFrom ?? "start"} to ${f.visitTo ?? "today"}` : "All dates"],
           ["Stores", list(f.storeIds, (id) => nameById.get(id) ?? `#${id}`, "All stores")],
           ["Districts", list(f.zones, (z) => String(z), "All districts")],
+          ["Villages", list(f.villages, (v) => String(v), "All villages")],
           ["Crops (visit)", list(f.crops, cropLabel, "All crops")],
           ["Pests / diseases", list(f.pests, tagLabel, "All")],
           ["Current problem", list(f.problems, (p) => String(p), "Any")],
@@ -269,6 +272,7 @@ export async function GET(req: NextRequest) {
         ["Financial year(s)", list(f.fyStarts, fyLbl, "All FYs")],
         ["Stores", list(storeIds, (id) => nameById.get(id) ?? `#${id}`, "All stores")],
         ["Districts", list(zones, (z) => String(z), "All districts")],
+        ["Villages", list(f.villages, (v) => String(v), "All villages")],
         ["Crops", list(f.crops, cropLabel, "All crops")],
         ["Pests / diseases", list(f.pests, tagLabel, "All")],
         ["Value segment", list(f.valueSegments, (s) => segMeta(s).label, "All")],

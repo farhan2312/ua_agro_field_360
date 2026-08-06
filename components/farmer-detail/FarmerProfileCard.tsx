@@ -66,6 +66,8 @@ export function FarmerProfileCard({ farmer }: { farmer: FarmerDetail }) {
         </div>
       </div>
       <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+        <DetailRow label="Village" value={farmer.village || "—"} />
+        <DetailRow label="District" value={farmer.district || "—"} />
         <DetailRow label="Land" value={farmer.land || "—"} />
         <DetailRow label="Season" value={farmer.season} />
         <DetailRow label="Soil" value={farmer.soil} border={false} />
