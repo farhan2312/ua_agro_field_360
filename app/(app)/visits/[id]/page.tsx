@@ -250,7 +250,9 @@ export default async function VisitDetailPage({
   const segEnum = visit.segment ?? visit.farmer?.segment ?? null;
   const segLabel: SegmentLabel | "" = segEnum ? SEGMENT_ENUM_TO_LABEL[segEnum] ?? "" : "";
 
-  const needsFollowup = followupNeeded(visit.purpose);
+  // A follow-up is scheduled when the officer actually recorded a follow-up date;
+  // fall back to the purpose-based heuristic only when no explicit date exists.
+  const needsFollowup = !!visit.followUpDate || followupNeeded(visit.purpose);
   const gps = gpsString(visit.gpsLat, visit.gpsLng);
 
   // Header "Crop"/"Land" reflect what THIS visit captured, falling back to the farmer record.
@@ -280,7 +282,9 @@ export default async function VisitDetailPage({
     storeName: shortStoreName(visit.store?.name),
     typeColor: visitTypeColor(visit.purpose),
     storeColor: visit.store ? storeColor(visit.store.id) : "#9E9E9E",
-    followup: needsFollowup ? "Needed" : "None",
+    followup: visit.followUpDate
+      ? (() => { const d = new Date(`${visit.followUpDate}T00:00:00`); return Number.isNaN(d.getTime()) ? visit.followUpDate! : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); })()
+      : needsFollowup ? "Needed" : "None",
     followupBg: needsFollowup ? "#FFF3E0" : "#E8F5E9",
     followupColor: needsFollowup ? "#E65100" : "#2E7D32",
     segBg: segLabel ? SEGMENT_BGS[segLabel] : "#F5F5F5",
