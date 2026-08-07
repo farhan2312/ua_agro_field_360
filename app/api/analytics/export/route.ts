@@ -234,16 +234,16 @@ export async function GET(req: NextRequest) {
 
       // ── Sheet 2: every matching sale line (keyset-paged) ──
       const ws2 = wb.addWorksheet("Sales lines");
-      ws2.addRow(["Order No", "Date", "Financial year", "Farmer", "Mobile", "Store", "District", "Item", "Crop", "Category", "Qty", "UOM", "Base value (Rs)", "Value segment", "Lifecycle"]).commit();
+      ws2.addRow(["Order No", "Date", "Financial year", "Farmer", "Mobile", "Village", "Store", "District", "Item", "Crop", "Category", "Qty", "UOM", "Base value (Rs)", "Value segment", "Lifecycle"]).commit();
       let cursor = 0, lineCount = 0;
       const BATCH = 10000;
       for (;;) {
         const rows = await prisma.$queryRaw<Array<{
           id: number; ordno: string | null; soldat: Date | null; fy: string | null; name: string; mobile: string | null;
-          sid: number | null; zone: string | null; item: string; crop: string | null; cat: string | null;
+          village: string | null; sid: number | null; zone: string | null; item: string; crop: string | null; cat: string | null;
           qty: number | null; uom: string | null; basic: number | null; vseg: string | null; lseg: string | null;
         }>>(Prisma.sql`
-          SELECT sl.id, sl."orderNo" ordno, sl."soldAt" soldat, sl."financialYear" fy, f.name, f.mobile,
+          SELECT sl.id, sl."orderNo" ordno, sl."soldAt" soldat, sl."financialYear" fy, f.name, f.mobile, f."village" village,
             f."storeId" sid, st."zone" zone, sl."itemRaw" item, sl."cropTag" crop, sl."mainCategory" cat,
             sl.qty, sl.uom, sl."basic" basic, f."valueSegment" vseg, f."lifecycleSegment" lseg
           FROM "SaleLine" sl JOIN "Farmer" f ON f.id = sl."farmerId" LEFT JOIN "Store" st ON st.id = f."storeId"
@@ -254,7 +254,7 @@ export async function GET(req: NextRequest) {
           cursor = r.id; lineCount++;
           ws2.addRow([
             r.ordno ?? "", r.soldat ? new Date(r.soldat).toISOString().slice(0, 10) : "", r.fy ?? "",
-            r.name, r.mobile ?? "", r.sid != null ? nameById.get(r.sid) ?? "" : "", r.zone ?? "",
+            r.name, r.mobile ?? "", r.village ?? "", r.sid != null ? nameById.get(r.sid) ?? "" : "", r.zone ?? "",
             r.item, r.crop ? cropLabel(r.crop) : "", r.cat ?? "", r.qty ?? 0, r.uom ?? "",
             Math.round(r.basic ?? 0), r.vseg ? segMeta(r.vseg).label : "", r.lseg ? segMeta(r.lseg).label : "",
           ]).commit();
