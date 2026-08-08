@@ -122,6 +122,7 @@ export function NewVisitWizard({
   districts,
   villages,
   visitReasons,
+  stores = [],
   primaryIdLabel = "Mobile Number",
   visitReasonRequired = true,
 }: {
@@ -129,11 +130,17 @@ export function NewVisitWizard({
   districts: string[];
   villages: string[];
   visitReasons: string[];
+  stores?: { id: number; name: string }[];
   primaryIdLabel?: string;
   visitReasonRequired?: boolean;
 }) {
   const [step, setStep] = useState(0);
-  const [form, setForm] = useState<VisitForm>(INITIAL_FORM);
+  // One store → auto-select and lock it. Several (RM / admin) → a mandatory manual pick.
+  const storeLocked = stores.length === 1;
+  const [form, setForm] = useState<VisitForm>(() => ({
+    ...INITIAL_FORM,
+    storeId: storeLocked ? stores[0].id : null,
+  }));
   const [pending, startTransition] = useTransition();
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -320,6 +327,7 @@ export function NewVisitWizard({
   const mobileValid = /^[6-9]\d{9}$/.test(form.mobile);
   const step0Valid =
     mobileValid &&
+    form.storeId != null &&
     form.name.trim() !== "" &&
     form.village.trim() !== "" &&
     (!visitReasonRequired || form.visitPurpose.trim() !== "");
@@ -406,33 +414,60 @@ export function NewVisitWizard({
           <div>
             <div className="mb-5 text-[18px] font-bold text-[#1A1C1A]">Farmer & Location</div>
 
-            {/* Visit type — controls whether the farmer's GPS is recorded */}
-            <div className="mb-5">
-              <FieldLabel>Visit Type</FieldLabel>
-              <div className="inline-flex rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] p-1">
-                {(
-                  [
-                    ["field", "🚜 Field Visit"],
-                    ["store", "🏪 At Store"],
-                  ] as const
-                ).map(([mode, label]) => {
-                  const active = form.visitMode === mode;
-                  return (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() => set("visitMode", mode)}
-                      className="rounded-[8px] px-4 py-2 text-[12.5px] font-semibold transition-colors"
-                      style={{
-                        background: active ? "#FFFFFF" : "transparent",
-                        color: active ? "#2E7D32" : "#9E9E9E",
-                        boxShadow: active ? "0 1px 3px rgba(0,0,0,0.12)" : "none",
-                      }}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
+            {/* Visit type (controls GPS capture) + the store this visit is recorded against */}
+            <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <FieldLabel>Visit Type</FieldLabel>
+                <div className="inline-flex rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] p-1">
+                  {(
+                    [
+                      ["field", "🚜 Field Visit"],
+                      ["store", "🏪 At Store"],
+                    ] as const
+                  ).map(([mode, label]) => {
+                    const active = form.visitMode === mode;
+                    return (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => set("visitMode", mode)}
+                        className="rounded-[8px] px-4 py-2 text-[12.5px] font-semibold transition-colors"
+                        style={{
+                          background: active ? "#FFFFFF" : "transparent",
+                          color: active ? "#2E7D32" : "#9E9E9E",
+                          boxShadow: active ? "0 1px 3px rgba(0,0,0,0.12)" : "none",
+                        }}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <FieldLabel>Store *</FieldLabel>
+                {storeLocked ? (
+                  <div className="flex items-center gap-2 rounded-[10px] border-[1.5px] border-[#C8E6C9] bg-[#F1F8F1] px-3.5 py-[11px] text-[14px] font-semibold text-[#2E7D32]">
+                    🏪 {stores[0].name}
+                  </div>
+                ) : (
+                  <select
+                    value={form.storeId ?? ""}
+                    onChange={(e) => set("storeId", e.target.value ? Number(e.target.value) : null)}
+                    className={`w-full rounded-[10px] border-[1.5px] bg-white px-3.5 py-[11px] text-[14px] outline-none focus:border-[#2E7D32] ${
+                      form.storeId == null ? "border-[#EF9A9A]" : "border-[#E0E0E0]"
+                    }`}
+                  >
+                    <option value="">Select store…</option>
+                    {stores.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                )}
+                {!storeLocked && form.storeId == null && (
+                  <div className="mt-[7px] text-[11px] text-[#C62828]">Pick the store this visit belongs to.</div>
+                )}
               </div>
             </div>
 
@@ -1024,7 +1059,7 @@ export function NewVisitWizard({
               disabled={(step === 0 && !step0Valid) || (step === 1 && !step1Valid)}
               title={
                 step === 0 && !step0Valid
-                  ? "Enter a valid mobile, farmer name, village and visit reason to continue."
+                  ? "Select a store and enter a valid mobile, farmer name, village and visit reason to continue."
                   : step === 1 && !step1Valid
                     ? "Select at least one crop to continue."
                     : undefined

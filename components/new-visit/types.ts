@@ -7,6 +7,9 @@ export interface VisitForm {
   village: string;
   district: string;
   visitPurpose: string;
+  /** The store this visit is recorded against. Auto-set + locked when the filler has one store;
+   *  a mandatory manual pick for regional managers / admins who cover several stores. */
+  storeId: number | null;
   /** "field" records the device GPS; "store" (filling in from the store) records no farmer location. */
   visitMode: "field" | "store";
   /** Captured device location for a field visit (null for a store visit or if unavailable). */
@@ -60,6 +63,7 @@ export const INITIAL_FORM: VisitForm = {
   village: "",
   district: "",
   visitPurpose: "",
+  storeId: null,
   visitMode: "field",
   gpsLat: null,
   gpsLng: null,

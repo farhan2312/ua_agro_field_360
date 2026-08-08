@@ -133,13 +133,16 @@ export async function submitVisitAction(
   let newVisitId: number | undefined;
 
   try {
-    // The store of the person filling in the form — stamped on new farmers + this visit.
-    const officerStore = scope.storeId != null
-      ? await prisma.store.findUnique({ where: { id: scope.storeId }, select: { id: true, code: true } })
+    // The store this visit is recorded against. It now comes from the mandatory Store picker on the
+    // form (auto-set for single-store officers, chosen by RMs/admins). Fall back to the filler's own
+    // scope store for older clients that don't send one.
+    const chosenStoreId = form.storeId ?? scope.storeId ?? null;
+    const officerStore = chosenStoreId != null
+      ? await prisma.store.findUnique({ where: { id: chosenStoreId }, select: { id: true, code: true } })
       : null;
     let farmerId: number | undefined;
-    // Store recorded on the visit: an existing farmer keeps the store from their record;
-    // a new farmer (or a walk-in with no record) is stamped with the filling officer's store.
+    // Store recorded on the visit: always the store chosen on the form; only falls back to an
+    // existing farmer's own store when the form somehow didn't carry one.
     let visitStoreId: number | null = officerStore?.id ?? null;
     const mobile = form.mobile.trim();
     const lead = leadEnum(form.leadStatus);
@@ -154,24 +157,29 @@ export async function submitVisitAction(
       ...(mobile ? { mobile } : {}),
     };
 
+    // A store-less existing farmer inherits the store chosen on the form (keeps records complete);
+    // a farmer who already has a store keeps it.
+    const farmerStorePatch = (currentStoreId: number | null) =>
+      currentStoreId == null && officerStore ? { storeId: officerStore.id, storeCode: officerStore.code } : {};
+
     if (editingFarmerId) {
-      // Edit the pulled-up record directly — keep its own store (show the store from the record).
+      // Edit the pulled-up record directly. The visit is recorded against the store chosen on the form.
       const updated = await prisma.farmer.update({
         where: { id: editingFarmerId },
-        data: editData,
+        data: { ...editData, ...farmerStorePatch((await prisma.farmer.findUnique({ where: { id: editingFarmerId }, select: { storeId: true } }))?.storeId ?? null) },
       });
       farmerId = updated.id;
-      visitStoreId = updated.storeId;
+      if (officerStore == null) visitStoreId = updated.storeId; // old client sent no store → fall back
     } else if (mobile.length > 0) {
       const existing = await prisma.farmer.findFirst({ where: { mobile } });
       if (existing) {
-        // Known farmer — keep the store already on their record.
+        // Known farmer — recorded against the chosen store; stamp the farmer's store only if missing.
         const updated = await prisma.farmer.update({
           where: { id: existing.id },
-          data: editData,
+          data: { ...editData, ...farmerStorePatch(existing.storeId) },
         });
         farmerId = updated.id;
-        visitStoreId = updated.storeId;
+        if (officerStore == null) visitStoreId = updated.storeId;
       } else {
         // Brand-new farmer — stamp them with the filling officer's store.
         const created = await prisma.farmer.create({

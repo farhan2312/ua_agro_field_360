@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getRole } from "@/lib/session";
+import { getScope } from "@/lib/scope";
 import { NewVisitWizard } from "@/components/new-visit/NewVisitWizard";
 import {
   resolveOptions,
@@ -22,6 +23,27 @@ export default async function NewVisitPage() {
   // so the dropdowns reflect real operating areas (fall back to the spec lists).
   let districts: string[] = DISTRICTS;
   let villages: string[] = VILLAGES;
+
+  // Stores the filler may record this visit against: an officer scoped to one store gets exactly
+  // that store (auto-set + locked); a regional manager gets their region's stores; admins/sysadmin
+  // get every store — a mandatory pick, so a multi-store filler can never leave the store blank.
+  let stores: { id: number; name: string }[] = [];
+  try {
+    const scope = await getScope();
+    const where =
+      scope.role === "officer" && scope.storeId != null
+        ? { id: scope.storeId }
+        : scope.role !== "central" && scope.role !== "sysadmin" && scope.zone
+          ? { zone: scope.zone, status: "Active" }
+          : { status: "Active" };
+    let rows = await prisma.store.findMany({ where, select: { id: true, name: true }, orderBy: { name: "asc" } });
+    // Never leave a filler with an empty mandatory picker (e.g. a region with no active stores).
+    if (rows.length === 0) rows = await prisma.store.findMany({ where: { status: "Active" }, select: { id: true, name: true }, orderBy: { name: "asc" } });
+    stores = rows.map((s) => ({ id: s.id, name: s.name.replace(/\s*\(.*?\)\s*/g, "").trim() || s.name }));
+  } catch {
+    // Tolerate a missing DB — the wizard then shows an "All stores" empty pick and validates client-side.
+  }
+
   try {
     const [fieldRows, distRows, villRows] = await Promise.all([
       prisma.fieldOption.findMany({ select: { fieldName: true, options: true } }),
@@ -54,6 +76,7 @@ export default async function NewVisitPage() {
       districts={districts}
       villages={villages}
       visitReasons={VISIT_REASONS}
+      stores={stores}
     />
   );
 }
