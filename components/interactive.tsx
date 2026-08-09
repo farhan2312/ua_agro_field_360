@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
 import { CloseIcon } from "./icons";
 
@@ -59,6 +60,12 @@ export function Modal({
   className?: string;
   children: React.ReactNode;
 }) {
+  // Portal to <body> so the overlay always positions against the viewport — never trapped by an
+  // ancestor with a transform (e.g. animate-fadeUp), which would make `fixed` resolve to that
+  // element's box and push the centred dialog far down a long page.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -70,8 +77,8 @@ export function Modal({
     };
   }, [open, onClose]);
 
-  if (!open) return null;
-  return (
+  if (!open || !mounted) return null;
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 animate-countUp"
       onClick={onClose}
@@ -85,7 +92,8 @@ export function Modal({
       >
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
