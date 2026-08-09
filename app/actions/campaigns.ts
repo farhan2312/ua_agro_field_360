@@ -893,6 +893,8 @@ export interface SmsPrepared {
 
 /** Load a member + comm template, fill placeholders from real data, and report anything missing. */
 export async function prepareCampaignSms(input: { memberId: number; commTemplateId: number }): Promise<SmsPrepared> {
+  // SMS sending is restricted to admins / super admins (Central Admin + System Admin).
+  if (!(await requireManager()).ok) return { ok: false, error: "SMS is available to admins only." };
   const scope = await memberScopeWhere();
   if (scope === "none") return { ok: false, error: "Not authorised." };
   try {
@@ -922,6 +924,8 @@ export async function prepareCampaignSms(input: { memberId: number; commTemplate
 
 /** Send the SMS via ZapSMS, log it, and mark the member reached-by-SMS on success. */
 export async function sendCampaignSms(input: { memberId: number; commTemplateId?: number | null; message: string }): Promise<{ ok: boolean; error?: string; providerId?: string }> {
+  // SMS sending is restricted to admins / super admins (Central Admin + System Admin).
+  if (!(await requireManager()).ok) return { ok: false, error: "SMS is available to admins only." };
   const scope = await memberScopeWhere();
   if (scope === "none") return { ok: false, error: "Not authorised." };
   const message = (input.message ?? "").trim();

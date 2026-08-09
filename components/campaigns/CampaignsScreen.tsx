@@ -386,7 +386,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
                       </div>
                     </div>
                     {focusMode
-                      ? <FocusMode members={members} crops={crops} onChange={patchMember} onExit={() => setFocusMode(false)} onCurrent={setFocusCurrent} commPlans={membersOf?.commPlans ?? []} templates={templates} />
+                      ? <FocusMode members={members} crops={crops} onChange={patchMember} onExit={() => setFocusMode(false)} onCurrent={setFocusCurrent} commPlans={membersOf?.commPlans ?? []} templates={templates} canSms={canManage} />
                       : (() => {
                           // List view: un-contacted first, reached/unreachable sink to the bottom.
                           const sorted = [...members].sort((a, b) => rank(a) - rank(b));
@@ -397,7 +397,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
                           return (
                             <>
                               <div className="flex flex-col gap-2.5">
-                                {slice.map((m) => <MemberRow key={m.id} member={m} crops={crops} onChange={patchMember} commPlans={membersOf?.commPlans ?? []} templates={templates} />)}
+                                {slice.map((m) => <MemberRow key={m.id} member={m} crops={crops} onChange={patchMember} commPlans={membersOf?.commPlans ?? []} templates={templates} canSms={canManage} />)}
                               </div>
                               {pages > 1 && (
                                 <div className="mt-3 flex items-center justify-center gap-3">
@@ -763,7 +763,7 @@ export function useOutreach(member: CampaignMemberVM) {
   return { mediums, comment, response, crop, setComment, setCrop, toggleChannel, pickResponse, dirty, cropMissing, patch, optimistic };
 }
 
-function MemberRow({ member, crops, onChange, commPlans, templates }: { member: CampaignMemberVM; crops: CropOption[]; onChange: (m: CampaignMemberVM) => void; commPlans: string[]; templates: CommTemplateVM[] }) {
+function MemberRow({ member, crops, onChange, commPlans, templates, canSms }: { member: CampaignMemberVM; crops: CropOption[]; onChange: (m: CampaignMemberVM) => void; commPlans: string[]; templates: CommTemplateVM[]; canSms?: boolean }) {
   const o = useOutreach(member);
   const [pending, start] = useTransition();
   const [saved, setSaved] = useState(false);
@@ -789,7 +789,7 @@ function MemberRow({ member, crops, onChange, commPlans, templates }: { member: 
         <ResponseBadge member={member} />
         <span className="text-[12px] text-[#9E9E9E]">{member.village ?? "—"}{member.store ? ` · ${member.store}` : ""}</span>
       </div>
-      <div className="mb-3"><PhoneBlock mobile={member.mobile} extra={<SmsSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} />} /></div>
+      <div className="mb-3"><PhoneBlock mobile={member.mobile} extra={canSms ? <SmsSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} /> : null} /></div>
       <div className="flex flex-col gap-2.5 rounded-[12px] border border-[#EAEAEA] bg-[#FBFBFB] p-3">
         <ResponsePicker value={o.response} crop={o.crop} crops={crops} onPick={o.pickResponse} onCrop={o.setCrop} disabled={pending} />
         <ApproachPicker value={o.mediums} onToggle={o.toggleChannel} disabled={pending} />
@@ -808,7 +808,7 @@ function MemberRow({ member, crops, onChange, commPlans, templates }: { member: 
 }
 
 /* ── Focus mode: one farmer at a time (queue: head = current; skip requeues; back re-opens last) ── */
-function FocusMode({ members, crops, onChange, onExit, onCurrent, commPlans, templates }: { members: CampaignMemberVM[]; crops: CropOption[]; onChange: (m: CampaignMemberVM) => void; onExit: () => void; onCurrent?: (m: CampaignMemberVM | null) => void; commPlans: string[]; templates: CommTemplateVM[] }) {
+function FocusMode({ members, crops, onChange, onExit, onCurrent, commPlans, templates, canSms }: { members: CampaignMemberVM[]; crops: CropOption[]; onChange: (m: CampaignMemberVM) => void; onExit: () => void; onCurrent?: (m: CampaignMemberVM | null) => void; commPlans: string[]; templates: CommTemplateVM[]; canSms?: boolean }) {
   const [queue, setQueue] = useState<number[]>(() => members.filter((m) => statusOf(m) === "pending").map((m) => m.id));
   const [history, setHistory] = useState<number[]>([]);
   const currentId = queue[0];
@@ -824,7 +824,7 @@ function FocusMode({ members, crops, onChange, onExit, onCurrent, commPlans, tem
   return (
     <div className="mt-3">
       {member
-        ? <FocusCard key={member.id} member={member} crops={crops} onChange={onChange} onHandled={handled} onSkip={skip} onBack={history.length ? back : undefined} remaining={queue.length} commPlans={commPlans} templates={templates} />
+        ? <FocusCard key={member.id} member={member} crops={crops} onChange={onChange} onHandled={handled} onSkip={skip} onBack={history.length ? back : undefined} remaining={queue.length} commPlans={commPlans} templates={templates} canSms={canSms} />
         : (
           <div className="rounded-[18px] border-2 border-[#A5D6A7] bg-[#F6FFF4] p-10 text-center">
             <div className="text-[20px] font-bold text-[#1B5E20]">All done 🎉</div>
@@ -836,8 +836,8 @@ function FocusMode({ members, crops, onChange, onExit, onCurrent, commPlans, tem
   );
 }
 
-function FocusCard({ member, crops, onChange, onHandled, onSkip, onBack, remaining, commPlans, templates }: {
-  member: CampaignMemberVM; crops: CropOption[]; onChange: (m: CampaignMemberVM) => void; onHandled: () => void; onSkip: () => void; onBack?: () => void; remaining: number; commPlans: string[]; templates: CommTemplateVM[];
+function FocusCard({ member, crops, onChange, onHandled, onSkip, onBack, remaining, commPlans, templates, canSms }: {
+  member: CampaignMemberVM; crops: CropOption[]; onChange: (m: CampaignMemberVM) => void; onHandled: () => void; onSkip: () => void; onBack?: () => void; remaining: number; commPlans: string[]; templates: CommTemplateVM[]; canSms?: boolean;
 }) {
   const o = useOutreach(member);
   const [pending, start] = useTransition();
@@ -866,7 +866,7 @@ function FocusCard({ member, crops, onChange, onHandled, onSkip, onBack, remaini
         <span className="ml-auto rounded-full bg-[#F5F7F5] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#616161]">{remaining} left</span>
       </div>
       <div className="mb-3 text-[12.5px] text-[#9E9E9E]">{member.village ?? "—"}{member.store ? ` · ${member.store}` : ""}</div>
-      <div className="mb-4"><PhoneBlock mobile={member.mobile} big extra={<SmsSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} onSent={onHandled} big />} /></div>
+      <div className="mb-4"><PhoneBlock mobile={member.mobile} big extra={canSms ? <SmsSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} onSent={onHandled} big /> : null} /></div>
       <div className="flex flex-col gap-3 rounded-[12px] border border-[#EAEAEA] bg-[#FBFBFB] p-3.5">
         <ResponsePicker value={o.response} crop={o.crop} crops={crops} onPick={o.pickResponse} onCrop={o.setCrop} disabled={pending} />
         <ApproachPicker value={o.mediums} onToggle={o.toggleChannel} disabled={pending} />
