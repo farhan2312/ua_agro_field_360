@@ -1,11 +1,13 @@
 import { prisma } from "@/lib/prisma";
 import { grouped } from "@/lib/format";
+import { zapConfig } from "@/lib/zapsms";
 import { MasterDataCard, type RegistryRow } from "@/components/settings/MasterDataCard";
 import {
   SystemConfigCard,
   type ConfigState,
 } from "@/components/settings/SystemConfigCard";
 import { DataManagementCard } from "@/components/settings/DataManagementCard";
+import { SmsTestCard } from "@/components/settings/SmsTestCard";
 
 export const dynamic = "force-dynamic";
 
@@ -107,6 +109,18 @@ async function load(): Promise<LoadResult> {
 export default async function SettingsPage() {
   const { counts, config, districtOptions } = await load();
 
+  // Test-SMS bench data: gateway status + saved comm plans to optionally load a message from.
+  const sms = zapConfig();
+  let plans: { id: number; name: string; template: string; dltTemplateId: string | null }[] = [];
+  try {
+    plans = await prisma.commTemplate.findMany({
+      select: { id: true, name: true, template: true, dltTemplateId: true },
+      orderBy: [{ priority: "asc" }, { name: "asc" }],
+    });
+  } catch {
+    // DB unavailable — the test bench still renders with free text only.
+  }
+
   const registry: RegistryRow[] = [
     {
       label: "Crop Master",
@@ -138,6 +152,7 @@ export default async function SettingsPage() {
         <MasterDataCard rows={registry} />
         <div className="flex flex-col gap-[18px]">
           <SystemConfigCard initial={config} districtOptions={districtOptions} />
+          <SmsTestCard plans={plans} smsReady={sms.ready} missing={sms.missing} senderId={sms.cfg.senderId} />
           <DataManagementCard />
         </div>
       </div>
