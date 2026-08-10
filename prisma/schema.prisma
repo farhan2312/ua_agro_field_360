@@ -410,6 +410,8 @@ model CommTemplate {
   timingLabel String
   template    String   @db.Text // message with [Naam] [gap] [last item] [Store] [number] [date] slots
   dltTemplateId String? // ZapSMS/DLT approved Template ID for this message (required for real delivery)
+  waTemplateName String? // WhatsApp Cloud API approved template name (for template-mode WhatsApp sends)
+  waLanguage     String? // WhatsApp template language code, e.g. "en" | "en_US" | "hi"
   active      Boolean  @default(true)
   updatedAt   DateTime @updatedAt
 
@@ -433,6 +435,29 @@ model SmsLog {
   sentByName    String?
   sentByCode    String?
   createdAt     DateTime @default(now())
+
+  @@index([campaignId])
+  @@index([farmerId])
+  @@index([createdAt])
+}
+
+/// One WhatsApp send attempt (via the Meta Cloud API) — the WhatsApp outreach audit log.
+model WhatsAppLog {
+  id           Int      @id @default(autoincrement())
+  farmerId     Int?
+  campaignId   Int?
+  memberId     Int?
+  mobile       String
+  kind         String   @default("text") // "text" | "template"
+  templateName String? // WhatsApp template name, when sent as a template
+  message      String   @db.Text // text body (or a summary of the template)
+  ok           Boolean  @default(false)
+  providerId   String? // wamid.* message id returned by Meta
+  status       String? // short status / result
+  error        String?
+  sentByName   String?
+  sentByCode   String?
+  createdAt    DateTime @default(now())
 
   @@index([campaignId])
   @@index([farmerId])

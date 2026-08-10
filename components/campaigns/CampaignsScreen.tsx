@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Modal, ModalHeader } from "@/components/interactive";
 import { segMeta, fillTemplate, SEGMENT_COLUMNS, VALUE_TITLE, LIFECYCLE_TITLE } from "@/lib/campaign-segments";
 import { SmsSender } from "./SmsSender";
+import { WaSender } from "./WaSender";
 import { cropLabel } from "@/lib/crops";
 import { inr } from "@/lib/format";
 import {
@@ -23,6 +24,8 @@ export interface CommTemplateVM {
   id: number; name: string; language: string; promoType: string;
   segment: string; priority: number; medium: string; offer: string; timingLabel: string; template: string;
   dltTemplateId?: string | null;
+  waTemplateName?: string | null;
+  waLanguage?: string | null;
 }
 export interface StoreLite { id: number; name: string }
 
@@ -71,11 +74,17 @@ function CommPlanForm({ draft, setDraft }: { draft: CommTemplateVM; setDraft: (t
         <textarea className={`${input} min-h-[90px] w-full`} value={draft.template} onChange={(e) => setDraft({ ...draft, template: e.target.value })} /></div>
       <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">DLT Template ID <span className="normal-case text-[#BDBDBD]">(required for SMS delivery in India)</span></label>
         <input className={`${input} w-full`} value={draft.dltTemplateId ?? ""} onChange={(e) => setDraft({ ...draft, dltTemplateId: e.target.value })} placeholder="e.g. 1207xxxxxxxxxxxxx" /></div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">WhatsApp Template Name <span className="normal-case text-[#BDBDBD]">(Meta-approved; for cold sends)</span></label>
+          <input className={`${input} w-full`} value={draft.waTemplateName ?? ""} onChange={(e) => setDraft({ ...draft, waTemplateName: e.target.value })} placeholder="e.g. hni_reminder_v1" /></div>
+        <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">WhatsApp Template Language</label>
+          <input className={`${input} w-full`} value={draft.waLanguage ?? ""} onChange={(e) => setDraft({ ...draft, waLanguage: e.target.value })} placeholder="e.g. en / en_US / hi" /></div>
+      </div>
     </div>
   );
 }
 
-const EMPTY_PLAN: CommTemplateVM = { id: 0, name: "", language: "hi", promoType: "General", segment: "REGULAR", priority: 5, medium: "WhatsApp", offer: "", timingLabel: "", template: "", dltTemplateId: "" };
+const EMPTY_PLAN: CommTemplateVM = { id: 0, name: "", language: "hi", promoType: "General", segment: "REGULAR", priority: 5, medium: "WhatsApp", offer: "", timingLabel: "", template: "", dltTemplateId: "", waTemplateName: "", waLanguage: "" };
 
 function CommPlanTab({ templates }: { templates: CommTemplateVM[] }) {
   const [rows, setRows] = useState(templates);
@@ -98,7 +107,7 @@ function CommPlanTab({ templates }: { templates: CommTemplateVM[] }) {
     if (!draft) return;
     setErr(null);
     start(async () => {
-      const patch = { name: draft.name, language: draft.language, promoType: draft.promoType, segment: draft.segment, medium: draft.medium, offer: draft.offer, timingLabel: draft.timingLabel, template: draft.template, dltTemplateId: (draft.dltTemplateId ?? "").trim() || null };
+      const patch = { name: draft.name, language: draft.language, promoType: draft.promoType, segment: draft.segment, medium: draft.medium, offer: draft.offer, timingLabel: draft.timingLabel, template: draft.template, dltTemplateId: (draft.dltTemplateId ?? "").trim() || null, waTemplateName: (draft.waTemplateName ?? "").trim() || null, waLanguage: (draft.waLanguage ?? "").trim() || null };
       if (adding) {
         const res = await createCommTemplate(patch);
         if (res.ok && res.id != null) { setRows((r) => [...r, { ...draft, id: res.id! }]); setAdding(false); setDraft(null); }
@@ -789,7 +798,7 @@ function MemberRow({ member, crops, onChange, commPlans, templates, canSms }: { 
         <ResponseBadge member={member} />
         <span className="text-[12px] text-[#9E9E9E]">{member.village ?? "—"}{member.store ? ` · ${member.store}` : ""}</span>
       </div>
-      <div className="mb-3"><PhoneBlock mobile={member.mobile} extra={canSms ? <SmsSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} /> : null} /></div>
+      <div className="mb-3"><PhoneBlock mobile={member.mobile} extra={canSms ? <><SmsSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} /><WaSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} /></> : null} /></div>
       <div className="flex flex-col gap-2.5 rounded-[12px] border border-[#EAEAEA] bg-[#FBFBFB] p-3">
         <ResponsePicker value={o.response} crop={o.crop} crops={crops} onPick={o.pickResponse} onCrop={o.setCrop} disabled={pending} />
         <ApproachPicker value={o.mediums} onToggle={o.toggleChannel} disabled={pending} />
@@ -866,7 +875,7 @@ function FocusCard({ member, crops, onChange, onHandled, onSkip, onBack, remaini
         <span className="ml-auto rounded-full bg-[#F5F7F5] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#616161]">{remaining} left</span>
       </div>
       <div className="mb-3 text-[12.5px] text-[#9E9E9E]">{member.village ?? "—"}{member.store ? ` · ${member.store}` : ""}</div>
-      <div className="mb-4"><PhoneBlock mobile={member.mobile} big extra={canSms ? <SmsSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} onSent={onHandled} big /> : null} /></div>
+      <div className="mb-4"><PhoneBlock mobile={member.mobile} big extra={canSms ? <><SmsSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} onSent={onHandled} big /><WaSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} onSent={onHandled} big /></> : null} /></div>
       <div className="flex flex-col gap-3 rounded-[12px] border border-[#EAEAEA] bg-[#FBFBFB] p-3.5">
         <ResponsePicker value={o.response} crop={o.crop} crops={crops} onPick={o.pickResponse} onCrop={o.setCrop} disabled={pending} />
         <ApproachPicker value={o.mediums} onToggle={o.toggleChannel} disabled={pending} />

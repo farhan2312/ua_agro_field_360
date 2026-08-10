@@ -40,6 +40,7 @@ export default async function CampaignsPage({ searchParams }: { searchParams?: {
       id: t.id, name: t.name, language: t.language, promoType: t.promoType,
       segment: t.segment, priority: t.priority, medium: t.medium,
       offer: t.offer, timingLabel: t.timingLabel, template: t.template, dltTemplateId: t.dltTemplateId,
+      waTemplateName: t.waTemplateName, waLanguage: t.waLanguage,
     }));
     campaigns = camps;
     stores = sts;

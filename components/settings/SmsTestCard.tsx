@@ -2,19 +2,22 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { searchFarmersForAction } from "@/app/actions/action-registry";
-import { sendTestSms } from "@/app/actions/test-messaging";
+import { sendTestSms, sendTestWhatsApp } from "@/app/actions/test-messaging";
 import type { FarmerPick } from "@/lib/action-constants";
 
 type Plan = { id: number; name: string; template: string; dltTemplateId: string | null };
+type Channel = "sms" | "whatsapp";
 
 /**
- * Settings → Test SMS bench. Pick a farmer (search) or type any number, compose a message
- * (free text, optionally loaded from a saved Comm Plan), and fire one SMS through ZapSMS.
- * Admin-only (Settings is sysadmin), every send is logged. WhatsApp test comes later.
+ * Settings → Test messaging bench. Pick a farmer (search) or type any number, compose a message
+ * (free text, optionally loaded from a saved Comm Plan), and fire one SMS (ZapSMS) or WhatsApp
+ * (Meta Cloud API). Admin-only (Settings is sysadmin); every send is logged.
  */
-export function SmsTestCard({ plans, smsReady, missing, senderId }: {
+export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMissing }: {
   plans: Plan[]; smsReady: boolean; missing: string[]; senderId: string;
+  waReady: boolean; waMissing: string[];
 }) {
+  const [channel, setChannel] = useState<Channel>("sms");
   const [q, setQ] = useState("");
   const [results, setResults] = useState<FarmerPick[]>([]);
   const [picked, setPicked] = useState<FarmerPick | null>(null);
@@ -25,10 +28,15 @@ export function SmsTestCard({ plans, smsReady, missing, senderId }: {
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
   const lastQ = useRef("");
 
+  const isWa = channel === "whatsapp";
+  const ready = isWa ? waReady : smsReady;
+  const miss = isWa ? waMissing : missing;
+  const accent = isWa ? "#0B8A3D" : "#6A1B9A";
+
   // Debounced farmer search.
   useEffect(() => {
     const term = q.trim();
-    if (picked && term === picked.name) return; // don't re-search the picked name
+    if (picked && term === picked.name) return;
     if (term.length < 2) { setResults([]); return; }
     const t = setTimeout(async () => {
       if (term === lastQ.current) return;
@@ -52,12 +60,14 @@ export function SmsTestCard({ plans, smsReady, missing, senderId }: {
   };
 
   const mobileValid = /^[6-9]\d{9}$/.test(mobile);
-  const canSend = smsReady && mobileValid && message.trim().length > 0 && !sending;
+  const canSend = ready && mobileValid && message.trim().length > 0 && !sending;
 
   const send = () => {
     setResult(null);
     startSend(async () => {
-      const r = await sendTestSms({ mobile, message, commTemplateId: planId, farmerId: picked?.id ?? null });
+      const r = isWa
+        ? await sendTestWhatsApp({ mobile, message, farmerId: picked?.id ?? null })
+        : await sendTestSms({ mobile, message, commTemplateId: planId, farmerId: picked?.id ?? null });
       setResult(r.ok
         ? { ok: true, text: `Sent to ${mobile}${r.providerId ? ` · id ${r.providerId}` : ""}${r.status ? ` · ${r.status}` : ""}` }
         : { ok: false, text: r.error ?? "Send failed." });
@@ -69,19 +79,36 @@ export function SmsTestCard({ plans, smsReady, missing, senderId }: {
   return (
     <div className="rounded-2xl border border-black/[0.03] bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
       <div className="mb-1 flex items-center gap-2">
-        <span className="text-[15px] font-bold text-[#1A1C1A]">Test SMS</span>
-        <span className="rounded-full bg-[#F3E5F5] px-2 py-0.5 text-[10.5px] font-bold text-[#6A1B9A]">ZapSMS</span>
+        <span className="text-[15px] font-bold text-[#1A1C1A]">Test messaging</span>
+        <span className="rounded-full px-2 py-0.5 text-[10.5px] font-bold" style={{ background: isWa ? "#E8F5E9" : "#F3E5F5", color: accent }}>{isWa ? "Meta WhatsApp" : "ZapSMS"}</span>
       </div>
-      <p className="mb-4 text-[12px] text-[#9E9E9E]">Send a one-off SMS to a farmer or any number to verify the gateway. Admin-only; every send is logged.</p>
+      <p className="mb-3 text-[12px] text-[#9E9E9E]">Send a one-off message to a farmer or any number to verify the gateway. Admin-only; every send is logged.</p>
+
+      {/* Channel toggle */}
+      <div className="mb-4 inline-flex rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] p-1">
+        {([["sms", "✉ SMS"], ["whatsapp", "⚡ WhatsApp"]] as [Channel, string][]).map(([c, label]) => (
+          <button key={c} type="button" onClick={() => { setChannel(c); setResult(null); }}
+            className="rounded-[8px] px-4 py-1.5 text-[12.5px] font-bold transition-colors"
+            style={{ background: channel === c ? "#fff" : "transparent", color: channel === c ? accent : "#9E9E9E", boxShadow: channel === c ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}>
+            {label}
+          </button>
+        ))}
+      </div>
 
       {/* Gateway status */}
-      {smsReady ? (
+      {ready ? (
         <div className="mb-4 rounded-[10px] bg-[#E8F5E9] px-3 py-2 text-[12px] text-[#2E7D32]">
-          ✓ Gateway configured{senderId ? ` · sender ${senderId}` : ""}.
+          ✓ {isWa ? "WhatsApp Cloud API configured." : `Gateway configured${senderId ? ` · sender ${senderId}` : ""}.`}
         </div>
       ) : (
         <div className="mb-4 rounded-[10px] bg-[#FFF8E1] px-3 py-2 text-[12px] text-[#8D6E00]">
-          Not configured — set {missing.join(", ")} in the environment, then restart.
+          Not configured — set {miss.join(", ")} in the environment, then restart.
+        </div>
+      )}
+
+      {isWa && (
+        <div className="mb-4 rounded-[10px] bg-[#FFF8E1] px-3 py-2 text-[11.5px] text-[#8D6E00]">
+          Free-text WhatsApp only reaches numbers that messaged you in the last 24h or your Meta app's registered test numbers. Cold numbers need an approved template.
         </div>
       )}
 
@@ -139,8 +166,8 @@ export function SmsTestCard({ plans, smsReady, missing, senderId }: {
 
       <div className="mt-4 flex justify-end">
         <button type="button" onClick={send} disabled={!canSend}
-          className="rounded-[10px] bg-[#6A1B9A] px-5 py-2.5 text-[13px] font-bold text-white hover:bg-[#4A148C] disabled:opacity-50">
-          {sending ? "Sending…" : "✉ Send test SMS"}
+          className="rounded-[10px] px-5 py-2.5 text-[13px] font-bold text-white disabled:opacity-50" style={{ background: accent }}>
+          {sending ? "Sending…" : isWa ? "⚡ Send test WhatsApp" : "✉ Send test SMS"}
         </button>
       </div>
     </div>

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { grouped } from "@/lib/format";
 import { zapConfig } from "@/lib/zapsms";
+import { waConfig } from "@/lib/whatsapp";
 import { MasterDataCard, type RegistryRow } from "@/components/settings/MasterDataCard";
 import {
   SystemConfigCard,
@@ -109,8 +110,9 @@ async function load(): Promise<LoadResult> {
 export default async function SettingsPage() {
   const { counts, config, districtOptions } = await load();
 
-  // Test-SMS bench data: gateway status + saved comm plans to optionally load a message from.
+  // Test-messaging bench data: gateway status + saved comm plans to optionally load a message from.
   const sms = zapConfig();
+  const wa = waConfig();
   let plans: { id: number; name: string; template: string; dltTemplateId: string | null }[] = [];
   try {
     plans = await prisma.commTemplate.findMany({
@@ -152,7 +154,7 @@ export default async function SettingsPage() {
         <MasterDataCard rows={registry} />
         <div className="flex flex-col gap-[18px]">
           <SystemConfigCard initial={config} districtOptions={districtOptions} />
-          <SmsTestCard plans={plans} smsReady={sms.ready} missing={sms.missing} senderId={sms.cfg.senderId} />
+          <SmsTestCard plans={plans} smsReady={sms.ready} missing={sms.missing} senderId={sms.cfg.senderId} waReady={wa.ready} waMissing={wa.missing} />
           <DataManagementCard />
         </div>
       </div>
