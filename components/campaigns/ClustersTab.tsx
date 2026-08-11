@@ -20,6 +20,7 @@ import type { ClusterMembersResult } from "@/components/clusters/types";
 const CARD = "rounded-[14px] border border-black/[0.04] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]";
 const n = (x: number) => x.toLocaleString("en-IN");
 const ORIGIN_LABEL: Record<string, string> = { map: "Map", segment: "Builder", analytics: "Analytics" };
+const fmtDate = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); };
 
 export interface StoreOption { id: number; name: string; zone: string | null }
 
@@ -64,6 +65,10 @@ export function ClustersTab({ initial, zones, crops, pests, stores, canChain, ca
                 {c.mode === "dynamic" && <span className="rounded-full bg-[#E8F5E9] px-2 py-0.5 text-[10px] font-semibold text-[#2E7D32]">● live</span>}
               </div>
               <div className="mt-0.5 truncate text-[11.5px] text-[#9E9E9E]" title={c.description}>{c.description}</div>
+              <div className="mt-0.5 text-[10.5px] text-[#BDBDBD]">
+                {c.createdBy ? <>By <span className="font-semibold text-[#9E9E9E]">{c.createdBy}</span>{c.createdByCode ? ` (${c.createdByCode})` : ""}</> : "By —"}
+                {c.createdAt ? ` · ${fmtDate(c.createdAt)}` : ""}
+              </div>
             </div>
             <div className="text-[13px] font-bold text-[#2E7D32]">{n(c.count)}</div>
             <div className="text-[11px] text-[#9E9E9E]">farmers</div>
@@ -238,7 +243,9 @@ function MembersModal({ cluster, onClose }: { cluster: ClusterVM; onClose: () =>
   useEffect(() => { getClusterFarmers(cluster.id, 1).then(setData); }, [cluster.id]);
   return (
     <Modal open onClose={onClose} className="max-w-[720px]">
-      <ModalHeader eyebrow={cluster.description} eyebrowColor="#2E7D32" title={cluster.name} subtitle={`${n(cluster.count)} farmers · live`} onClose={onClose} />
+      <ModalHeader eyebrow={cluster.description} eyebrowColor="#2E7D32" title={cluster.name}
+        subtitle={`${n(cluster.count)} farmers · live${cluster.createdBy ? ` · created by ${cluster.createdBy}${cluster.createdByCode ? ` (${cluster.createdByCode})` : ""}` : ""}${cluster.createdAt ? ` · ${fmtDate(cluster.createdAt)}` : ""}`}
+        onClose={onClose} />
       <div className="max-h-[64vh] overflow-y-auto px-5 py-4">
         {!data ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">Loading…</div>
           : data.rows.length === 0 ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">No members.</div>

@@ -9,7 +9,7 @@ import { segMeta } from "@/lib/campaign-segments";
 import { cropLabel } from "@/lib/crops";
 import { inr } from "@/lib/format";
 import { shortStoreName } from "@/lib/store-utils";
-import { getScope, farmerScopeWhere } from "@/lib/scope";
+import { getScope, farmerScopeWhere, getActor } from "@/lib/scope";
 import { CLUSTER_PAGE_SIZE, type ClusterMembersResult } from "@/components/clusters/types";
 import { parseCriteria, scopedCriteriaWhere } from "@/lib/cluster-rules";
 
@@ -84,6 +84,7 @@ export async function createClusterAction(
       storeName,
     });
 
+    const actor = await getActor();
     await prisma.cluster.create({
       data: {
         name,
@@ -91,6 +92,8 @@ export async function createClusterAction(
         criteria,
         farmerIds,
         farmerNames,
+        createdBy: actor.name,
+        createdByCode: actor.code,
         source: "DEMO",
       },
     });

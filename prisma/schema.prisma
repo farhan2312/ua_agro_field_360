@@ -618,7 +618,8 @@ model Cluster {
   mode        String     @default("static") // dynamic (resolve rule live) | static (frozen farmerIds)
   farmerIds   Int[]      @default([]) // snapshot (static clusters + legacy)
   farmerNames String[]   @default([])
-  createdBy   String?
+  createdBy   String? // name of the user who created the cluster (real user, not an impersonated persona)
+  createdByCode String? // their employee code (audit)
   source      DataSource @default(DEMO)
   createdAt   DateTime   @default(now())
 

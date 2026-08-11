@@ -67,6 +67,8 @@ export interface ClusterVM {
   origin: string;
   mode: string;
   createdBy: string;
+  createdByCode: string;
+  createdAt: string; // ISO — when the cluster was created
 }
 
 /** All saved clusters with LIVE counts (dynamic clusters re-resolve their rule). */
@@ -81,7 +83,7 @@ export async function listClustersWithCounts(): Promise<ClusterVM[]> {
     where: { source: "REAL" }, // demo clusters must not be bundleable into real projects/campaigns
     orderBy: { createdAt: "desc" },
     take: 100,
-    select: { id: true, name: true, description: true, criteria: true, mode: true, origin: true, farmerIds: true, createdBy: true },
+    select: { id: true, name: true, description: true, criteria: true, mode: true, origin: true, farmerIds: true, createdBy: true, createdByCode: true, createdAt: true },
   });
   const rows = await mapLimit(clusters, 8, async (c) => {
     const crit = c.mode === "dynamic" ? parseCriteria(c.criteria) : null;
@@ -99,6 +101,8 @@ export async function listClustersWithCounts(): Promise<ClusterVM[]> {
       origin: c.origin ?? "map",
       mode: c.mode,
       createdBy: c.createdBy ?? "",
+      createdByCode: c.createdByCode ?? "",
+      createdAt: c.createdAt.toISOString(),
     };
   });
   return fScope ? rows.filter((r) => r.count > 0) : rows;

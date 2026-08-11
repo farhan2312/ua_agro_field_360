@@ -3,8 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { getPersona, getRole } from "@/lib/session";
-import { canManage } from "@/lib/scope";
+import { getRole } from "@/lib/session";
+import { canManage, getActor } from "@/lib/scope";
 import { SPEND_TIERS } from "@/lib/spend-tiers";
 import {
   PAGE_SIZE,
@@ -175,7 +175,7 @@ export async function createClusterFromCriteria(input: {
           ? input.criteria.explicitIds.slice(0, MAX_CLUSTER)
           : await resolveClusterIds(input.criteria, MAX_CLUSTER)
         : [];
-    const persona = await getPersona();
+    const actor = await getActor(); // the ACTUAL logged-in user (not an impersonated persona)
     const cluster = await prisma.cluster.create({
       data: {
         name,
@@ -185,7 +185,8 @@ export async function createClusterFromCriteria(input: {
         mode,
         farmerIds,
         farmerNames: [],
-        createdBy: persona.name,
+        createdBy: actor.name,
+        createdByCode: actor.code,
         source: "REAL",
       },
     });
