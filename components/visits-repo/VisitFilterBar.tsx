@@ -26,15 +26,35 @@ export function VisitFilterBar({
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  const navigate = useCallback(
+    (params: URLSearchParams) => {
+      const qs = params.toString();
+      router.push(qs ? `/visits?${qs}` : "/visits");
+      router.refresh(); // force the server component to re-run (defeats any stale client router cache)
+    },
+    [router],
+  );
+
+  // Dropdown filters: "all" means "no filter", so drop the param entirely.
   const setParam = useCallback(
     (key: string, value: string) => {
       const params = new URLSearchParams(searchParams.toString());
       if (value === "all") params.delete(key);
       else params.set(key, value);
-      const qs = params.toString();
-      router.push(qs ? `/visits?${qs}` : "/visits");
+      navigate(params);
     },
-    [router, searchParams],
+    [navigate, searchParams],
+  );
+
+  // Period pills: "all" (All Time) is a real state, NOT an absent filter — always set it explicitly,
+  // or the page falls back to its "month" default and All Time can never stay selected.
+  const setPeriod = useCallback(
+    (value: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("period", value);
+      navigate(params);
+    },
+    [navigate, searchParams],
   );
 
   return (
@@ -47,7 +67,7 @@ export function VisitFilterBar({
             <button
               key={p.key}
               type="button"
-              onClick={() => setParam("period", p.key)}
+              onClick={() => setPeriod(p.key)}
               className="px-[14px] py-[6px] rounded-[20px] text-xs font-semibold cursor-pointer transition-all hover:opacity-85"
               style={{
                 background: active ? "#1A3A1A" : "white",

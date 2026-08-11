@@ -63,13 +63,16 @@ export function VisitDateFilter({ minDate, from, to, onChange }: {
         </span>
       </div>
 
-      <div className="relative mx-1 h-6">
-        <div className="absolute left-0 right-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-[#EAEAEA]" />
-        <div className="absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-[#2E7D32]" style={{ left: `${leftPct}%`, right: `${100 - rightPct}%` }} />
+      {/* px-2 insets both ends by half a thumb so the 0%/100% handles are never clipped or unreachable.
+          Track + fill are one nested element (single bar); the two inputs sit over the same inset span. */}
+      <div className="relative mx-1 h-6 px-2">
+        <div className="absolute inset-x-2 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-[#EAEAEA]">
+          <div className="absolute inset-y-0 rounded-full bg-[#2E7D32]" style={{ left: `${leftPct}%`, right: `${100 - rightPct}%` }} />
+        </div>
         <input type="range" min={0} max={total} value={fromOff} onChange={(e) => setFrom(Number(e.target.value))}
-          aria-label="From date" className="vdf-range absolute left-0 top-0 h-6 w-full" style={{ zIndex: fromOff > total - 8 ? 5 : 3 }} />
+          aria-label="From date" className="vdf-range absolute inset-x-2 top-0 h-6" style={{ zIndex: fromOff > total - 8 ? 5 : 3 }} />
         <input type="range" min={0} max={total} value={toOff} onChange={(e) => setTo(Number(e.target.value))}
-          aria-label="To date" className="vdf-range absolute left-0 top-0 h-6 w-full" style={{ zIndex: 4 }} />
+          aria-label="To date" className="vdf-range absolute inset-x-2 top-0 h-6" style={{ zIndex: 4 }} />
       </div>
     </div>
   );

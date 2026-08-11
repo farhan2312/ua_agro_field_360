@@ -96,7 +96,7 @@ export async function GET(req: NextRequest) {
           "Main crop", "Crops", "Other crops", "Season", "Crop insured", "Land holding", "Products", "Product required",
           "Current problem", "Crop risk", "Danger zone", "Annual expense", "Purchase freq", "Other shops",
           "FPO member", "FPO name", "Contract farming", "Contract detail", "Dairy services", "Dairy detail",
-          "WhatsApp", "WhatsApp number", "Photos", "Voice notes", "Notes", "Lead status", "Segment", "Recorded at (UTC)",
+          "WhatsApp", "WhatsApp number", "Photos", "Voice notes", "Notes", "Lifecycle stage", "Value segment", "Recorded at (UTC)",
         ]).commit();
         let cursor = 0, count = 0; const BATCH = 5000;
         for (;;) {
@@ -119,7 +119,7 @@ export async function GET(req: NextRequest) {
               v."contractFarming" AS contract, v."contractDetail" AS contractdetail,
               v."dairyServices" AS dairy, v."dairyDetail" AS dairydetail, v."whatsappAvail" AS wa, v."whatsappNumber" AS wanum,
               COALESCE(array_length(v.photos,1),0) AS photos, COALESCE(array_length(v."voiceNotes",1),0) AS voices,
-              v.notes, v."leadStatus"::text AS lead, v.segment::text AS segment,
+              v.notes, f."lifecycleSegment"::text AS lead, f."valueSegment"::text AS segment,
               to_char(v."createdAt",'YYYY-MM-DD HH24:MI') AS createdat
             FROM "Visit" v
             LEFT JOIN "Farmer" f ON f.id = v."farmerId"
@@ -130,6 +130,8 @@ export async function GET(req: NextRequest) {
           if (!rows.length) break;
           const yn = (b: unknown) => (b ? "Yes" : "No");
           const s = (x: unknown) => (x == null ? "" : String(x));
+          // Farmer segments → friendly labels (LEAD → "Lead", POTENTIAL_HNI → "Potential HNI"); "" when unset.
+          const segLabel = (x: unknown) => { const k = x == null ? "" : String(x); if (!k) return ""; try { return segMeta(k).label; } catch { return k; } };
           for (const r of rows) {
             cursor = Number(r.id); count++;
             ws.addRow([
@@ -139,7 +141,7 @@ export async function GET(req: NextRequest) {
               s(r.maincrop), s(r.crops), s(r.othercrops), s(r.season), yn(r.insured), s(r.land),
               s(r.products), s(r.prodreq), s(r.problem), s(r.croprisk), s(r.danger), s(r.expense), s(r.freq), s(r.othershops),
               yn(r.fpo), s(r.fponame), yn(r.contract), s(r.contractdetail), yn(r.dairy), s(r.dairydetail),
-              yn(r.wa), s(r.wanum), Number(r.photos ?? 0), Number(r.voices ?? 0), s(r.notes), s(r.lead), s(r.segment), s(r.createdat),
+              yn(r.wa), s(r.wanum), Number(r.photos ?? 0), Number(r.voices ?? 0), s(r.notes), segLabel(r.lead), segLabel(r.segment), s(r.createdat),
             ]).commit();
           }
           if (rows.length < BATCH) break;
