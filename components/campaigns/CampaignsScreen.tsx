@@ -7,6 +7,7 @@ import { Modal, ModalHeader } from "@/components/interactive";
 import { segMeta, fillTemplate, SEGMENT_COLUMNS, VALUE_TITLE, LIFECYCLE_TITLE } from "@/lib/campaign-segments";
 import { SmsSender } from "./SmsSender";
 import { WaSender } from "./WaSender";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { cropLabel } from "@/lib/crops";
 import { inr } from "@/lib/format";
 import {
@@ -93,6 +94,7 @@ function CommPlanTab({ templates }: { templates: CommTemplateVM[] }) {
   const [adding, setAdding] = useState(false);
   const [saving, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
+  const { confirm, dialog } = useConfirm();
   // Filters: medium · promotion type · language
   const [fMedium, setFMedium] = useState("All");
   const [fPromo, setFPromo] = useState("");
@@ -121,9 +123,13 @@ function CommPlanTab({ templates }: { templates: CommTemplateVM[] }) {
   };
   const remove = (id: number) =>
     start(async () => { const res = await deleteCommTemplate(id); if (res.ok) setRows((r) => r.filter((x) => x.id !== id)); });
+  const askRemove = async (t: CommTemplateVM) => {
+    if (await confirm({ title: "Delete this comm plan?", confirmLabel: "Delete comm plan", message: <><b>{t.name || "This comm plan"}</b> will be permanently removed. Campaigns tagged with it lose that template. This can’t be undone.</> })) remove(t.id);
+  };
 
   return (
     <div className="flex flex-col gap-3.5">
+      {dialog}
       <div className="flex flex-wrap items-center gap-2">
         <div className="text-[12.5px] text-[#757575]">Reusable message templates — campaigns are tagged with one or more of these by name. Slots — <b>[Naam]</b>, <b>[gap]</b>, <b>[last item]</b>, <b>[Store]</b>, <b>[number]</b>, <b>[date]</b> — fill per customer.</div>
         <button type="button" onClick={() => { setAdding(true); setEditing(null); setDraft({ ...EMPTY_PLAN }); setErr(null); }}
@@ -180,7 +186,7 @@ function CommPlanTab({ templates }: { templates: CommTemplateVM[] }) {
               <div className="ml-auto flex items-center gap-3">
                 <button type="button" onClick={() => { setEditing(isEditing ? null : t.id); setAdding(false); setDraft({ ...t }); setErr(null); }}
                   className="text-[12px] font-semibold text-[#2E7D32] hover:underline">{isEditing ? "Cancel" : "Edit"}</button>
-                <button type="button" onClick={() => remove(t.id)} disabled={saving} className="text-[12px] font-semibold text-[#C62828] hover:underline disabled:opacity-50">Delete</button>
+                <button type="button" onClick={() => askRemove(t)} disabled={saving} className="text-[12px] font-semibold text-[#C62828] hover:underline disabled:opacity-50">Delete</button>
               </div>
             </div>
             {isEditing && draft ? (

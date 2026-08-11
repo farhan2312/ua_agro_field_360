@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { updateBugStatus, getBugScreenshot, deleteBug, saveBugResolution, updateBugKind } from "@/app/actions/bugs";
 import { BUG_SEVERITIES, BUG_KINDS, type BugVM } from "@/lib/bug-constants";
 
@@ -46,6 +47,7 @@ function Kpi({ label, value, sub, color }: { label: string; value: string | numb
 
 export function BugTracker({ bugs: initial }: { bugs: BugVM[] }) {
   const [bugs, setBugs] = useState(initial);
+  const { confirm, dialog } = useConfirm();
   const [sev, setSev] = useState("");
   const [q, setQ] = useState("");
   const [dragId, setDragId] = useState<number | null>(null);
@@ -92,11 +94,11 @@ export function BugTracker({ bugs: initial }: { bugs: BugVM[] }) {
     });
   };
 
-  const remove = (id: number) => {
-    if (!confirm("Delete this bug report?")) return;
+  const remove = async (b: BugVM) => {
+    if (!(await confirm({ title: "Delete this report?", confirmLabel: "Delete report", message: <><b>{b.title || "This report"}</b> will be permanently removed. This can’t be undone.</> }))) return;
     const prev = bugs;
-    setBugs((bs) => bs.filter((b) => b.id !== id));
-    start(async () => { const r = await deleteBug(id); if (!r.ok) setBugs(prev); });
+    setBugs((bs) => bs.filter((x) => x.id !== b.id));
+    start(async () => { const r = await deleteBug(b.id); if (!r.ok) setBugs(prev); });
   };
 
   const viewShot = (b: BugVM) => {
@@ -138,6 +140,7 @@ export function BugTracker({ bugs: initial }: { bugs: BugVM[] }) {
 
   return (
     <div className="animate-[fadeUp_0.4s_ease-out]">
+      {dialog}
       {/* KPI strip */}
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <Kpi label="Total Bugs" value={kpis.total} />
@@ -214,7 +217,7 @@ export function BugTracker({ bugs: initial }: { bugs: BugVM[] }) {
                           <button type="button" onClick={() => viewShot(b)} title="View screenshot"
                             className="rounded-md bg-[#F5F7F5] px-1.5 py-1 text-[10.5px] font-semibold text-[#1565C0] hover:bg-[#E3F2FD]">📷</button>
                         )}
-                        <button type="button" onClick={() => remove(b.id)} title="Delete"
+                        <button type="button" onClick={() => remove(b)} title="Delete"
                           className="rounded-md bg-[#FDECEA] px-1.5 py-1 text-[10.5px] font-semibold text-[#C62828] hover:bg-[#F9DCD8]">✕</button>
                       </div>
                     </div>

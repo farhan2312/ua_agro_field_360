@@ -14,6 +14,7 @@ import {
 } from "@/app/actions/campaigns";
 import { createClusterFromCriteria } from "@/app/actions/cluster-builder";
 import { ChainNext } from "@/components/ChainNext";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { getClusterFarmers } from "@/app/actions/clusters";
 import type { ClusterMembersResult } from "@/components/clusters/types";
 
@@ -35,13 +36,18 @@ export function ClustersTab({ initial, zones, crops, pests, stores, canChain, ca
   const [building, setBuilding] = useState(false);
   const [viewing, setViewing] = useState<ClusterVM | null>(null);
   const [pending, start] = useTransition();
+  const { confirm, dialog } = useConfirm();
 
   const refresh = () => start(async () => setList(await listClustersWithCounts()));
   const remove = (id: number) =>
     start(async () => { await deleteCluster(id); setList((l) => l.filter((c) => c.id !== id)); });
+  const askRemove = async (c: ClusterVM) => {
+    if (await confirm({ title: "Delete this cluster?", confirmLabel: "Delete cluster", message: <><b>{c.name}</b> ({n(c.count)} farmers) will be permanently removed. This can’t be undone.</> })) remove(c.id);
+  };
 
   return (
     <div>
+      {dialog}
       <div className="mb-3 flex items-center justify-between">
         <div className="text-[13px] text-[#757575]">
           {canCreate
@@ -74,7 +80,7 @@ export function ClustersTab({ initial, zones, crops, pests, stores, canChain, ca
             <div className="text-[11px] text-[#9E9E9E]">farmers</div>
             <button type="button" onClick={() => setViewing(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9]">View</button>
             {canCreate && (
-              <button type="button" onClick={() => remove(c.id)} disabled={pending} className="rounded-[8px] bg-[#FDECEA] px-3 py-1.5 text-[12px] font-semibold text-[#C62828] hover:bg-[#F9DCD8] disabled:opacity-50">Delete</button>
+              <button type="button" onClick={() => askRemove(c)} disabled={pending} className="rounded-[8px] bg-[#FDECEA] px-3 py-1.5 text-[12px] font-semibold text-[#C62828] hover:bg-[#F9DCD8] disabled:opacity-50">Delete</button>
             )}
           </div>
         ))}

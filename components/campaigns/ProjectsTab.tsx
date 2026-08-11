@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
 import { ChainNext } from "@/components/ChainNext";
+import { useConfirm } from "@/components/ConfirmDialog";
 import {
   listProjects, createProject, setProjectClusters, deleteProject, extendProject,
   type ProjectVM, type ClusterVM,
@@ -23,13 +24,18 @@ export function ProjectsTab({ initial, clusters, initialClusterId }: { initial: 
   const [editing, setEditing] = useState<ProjectVM | null>(null);
   const [extendingP, setExtendingP] = useState<ProjectVM | null>(null);
   const [pending, start] = useTransition();
+  const { confirm, dialog } = useConfirm();
 
   const refresh = () => start(async () => setList(await listProjects()));
   const remove = (id: number) =>
     start(async () => { await deleteProject(id); setList((l) => l.filter((p) => p.id !== id)); });
+  const askRemove = async (p: ProjectVM) => {
+    if (await confirm({ title: "Delete this project?", confirmLabel: "Delete project", confirmWord: p.name, message: <><b>{p.name}</b> and its campaign links will be permanently removed. This can’t be undone.</> })) remove(p.id);
+  };
 
   return (
     <div>
+      {dialog}
       <div className="mb-3 flex items-center justify-between">
         <div className="text-[13px] text-[#757575]">
           A project bundles one or more farmer clusters. Run a campaign on the whole project, or on a single cluster inside it.
@@ -74,7 +80,7 @@ export function ProjectsTab({ initial, clusters, initialClusterId }: { initial: 
                 </div>
                 <button type="button" onClick={() => setEditing(p)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9]">Edit</button>
                 <button type="button" onClick={() => setExtendingP(p)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#6A1B9A] hover:bg-[#F3E5F5]">Extend</button>
-                <button type="button" onClick={() => remove(p.id)} disabled={pending} className="rounded-[8px] bg-[#FDECEA] px-3 py-1.5 text-[12px] font-semibold text-[#C62828] hover:bg-[#F9DCD8] disabled:opacity-50">Delete</button>
+                <button type="button" onClick={() => askRemove(p)} disabled={pending} className="rounded-[8px] bg-[#FDECEA] px-3 py-1.5 text-[12px] font-semibold text-[#C62828] hover:bg-[#F9DCD8] disabled:opacity-50">Delete</button>
               </div>
             </div>
           );
