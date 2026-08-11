@@ -16,6 +16,7 @@ import {
 } from "@/app/actions/analytics-segments";
 
 const CARD = "rounded-[14px] border border-black/[0.04] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]";
+type ExportScope = "sales" | "visits" | "both";
 const n = (x: number) => Math.round(x).toLocaleString("en-IN");
 const money = (x: number) => (x >= 1e7 ? `₹${(x / 1e7).toFixed(2)} Cr` : x >= 1e5 ? `₹${(x / 1e5).toFixed(1)} L` : `₹${n(x)}`);
 
@@ -33,6 +34,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportBytes, setExportBytes] = useState(0);
+  const [exportScope, setExportScope] = useState<ExportScope>("sales"); // Sales / Visits / Both — drives the export
   const [treeBy, setTreeBy] = useState<"value" | "lifecycle">("value"); // shared primary dimension for the KPI tree AND the detailed matrix
   const flipTree = () => setTreeBy((b) => (b === "value" ? "lifecycle" : "value"));
   const years = filters.fyStarts ?? []; // selected FY start years — drives the whole sales analysis
@@ -53,8 +55,8 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
     return () => document.removeEventListener("mousedown", onDown);
   }, []);
 
-  // One streaming Excel export (matrix + all sale lines + filters) — any size, with live progress.
-  const exportExcel = async (type: "sales" | "visits" = "sales") => {
+  // One streaming Excel export — sales sheets, visit sheet, or both (one file) — any size, live progress.
+  const exportExcel = async (type: ExportScope = "sales") => {
     if (exporting) return;
     setExporting(true); setExportBytes(0);
     try {
@@ -64,7 +66,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
         spendTiers: filters.spendTiers, fyStarts: filters.fyStarts, problems: filters.problems,
         visitFrom: filters.visitFrom, visitTo: filters.visitTo,
       };
-      const url = `/api/analytics/export?f=${encodeURIComponent(btoa(JSON.stringify(f)))}${type === "visits" ? "&type=visits" : ""}`;
+      const url = `/api/analytics/export?f=${encodeURIComponent(btoa(JSON.stringify(f)))}&type=${type}`;
       const res = await fetch(url);
       if (!res.ok || !res.body) throw new Error((await res.text().catch(() => "")) || "Export failed.");
       const reader = res.body.getReader();
@@ -101,7 +103,10 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
       setVisitData(va);
     });
   };
-  const setLens = (lens: Lens) => apply({ lens, crops: undefined, valueSegments: undefined, lifecycleSegments: undefined, spendTiers: undefined, problems: undefined });
+  const setLens = (lens: Lens) => {
+    setExportScope((s) => (s === "both" ? s : lens === "visit" ? "visits" : "sales")); // follow the lens unless the user chose Both
+    apply({ lens, crops: undefined, valueSegments: undefined, lifecycleSegments: undefined, spendTiers: undefined, problems: undefined });
+  };
   const clearAll = () => apply({ storeIds: undefined, zones: undefined, villages: undefined, crops: undefined, pests: undefined, valueSegments: undefined, lifecycleSegments: undefined, spendTiers: undefined, problems: undefined, fyStarts: undefined, visitFrom: undefined, visitTo: undefined });
 
   const openCell = (storeId: number | null, storeName: string, dim: SegDim | "cross", seg: string) => {
@@ -132,8 +137,28 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {loading && <span className="text-[12px] text-[#9E9E9E]">Updating…</span>}
+          {/* Unified export: choose Sales / Visits / Both → one Excel (Both = separate sheets, filters respected). */}
+          {exporting && (
+            <span className="flex items-center gap-2 rounded-full bg-[#E3F2FD] px-2.5 py-1 text-[11px] font-semibold text-[#1565C0]">
+              <span className="h-3 w-3 animate-spin rounded-full border-2 border-[#90CAF9] border-t-[#1565C0]" />
+              Preparing Excel… {fmtBytes(exportBytes)}
+            </span>
+          )}
+          <div className="inline-flex overflow-hidden rounded-[10px] border border-[#2E7D32]">
+            <select value={exportScope} onChange={(e) => setExportScope(e.target.value as ExportScope)} disabled={exporting}
+              aria-label="What to export"
+              className="cursor-pointer bg-[#E8F5E9] px-2.5 py-2 text-[12.5px] font-semibold text-[#2E7D32] outline-none disabled:opacity-50">
+              <option value="sales">Sales data</option>
+              <option value="visits">Visit data</option>
+              <option value="both">Both (sales + visits)</option>
+            </select>
+            <button type="button" onClick={() => exportExcel(exportScope)} disabled={exporting}
+              className="border-l border-[#2E7D32] bg-[#2E7D32] px-3.5 py-2 text-[12.5px] font-semibold text-white hover:bg-[#1B5E20] disabled:opacity-50"
+              title="Export the current filters to Excel (streamed, any size)">
+              {exporting ? "Exporting…" : "⬇ Export"}</button>
+          </div>
           <button type="button" onClick={() => setSaving(true)} disabled={k.farmers === 0}
             className="rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50">＋ Save as cluster</button>
         </div>
@@ -212,34 +237,10 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
         </div>
         <BarCard title="Sales-crop breakdown" bars={data.cropBreakdown.map((b) => ({ ...b, label: cropLabel(b.label) }))} fmt={n} accent="#F9A825" />
 
-        <MergedMatrixCard matrix={data.matrix} valueCols={data.valueCols} lifecycleCols={data.lifecycleCols} onCell={openCell} by={treeBy} onFlip={flipTree} filters={filters}
-          right={<div className="flex items-center gap-2.5">
-            {exporting && (
-              <span className="flex items-center gap-2 rounded-full bg-[#E3F2FD] px-2.5 py-1 text-[11px] font-semibold text-[#1565C0]">
-                <span className="h-3 w-3 animate-spin rounded-full border-2 border-[#90CAF9] border-t-[#1565C0]" />
-                Preparing Excel… {fmtBytes(exportBytes)}
-              </span>
-            )}
-            <button type="button" onClick={() => exportExcel("sales")} disabled={exporting}
-              className="rounded-[8px] border border-[#2E7D32] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9] disabled:opacity-50"
-              title="Full workbook: Value×Lifecycle matrix + every matching sale line + filters (streamed, any size)">
-              {exporting ? "Exporting…" : "⬇ Export to Excel"}</button>
-          </div>} />
+        <MergedMatrixCard matrix={data.matrix} valueCols={data.valueCols} lifecycleCols={data.lifecycleCols} onCell={openCell} by={treeBy} onFlip={flipTree} filters={filters} />
       </div>
       ) : (
         <div className="flex flex-col gap-[14px]">
-          <div className="flex items-center justify-end gap-2.5">
-            {exporting && (
-              <span className="flex items-center gap-2 rounded-full bg-[#E3F2FD] px-2.5 py-1 text-[11px] font-semibold text-[#1565C0]">
-                <span className="h-3 w-3 animate-spin rounded-full border-2 border-[#90CAF9] border-t-[#1565C0]" />
-                Preparing Excel… {fmtBytes(exportBytes)}
-              </span>
-            )}
-            <button type="button" onClick={() => exportExcel("visits")} disabled={exporting}
-              className="rounded-[8px] border border-[#2E7D32] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9] disabled:opacity-50"
-              title="Every visit in scope with all recorded attributes (streamed, any size)">
-              {exporting ? "Exporting…" : "⬇ Export visits to Excel"}</button>
-          </div>
           <VisitBoard va={visitData} />
         </div>
       )}
