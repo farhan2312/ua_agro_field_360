@@ -7,6 +7,8 @@ import { Modal, ModalHeader } from "@/components/interactive";
 import { segMeta, fillTemplate, SEGMENT_COLUMNS, VALUE_TITLE, LIFECYCLE_TITLE } from "@/lib/campaign-segments";
 import { SmsSender } from "./SmsSender";
 import { WaSender } from "./WaSender";
+import { BroadcastPanel } from "./BroadcastPanel";
+import { WA_VAR_TOKENS } from "@/lib/campaign-vars";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { cropLabel } from "@/lib/crops";
 import { inr } from "@/lib/format";
@@ -27,6 +29,7 @@ export interface CommTemplateVM {
   dltTemplateId?: string | null;
   waTemplateName?: string | null;
   waLanguage?: string | null;
+  waVariables?: string[];
 }
 export interface StoreLite { id: number; name: string }
 
@@ -81,11 +84,30 @@ function CommPlanForm({ draft, setDraft }: { draft: CommTemplateVM; setDraft: (t
         <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">WhatsApp Template Language</label>
           <input className={`${input} w-full`} value={draft.waLanguage ?? ""} onChange={(e) => setDraft({ ...draft, waLanguage: e.target.value })} placeholder="e.g. en / en_US / hi" /></div>
       </div>
+      {/* WhatsApp template variables — map each {{n}} to a farmer field (order matters). */}
+      <div>
+        <label className="text-[10px] font-bold uppercase text-[#9E9E9E]">WhatsApp template variables <span className="normal-case text-[#BDBDBD]">— fills {"{{1}}"}, {"{{2}}"}… in order</span></label>
+        <div className="mt-1 flex flex-col gap-1.5">
+          {(draft.waVariables ?? []).map((tok, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <span className="w-9 shrink-0 text-[11px] font-mono font-bold text-[#616161]">{`{{${i + 1}}}`}</span>
+              <select className={`${input} flex-1`} value={tok}
+                onChange={(e) => setDraft({ ...draft, waVariables: (draft.waVariables ?? []).map((x, j) => (j === i ? e.target.value : x)) })}>
+                {WA_VAR_TOKENS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+              </select>
+              <button type="button" onClick={() => setDraft({ ...draft, waVariables: (draft.waVariables ?? []).filter((_, j) => j !== i) })}
+                className="text-[12px] font-semibold text-[#C62828] hover:underline">Remove</button>
+            </div>
+          ))}
+          <button type="button" onClick={() => setDraft({ ...draft, waVariables: [...(draft.waVariables ?? []), WA_VAR_TOKENS[0].key] })}
+            className="self-start rounded-[8px] border border-[#E0E0E0] px-2.5 py-1 text-[11.5px] font-semibold text-[#616161] hover:bg-[#F5F5F5]">+ Add variable</button>
+        </div>
+      </div>
     </div>
   );
 }
 
-const EMPTY_PLAN: CommTemplateVM = { id: 0, name: "", language: "hi", promoType: "General", segment: "REGULAR", priority: 5, medium: "WhatsApp", offer: "", timingLabel: "", template: "", dltTemplateId: "", waTemplateName: "", waLanguage: "" };
+const EMPTY_PLAN: CommTemplateVM = { id: 0, name: "", language: "hi", promoType: "General", segment: "REGULAR", priority: 5, medium: "WhatsApp", offer: "", timingLabel: "", template: "", dltTemplateId: "", waTemplateName: "", waLanguage: "", waVariables: [] };
 
 function CommPlanTab({ templates }: { templates: CommTemplateVM[] }) {
   const [rows, setRows] = useState(templates);
@@ -109,7 +131,7 @@ function CommPlanTab({ templates }: { templates: CommTemplateVM[] }) {
     if (!draft) return;
     setErr(null);
     start(async () => {
-      const patch = { name: draft.name, language: draft.language, promoType: draft.promoType, segment: draft.segment, medium: draft.medium, offer: draft.offer, timingLabel: draft.timingLabel, template: draft.template, dltTemplateId: (draft.dltTemplateId ?? "").trim() || null, waTemplateName: (draft.waTemplateName ?? "").trim() || null, waLanguage: (draft.waLanguage ?? "").trim() || null };
+      const patch = { name: draft.name, language: draft.language, promoType: draft.promoType, segment: draft.segment, medium: draft.medium, offer: draft.offer, timingLabel: draft.timingLabel, template: draft.template, dltTemplateId: (draft.dltTemplateId ?? "").trim() || null, waTemplateName: (draft.waTemplateName ?? "").trim() || null, waLanguage: (draft.waLanguage ?? "").trim() || null, waVariables: draft.waVariables ?? [] };
       if (adding) {
         const res = await createCommTemplate(patch);
         if (res.ok && res.id != null) { setRows((r) => [...r, { ...draft, id: res.id! }]); setAdding(false); setDraft(null); }
@@ -236,6 +258,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
   const [members, setMembers] = useState<CampaignMemberVM[] | null>(null);
   const [memberPage, setMemberPage] = useState(0);
   const [focusMode, setFocusMode] = useState(false);
+  const [broadcasting, setBroadcasting] = useState(false); // admin mass-send panel
   const [focusCurrent, setFocusCurrent] = useState<CampaignMemberVM | null>(null); // Focus view's current farmer → drives the script panel
   const [extendOf, setExtendOf] = useState<CampaignListItem | null>(null);
 
@@ -391,7 +414,11 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
                     <OutreachProgress members={members} />
                     <div className="mb-3 mt-3 flex flex-wrap items-center justify-between gap-2">
                       <div className="text-[12px] text-[#757575]">{focusMode ? "Focus mode — one farmer at a time" : "Work the list, switch to Focus mode, or open the full-page matrix."}</div>
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2">
+                        {canManage && (
+                          <button type="button" onClick={() => setBroadcasting(true)}
+                            className="rounded-[10px] bg-[#0B8A3D] px-4 py-2 text-[12.5px] font-bold text-white">📣 Mass send</button>
+                        )}
                         <Link href={`/campaigns/${membersOf.id}/outreach`}
                           className="rounded-[10px] bg-[#6A1B9A] px-4 py-2 text-[12.5px] font-bold text-white">⛶ Matrix view</Link>
                         <button type="button" onClick={() => setFocusMode((v) => !v)}
@@ -460,6 +487,9 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
       </Modal>
 
       {extendOf && <ExtendModal campaign={extendOf} project={projects.find((p) => p.id === projectId) ?? null} onClose={() => setExtendOf(null)} />}
+      {broadcasting && membersOf && (
+        <BroadcastPanel campaignId={membersOf.id} campaignName={membersOf.name} commPlans={membersOf.commPlans ?? []} templates={templates} onClose={() => setBroadcasting(false)} />
+      )}
     </div>
   );
 }
@@ -542,8 +572,9 @@ export function StatusBadge({ member }: { member: CampaignMemberVM }) {
   return null;
 }
 
-/** Prominent, tappable phone number — what officers dial from. */
-function PhoneBlock({ mobile, big, extra }: { mobile: string | null; big?: boolean; extra?: ReactNode }) {
+/** Prominent, tappable phone number — what officers dial from. Officers get Call only; the manual
+ *  WhatsApp chat link + any admin send controls (`extra`) show only when `canWhatsApp`. */
+function PhoneBlock({ mobile, big, extra, canWhatsApp }: { mobile: string | null; big?: boolean; extra?: ReactNode; canWhatsApp?: boolean }) {
   const d10 = digits10(mobile);
   if (!d10) return (
     <div className="flex flex-wrap items-center gap-3 rounded-[12px] bg-[#FFF8E1] px-4 py-3">
@@ -558,7 +589,7 @@ function PhoneBlock({ mobile, big, extra }: { mobile: string | null; big?: boole
       </a>
       <div className="ml-auto flex flex-wrap gap-2">
         <a href={`tel:+91${d10}`} className={`rounded-[10px] bg-[#1565C0] font-bold text-white ${big ? "px-5 py-3 text-[14px]" : "px-4 py-2.5 text-[13px]"}`}>Call</a>
-        <a href={`https://wa.me/91${d10}`} target="_blank" rel="noopener noreferrer" className={`rounded-[10px] bg-[#1B8A4B] font-bold text-white ${big ? "px-5 py-3 text-[14px]" : "px-4 py-2.5 text-[13px]"}`}>WhatsApp</a>
+        {canWhatsApp && <a href={`https://wa.me/91${d10}`} target="_blank" rel="noopener noreferrer" className={`rounded-[10px] bg-[#1B8A4B] font-bold text-white ${big ? "px-5 py-3 text-[14px]" : "px-4 py-2.5 text-[13px]"}`}>WhatsApp</a>}
         {extra}
       </div>
     </div>
@@ -804,7 +835,7 @@ function MemberRow({ member, crops, onChange, commPlans, templates, canSms }: { 
         <ResponseBadge member={member} />
         <span className="text-[12px] text-[#9E9E9E]">{member.village ?? "—"}{member.store ? ` · ${member.store}` : ""}</span>
       </div>
-      <div className="mb-3"><PhoneBlock mobile={member.mobile} extra={canSms ? <><SmsSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} /><WaSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} /></> : null} /></div>
+      <div className="mb-3"><PhoneBlock mobile={member.mobile} canWhatsApp={canSms} extra={canSms ? <><SmsSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} /><WaSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} /></> : null} /></div>
       <div className="flex flex-col gap-2.5 rounded-[12px] border border-[#EAEAEA] bg-[#FBFBFB] p-3">
         <ResponsePicker value={o.response} crop={o.crop} crops={crops} onPick={o.pickResponse} onCrop={o.setCrop} disabled={pending} />
         <ApproachPicker value={o.mediums} onToggle={o.toggleChannel} disabled={pending} />
@@ -881,7 +912,7 @@ function FocusCard({ member, crops, onChange, onHandled, onSkip, onBack, remaini
         <span className="ml-auto rounded-full bg-[#F5F7F5] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#616161]">{remaining} left</span>
       </div>
       <div className="mb-3 text-[12.5px] text-[#9E9E9E]">{member.village ?? "—"}{member.store ? ` · ${member.store}` : ""}</div>
-      <div className="mb-4"><PhoneBlock mobile={member.mobile} big extra={canSms ? <><SmsSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} onSent={onHandled} big /><WaSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} onSent={onHandled} big /></> : null} /></div>
+      <div className="mb-4"><PhoneBlock mobile={member.mobile} big canWhatsApp={canSms} extra={canSms ? <><SmsSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} onSent={onHandled} big /><WaSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} onSent={onHandled} big /></> : null} /></div>
       <div className="flex flex-col gap-3 rounded-[12px] border border-[#EAEAEA] bg-[#FBFBFB] p-3.5">
         <ResponsePicker value={o.response} crop={o.crop} crops={crops} onPick={o.pickResponse} onCrop={o.setCrop} disabled={pending} />
         <ApproachPicker value={o.mediums} onToggle={o.toggleChannel} disabled={pending} />

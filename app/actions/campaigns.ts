@@ -245,6 +245,7 @@ export interface CommTemplatePatch {
   dltTemplateId?: string | null;
   waTemplateName?: string | null;
   waLanguage?: string | null;
+  waVariables?: string[];
 }
 
 export async function saveCommTemplate(id: number, patch: CommTemplatePatch): Promise<{ ok: boolean; error?: string }> {

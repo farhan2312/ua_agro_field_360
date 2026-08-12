@@ -414,6 +414,7 @@ model CommTemplate {
   dltTemplateId String? // ZapSMS/DLT approved Template ID for this message (required for real delivery)
   waTemplateName String? // WhatsApp Cloud API approved template name (for template-mode WhatsApp sends)
   waLanguage     String? // WhatsApp template language code, e.g. "en" | "en_US" | "hi"
+  waVariables    String[] @default([]) // ordered token keys filling the WA template's {{1}},{{2}}… (name|crop|store|…)
   active      Boolean  @default(true)
   updatedAt   DateTime @updatedAt
 
@@ -464,6 +465,44 @@ model WhatsAppLog {
   @@index([campaignId])
   @@index([farmerId])
   @@index([createdAt])
+}
+
+/// A mass send (SMS or WhatsApp) run against a campaign's TEST group — the broadcast job + audit.
+model Broadcast {
+  id             Int      @id @default(autoincrement())
+  campaignId     Int
+  channel        String // SMS | WHATSAPP
+  commTemplateId Int?
+  templateLabel  String? // display name (comm plan / WA template)
+  status         String   @default("running") // running | done | canceled
+  total          Int      @default(0)
+  sent           Int      @default(0)
+  failed         Int      @default(0)
+  createdByName  String?
+  createdByCode  String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt @default(now())
+
+  recipients BroadcastRecipient[]
+
+  @@index([campaignId])
+  @@index([status])
+}
+
+/// One recipient of a Broadcast — snapshotted at creation so a 1k–10k run can batch + resume idempotently.
+model BroadcastRecipient {
+  id          Int       @id @default(autoincrement())
+  broadcastId Int
+  broadcast   Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+  memberId    Int?
+  farmerId    Int?
+  mobile      String
+  status      String    @default("pending") // pending | sent | failed | skipped
+  providerId  String?
+  error       String?
+  sentAt      DateTime?
+
+  @@index([broadcastId, status])
 }
 
 /// A WhatsApp opt-in — someone who messaged our business number (scanned the QR / click-to-chat).
