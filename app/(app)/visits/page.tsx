@@ -50,6 +50,7 @@ export default async function VisitRepoPage({
   let officerOptions: string[] = [];
   let storeOptions: string[] = [];
   let typeOptions: string[] = [];
+  let total = 0, followup = 0, officers = 0, farmers = 0;
 
   // RBAC: officers see only their store's visits, RMs only their region's.
   const scope = await getScope();
@@ -81,7 +82,7 @@ export default async function VisitRepoPage({
       }),
       prisma.store.findMany({
         where: storeWhere && storeWhere !== "none" ? storeWhere : undefined,
-        select: { name: true },
+        select: { id: true, name: true },
       }),
     ]);
 
@@ -101,8 +102,26 @@ export default async function VisitRepoPage({
     if (type !== "all") where.purpose = type;
     const cutoff = periodCutoff(period);
     if (cutoff) where.visitedAt = { gte: cutoff };
+    // Store filter is a SHORT name (may cover several stores) → map to store IDs so it runs in the DB.
+    if (store !== "all") {
+      const ids = allStores.filter((s) => shortStoreName(s.name) === store).map((s) => s.id);
+      where.storeId = { in: ids.length ? ids : [-1] };
+    }
     // Scope goes on LAST so no query-string filter can widen it.
     const scopedWhere: Prisma.VisitWhereInput = scopeWhere ? { AND: [where, scopeWhere] } : where;
+
+    // KPIs are COUNTs over the FULL filtered set — never the capped table rows (that's the bug that
+    // pinned "Total Visits" at 500 and made it disagree with the analytics Visits tab).
+    const [totalCount, followupCount, officerDistinct, farmerDistinct] = await Promise.all([
+      prisma.visit.count({ where: scopedWhere }),
+      prisma.visit.count({ where: { AND: [scopedWhere, { followUpDate: { not: null } }] } }),
+      prisma.visit.findMany({ where: { AND: [scopedWhere, { officerName: { not: null } }] }, select: { officerName: true }, distinct: ["officerName"] }),
+      prisma.visit.findMany({ where: { AND: [scopedWhere, { farmerId: { not: null } }] }, select: { farmerId: true }, distinct: ["farmerId"] }),
+    ]);
+    total = totalCount;
+    followup = followupCount;
+    officers = officerDistinct.length;
+    farmers = farmerDistinct.length;
 
     const visits = await prisma.visit.findMany({
       where: scopedWhere,
@@ -144,20 +163,14 @@ export default async function VisitRepoPage({
             ? (() => { const d = new Date(`${v.followUpDate}T00:00:00`); return Number.isNaN(d.getTime()) ? v.followUpDate! : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); })()
             : "",
         };
-      })
-      // Store filter matches the short (first-segment) store name, per spec gotcha #1.
-      .filter((r) => store === "all" || r.storeName === store);
+      });
   } catch {
     rows = [];
     officerOptions = [];
     storeOptions = [];
     typeOptions = [];
+    total = followup = officers = farmers = 0;
   }
-
-  const total = rows.length;
-  const followup = rows.filter((r) => r.needsFollowup).length;
-  const officers = new Set(rows.map((r) => r.officer).filter((o) => o !== "—")).size;
-  const farmers = new Set(rows.map((r) => r.farmerName)).size;
 
   return (
     <div className="animate-[fadeUp_0.4s_ease-out]">
