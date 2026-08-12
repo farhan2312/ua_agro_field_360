@@ -5,8 +5,12 @@ import { SESSION_COOKIE, verifySession } from "@/lib/session-token";
 const PUBLIC_PATHS = new Set(["/login", "/register"]);
 const CHANGE_PW = "/change-password";
 
+// Public API endpoints that external services (e.g. the Meta WhatsApp webhook) call without a session.
+const PUBLIC_PREFIXES = ["/api/whatsapp/webhook"];
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+  if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) return NextResponse.next();
   const token = req.cookies.get(SESSION_COOKIE)?.value;
   const session = token ? await verifySession(token) : null;
   const isPublic = PUBLIC_PATHS.has(pathname);

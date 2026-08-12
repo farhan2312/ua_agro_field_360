@@ -1,0 +1,92 @@
+import type { NextRequest } from "next/server";
+import crypto from "node:crypto";
+import { prisma } from "@/lib/prisma";
+import { waWebhookConfig, toMobile10 } from "@/lib/whatsapp";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+/**
+ * Meta WhatsApp Cloud API inbound webhook.
+ *   GET  — verification handshake (Meta sends hub.mode / hub.verify_token / hub.challenge).
+ *   POST — inbound messages. Every person who messages our number (scans the opt-in QR / click-to-chat)
+ *          is recorded as a WhatsAppOptIn and, if their number matches a farmer, that farmer is flagged
+ *          whatsappOptIn. This is what turns "they messaged us" into a marketable, opted-in contact.
+ * Config: WHATSAPP_VERIFY_TOKEN (required for the handshake) + optional WHATSAPP_APP_SECRET (signature check).
+ */
+
+export async function GET(req: NextRequest) {
+  const { verifyToken } = waWebhookConfig();
+  const p = req.nextUrl.searchParams;
+  const mode = p.get("hub.mode");
+  const token = p.get("hub.verify_token");
+  const challenge = p.get("hub.challenge") ?? "";
+  if (mode === "subscribe" && verifyToken && token === verifyToken) {
+    return new Response(challenge, { status: 200, headers: { "Content-Type": "text/plain" } });
+  }
+  return new Response("Forbidden", { status: 403 });
+}
+
+export async function POST(req: NextRequest) {
+  const { appSecret } = waWebhookConfig();
+  const bodyText = await req.text();
+
+  // Optional but recommended: verify the payload signature so only Meta can post here.
+  if (appSecret) {
+    const sig = req.headers.get("x-hub-signature-256") ?? "";
+    const expected = "sha256=" + crypto.createHmac("sha256", appSecret).update(bodyText).digest("hex");
+    const ok = sig.length === expected.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
+    if (!ok) return new Response("Bad signature", { status: 401 });
+  }
+
+  let payload: any;
+  try { payload = JSON.parse(bodyText); } catch { return new Response("ok", { status: 200 }); }
+
+  try {
+    const entries = Array.isArray(payload?.entry) ? payload.entry : [];
+    for (const entry of entries) {
+      for (const change of entry?.changes ?? []) {
+        const value = change?.value ?? {};
+        const contacts: any[] = value.contacts ?? [];
+        const messages: any[] = value.messages ?? [];
+        // Map wa_id -> profile name for this batch.
+        const nameByWaId = new Map<string, string>();
+        for (const c of contacts) if (c?.wa_id) nameByWaId.set(String(c.wa_id), c?.profile?.name ?? "");
+
+        for (const m of messages) {
+          const waId = String(m?.from ?? "");
+          const mobile = toMobile10(waId);
+          if (!mobile) continue;
+          const text = m?.text?.body ?? m?.button?.text ?? m?.interactive?.list_reply?.title ?? m?.interactive?.button_reply?.title ?? `[${m?.type ?? "message"}]`;
+          const tsMs = m?.timestamp ? Number(m.timestamp) * 1000 : Date.now();
+          const at = Number.isFinite(tsMs) ? new Date(tsMs) : new Date();
+          const name = nameByWaId.get(waId) || null;
+
+          const farmer = await prisma.farmer.findFirst({ where: { mobile }, select: { id: true } });
+
+          await prisma.whatsAppOptIn.upsert({
+            where: { mobile },
+            create: {
+              mobile, waId, name, firstMessage: text, lastMessage: text, messageCount: 1,
+              farmerId: farmer?.id ?? null, optInAt: at, lastMessageAt: at,
+            },
+            update: {
+              waId, name: name ?? undefined, lastMessage: text, lastMessageAt: at,
+              messageCount: { increment: 1 }, farmerId: farmer?.id ?? undefined,
+            },
+          });
+
+          if (farmer) {
+            await prisma.farmer.updateMany({
+              where: { id: farmer.id, whatsappOptIn: false },
+              data: { whatsappOptIn: true, whatsappOptInAt: at },
+            });
+          }
+        }
+      }
+    }
+  } catch {
+    // Never fail the webhook — Meta retries on non-200 and would flood us. Swallow + 200.
+  }
+  return new Response("ok", { status: 200 });
+}

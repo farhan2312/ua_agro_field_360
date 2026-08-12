@@ -38,6 +38,21 @@ export function waConfig(): { cfg: WaConfig; ready: boolean; missing: string[] }
   return { cfg, ready: missing.length === 0, missing };
 }
 
+/** Inbound-webhook config. `verifyToken` is the string you set in the Meta webhook setup;
+ *  `appSecret` (optional) enables X-Hub-Signature-256 verification of incoming payloads. */
+export function waWebhookConfig(): { verifyToken: string; appSecret: string } {
+  return {
+    verifyToken: clean(process.env.WHATSAPP_VERIFY_TOKEN),
+    appSecret: clean(process.env.WHATSAPP_APP_SECRET),
+  };
+}
+
+/** Last 10 digits of an Indian mobile (drops country code / leading zeros). "" if not usable. */
+export function toMobile10(raw: string | null | undefined): string {
+  const d = (raw ?? "").replace(/\D/g, "").replace(/^0+/, "");
+  return d.length >= 10 ? d.slice(-10) : "";
+}
+
 export interface WaResult {
   ok: boolean;
   providerId?: string; // wamid.* message id

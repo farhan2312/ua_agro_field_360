@@ -169,6 +169,8 @@ model Farmer {
   pestTags          String[]  @default([]) // union of sales + visit pests (used by pest filters)
   salesPestTags     String[]  @default([]) // pests from sales (currently item-code Target Pests; reserved for a future sales pest column)
   visitPestTags     String[]  @default([]) // Pests/Diseases/Weeds recorded during field visits
+  whatsappOptIn     Boolean   @default(false) // opted in to WhatsApp marketing (messaged us / scanned the QR)
+  whatsappOptInAt   DateTime? // when they first opted in
   p12mSpend         Int? // ₹ base-price spend in past 12 months
   lifetimeSpend     Int? // ₹ all-time base-price spend (LTV) — drives the value tier + the "all spend" filter
   hniGap            Int? // ₹ to reach HNI (for Potential HNI)
@@ -462,6 +464,24 @@ model WhatsAppLog {
   @@index([campaignId])
   @@index([farmerId])
   @@index([createdAt])
+}
+
+/// A WhatsApp opt-in — someone who messaged our business number (scanned the QR / click-to-chat).
+/// Captured by the inbound webhook. Keyed by mobile; the matched farmer (if any) is flagged too.
+model WhatsAppOptIn {
+  id           Int      @id @default(autoincrement())
+  mobile       String   @unique // normalized 10-digit
+  waId         String? // full wa_id (country code + number) as Meta reports it
+  name         String? // WhatsApp profile name, when provided
+  firstMessage String? // the first inbound message text (usually the opt-in line)
+  lastMessage  String? // most recent inbound text
+  messageCount Int      @default(0)
+  farmerId     Int? // matched existing farmer, if any
+  optInAt      DateTime @default(now())
+  lastMessageAt DateTime @default(now())
+
+  @@index([optInAt])
+  @@index([farmerId])
 }
 
 // A Visit doubles as the per-farmer visit log entry and the Visit Repository record.
