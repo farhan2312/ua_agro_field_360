@@ -54,6 +54,8 @@ export function FarmerFilterBar({
     if (pest) params.set("pest", pest);
     const spend = overrides.spend !== undefined ? overrides.spend : selected.spend;
     if (spend) params.set("spend", spend);
+    const wa = overrides.wa !== undefined ? overrides.wa : selected.wa;
+    if (wa) params.set("wa", "1");
     const qs = params.toString();
     router.push(qs ? `${pathname}?${qs}` : pathname);
   }
@@ -67,7 +69,7 @@ export function FarmerFilterBar({
   /** Toggle a single key within its dimension's selection. */
   const toggle = (list: string[], key: string) => (list.includes(key) ? list.filter((k) => k !== key) : [...list, key]);
 
-  const anyFilter = selected.store || selected.zone || selected.crop || selected.pest || selected.spend || selected.values.length || selected.lifecycles.length;
+  const anyFilter = selected.store || selected.zone || selected.crop || selected.pest || selected.spend || selected.values.length || selected.lifecycles.length || selected.wa;
   const select = "rounded-xl border-[1.5px] border-[#E0E0E0] bg-white px-3 py-[9px] text-[12.5px] text-[#424242] outline-none focus:border-[#2E7D32]";
 
   const ChipGroup = ({ title, chips, dim }: { title: string; chips: SegChipVM[]; dim: "values" | "lifecycles" }) => (
@@ -127,6 +129,11 @@ export function FarmerFilterBar({
             <option key={t} value={String(i)}>{t}</option>
           ))}
         </select>
+        <label className="flex cursor-pointer items-center gap-1.5 rounded-xl border-[1.5px] px-3 py-[9px] text-[12.5px] font-semibold"
+          style={{ borderColor: selected.wa ? "#0B8A3D" : "#E0E0E0", background: selected.wa ? "#F1F8F1" : "white", color: selected.wa ? "#1B5E20" : "#616161" }}>
+          <input type="checkbox" checked={!!selected.wa} onChange={(e) => push({ wa: e.target.checked })} style={{ accentColor: "#0B8A3D" }} />
+          ⚡ WhatsApp opted-in
+        </label>
         {anyFilter && (
           <button
             type="button"

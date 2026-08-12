@@ -103,6 +103,7 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
   const [zoneList, setZoneList] = useState<string[]>([]);
   const [storeIds, setStoreIds] = useState<number[]>([]);
   const [q, setQ] = useState("");
+  const [waOptIn, setWaOptIn] = useState(false);
   const [count, setCount] = useState<number | null>(null);
   const [counting, setCounting] = useState(false);
   const [saving, start] = useTransition();
@@ -123,8 +124,9 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
     zones: zoneList.length ? zoneList : undefined,
     storeIds: storeIds.length ? storeIds : undefined,
     q: q.trim() || undefined,
+    whatsappOptIn: waOptIn || undefined,
   });
-  const hasAny = valueSegs.length || lifecycleSegs.length || crops.length || pests.length || zoneList.length || storeIds.length || q.trim();
+  const hasAny = valueSegs.length || lifecycleSegs.length || crops.length || pests.length || zoneList.length || storeIds.length || q.trim() || waOptIn;
 
   // Debounced live count preview.
   useEffect(() => {
@@ -133,7 +135,7 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
     const t = setTimeout(async () => { setCount(await previewClusterCount(criteria())); setCounting(false); }, 350);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [valueSegs, lifecycleSegs, crops, pests, zoneList, storeIds, q]);
+  }, [valueSegs, lifecycleSegs, crops, pests, zoneList, storeIds, q, waOptIn]);
 
   const toggle = (arr: string[], set: (a: string[]) => void, v: string) => set(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
   const toggleZone = (z: string) => {
@@ -227,6 +229,12 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
         {/* Search */}
         <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Search</label>
         <input className="mt-1 w-full rounded-lg border border-[#E0E0E0] px-2.5 py-2 text-[13px]" value={q} onChange={(e) => setQ(e.target.value)} placeholder="name / village / mobile" />
+
+        {/* WhatsApp opt-in */}
+        <label className="mt-3 flex cursor-pointer items-center gap-2 rounded-lg border border-[#C8E6C9] bg-[#F1F8F1] px-3 py-2 text-[12.5px] font-semibold text-[#1B5E20]">
+          <input type="checkbox" checked={waOptIn} onChange={(e) => setWaOptIn(e.target.checked)} style={{ accentColor: "#0B8A3D" }} />
+          ⚡ WhatsApp opted-in only
+        </label>
 
         <div className="mt-4 flex items-center justify-between rounded-[10px] bg-[#F5F7F5] px-4 py-3">
           <div className="text-[12px] text-[#616161]">Matches</div>

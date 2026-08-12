@@ -25,6 +25,7 @@ type SearchParams = {
   crop?: string;
   pest?: string;
   spend?: string;
+  wa?: string;
   page?: string;
 };
 
@@ -55,6 +56,7 @@ export default async function FarmersPage({
   const pest = (sp.pest ?? "").trim() || null;
   const spendIdx = /^\d+$/.test(sp.spend ?? "") ? Number(sp.spend) : null;
   const spendTier = spendIdx != null ? SPEND_TIERS[spendIdx] ?? null : null;
+  const waOptIn = sp.wa === "1";
   const page = Math.max(1, Number.parseInt(sp.page ?? "1", 10) || 1);
 
   let rows: FarmerRowVM[] = [];
@@ -83,6 +85,7 @@ export default async function FarmersPage({
     if (zone) where.store = { zone };
     if (crop) where.cropTags = { has: crop };
     if (pest) where.pestTags = { has: pest };
+    if (waOptIn) where.whatsappOptIn = true;
     if (spendTier) {
       // "All spend" = all-time base-price LTV (same brackets as the analytics spend filter).
       if (spendTier.max === 0 && spendTier.min == null) {
@@ -245,6 +248,7 @@ export default async function FarmersPage({
     spend: spendTier ? String(spendIdx) : null,
     values: valueKeys,
     lifecycles: lifecycleKeys,
+    wa: waOptIn,
   };
 
   return (

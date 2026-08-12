@@ -34,6 +34,8 @@ export interface FarmerSelectedVM {
   values: string[];
   /** Selected lifecycle keys (multi-select). */
   lifecycles: string[];
+  /** WhatsApp opted-in only. */
+  wa: boolean;
 }
 
 /** A single farmer table row view-model (plain, serialisable). */

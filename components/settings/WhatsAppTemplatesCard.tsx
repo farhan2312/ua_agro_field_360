@@ -1,0 +1,145 @@
+"use client";
+
+import { useState, useTransition } from "react";
+import { listTemplates, createTemplate, deleteTemplate, type WaTemplate } from "@/app/actions/whatsapp-templates";
+import { useConfirm } from "@/components/ConfirmDialog";
+
+const CATEGORIES = ["MARKETING", "UTILITY", "AUTHENTICATION"];
+const LANGS = ["en", "en_US", "hi", "en_GB"];
+
+const STATUS_STYLE: Record<string, { bg: string; c: string }> = {
+  APPROVED: { bg: "#E8F5E9", c: "#2E7D32" },
+  PENDING: { bg: "#FFF8E1", c: "#8D6E00" },
+  IN_APPEAL: { bg: "#FFF8E1", c: "#8D6E00" },
+  REJECTED: { bg: "#FDECEA", c: "#C62828" },
+  PAUSED: { bg: "#FDECEA", c: "#C62828" },
+  DISABLED: { bg: "#F5F5F5", c: "#616161" },
+};
+
+/**
+ * Settings → WhatsApp templates. Create + submit templates to Meta via the Business Management API
+ * and watch their approval status — no WhatsApp Manager UI. Approved marketing templates are what
+ * you send to your opted-in list. Admin-only.
+ */
+export function WhatsAppTemplatesCard({ initial }: {
+  initial: { ready: boolean; missing: string[]; templates: WaTemplate[] };
+}) {
+  const [rows, setRows] = useState(initial.templates);
+  const [name, setName] = useState("");
+  const [language, setLanguage] = useState("en");
+  const [category, setCategory] = useState("MARKETING");
+  const [body, setBody] = useState("");
+  const [examples, setExamples] = useState("");
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, start] = useTransition();
+  const { confirm, dialog } = useConfirm();
+
+  const varCount = new Set((body.match(/\{\{\s*(\d+)\s*\}\}/g) ?? []).map((m) => m.replace(/\D/g, ""))).size;
+
+  const refresh = () => start(async () => { const r = await listTemplates(); if (r.ok && r.templates) setRows(r.templates); });
+
+  const submit = () => {
+    setMsg(null);
+    start(async () => {
+      const r = await createTemplate({ name, language, category, body, examples: examples.split(",").map((s) => s.trim()).filter(Boolean) });
+      if (!r.ok) { setMsg({ ok: false, text: r.error ?? "Failed." }); return; }
+      setMsg({ ok: true, text: `Submitted “${name.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_")}” — status ${r.status ?? "PENDING"}. Meta reviews it (usually minutes–hours).` });
+      setName(""); setBody(""); setExamples("");
+      const l = await listTemplates(); if (l.ok && l.templates) setRows(l.templates);
+    });
+  };
+
+  const remove = async (t: WaTemplate) => {
+    if (!(await confirm({ title: "Delete this template?", confirmLabel: "Delete template", message: <><b>{t.name}</b> will be removed from your WhatsApp account. This can’t be undone.</> }))) return;
+    start(async () => { const r = await deleteTemplate(t.name); if (r.ok) setRows((rs) => rs.filter((x) => !(x.name === t.name && x.language === t.language))); else setMsg({ ok: false, text: r.error ?? "Delete failed." }); });
+  };
+
+  const inputCls = "w-full rounded-[10px] border border-[#E0E0E0] px-3 py-2.5 text-[13px] outline-none focus:border-[#0B8A3D]";
+
+  return (
+    <div className="rounded-2xl border border-black/[0.03] bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+      {dialog}
+      <div className="mb-1 flex items-center gap-2">
+        <span className="text-[15px] font-bold text-[#1A1C1A]">WhatsApp templates</span>
+        <span className="rounded-full bg-[#E8F5E9] px-2 py-0.5 text-[10.5px] font-bold text-[#0B8A3D]">Meta Cloud API</span>
+      </div>
+      <p className="mb-4 text-[12px] text-[#9E9E9E]">Create &amp; submit templates for approval without leaving the portal. Approved <b>marketing</b> templates are what you send to your opted-in list. Admin-only.</p>
+
+      {!initial.ready ? (
+        <div className="rounded-[10px] bg-[#FFF8E1] px-3 py-2 text-[12px] text-[#8D6E00]">
+          Not available yet — set {initial.missing.join(", ")} in the environment (WHATSAPP_WABA_ID is your WhatsApp Business Account id), then restart.
+        </div>
+      ) : (
+        <>
+          {/* Create form */}
+          <div className="rounded-[12px] border border-[#ECEFEC] bg-[#FAFBFA] p-4">
+            <div className="mb-2.5 text-[12px] font-bold text-[#3A3A3A]">New template</div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <div>
+                <label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Name</label>
+                <input className={`${inputCls} mt-1`} placeholder="hni_offer_v1" value={name}
+                  onChange={(e) => setName(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Language</label>
+                <select className={`${inputCls} mt-1 bg-white`} value={language} onChange={(e) => setLanguage(e.target.value)}>
+                  {LANGS.map((l) => <option key={l} value={l}>{l}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Category</label>
+                <select className={`${inputCls} mt-1 bg-white`} value={category} onChange={(e) => setCategory(e.target.value)}>
+                  {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+            </div>
+            <label className="mt-3 block text-[10px] font-bold uppercase text-[#9E9E9E]">Body — use {"{{1}}"}, {"{{2}}"} for variables</label>
+            <textarea className={`${inputCls} mt-1 resize-y`} rows={3} value={body} onChange={(e) => setBody(e.target.value)}
+              placeholder={"Namaste {{1}}! UA Agro has a special offer on {{2}} this week. Visit your nearest store."} />
+            {varCount > 0 && (
+              <>
+                <label className="mt-2 block text-[10px] font-bold uppercase text-[#9E9E9E]">Example values for {"{{1}}"}…{`{{${varCount}}}`} (comma-separated) — Meta needs these to review</label>
+                <input className={`${inputCls} mt-1`} placeholder="Ramesh, Wheat" value={examples} onChange={(e) => setExamples(e.target.value)} />
+              </>
+            )}
+            {msg && <div className={`mt-2 rounded-[8px] px-3 py-2 text-[12px] font-medium ${msg.ok ? "bg-[#E8F5E9] text-[#2E7D32]" : "bg-[#FDECEA] text-[#C62828]"}`}>{msg.text}</div>}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button type="button" onClick={submit} disabled={busy || !name.trim() || !body.trim()}
+                className="rounded-[10px] bg-[#0B8A3D] px-4 py-2 text-[13px] font-bold text-white hover:bg-[#0A6E31] disabled:opacity-50">
+                {busy ? "Submitting…" : "Submit for approval"}</button>
+              <button type="button" onClick={refresh} disabled={busy}
+                className="rounded-[10px] border border-[#E0E0E0] px-4 py-2 text-[13px] font-semibold text-[#616161] hover:bg-[#F5F5F5] disabled:opacity-50">Refresh status</button>
+            </div>
+          </div>
+
+          {/* Template list */}
+          <div className="mt-4 flex items-center justify-between">
+            <div className="text-[12px] font-bold text-[#3A3A3A]">Your templates ({rows.length})</div>
+          </div>
+          {rows.length === 0 ? (
+            <div className="mt-2 rounded-[10px] bg-[#FAFBFA] px-3 py-6 text-center text-[12.5px] text-[#9E9E9E]">No templates yet — submit one above.</div>
+          ) : (
+            <div className="mt-2 flex flex-col gap-2">
+              {rows.map((t) => {
+                const st = STATUS_STYLE[t.status] ?? { bg: "#F5F5F5", c: "#616161" };
+                return (
+                  <div key={`${t.name}-${t.language}`} className="rounded-[10px] border border-[#F0F0F0] px-3.5 py-2.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-[12.5px] font-bold text-[#1A1C1A]">{t.name}</span>
+                      <span className="rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: st.bg, color: st.c }}>{t.status}</span>
+                      <span className="rounded-full bg-[#F5F7F5] px-2 py-0.5 text-[10px] font-semibold text-[#616161]">{t.category}</span>
+                      <span className="text-[10.5px] text-[#9E9E9E]">{t.language}</span>
+                      <button type="button" onClick={() => remove(t)} className="ml-auto text-[11.5px] font-semibold text-[#C62828] hover:underline">Delete</button>
+                    </div>
+                    {t.body && <div className="mt-1 text-[11.5px] text-[#757575]">{t.body}</div>}
+                    {t.rejectedReason && <div className="mt-1 text-[11px] font-semibold text-[#C62828]">Rejected: {t.rejectedReason}</div>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}

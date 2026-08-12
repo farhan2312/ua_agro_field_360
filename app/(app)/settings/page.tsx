@@ -11,6 +11,8 @@ import { DataManagementCard } from "@/components/settings/DataManagementCard";
 import { SmsTestCard } from "@/components/settings/SmsTestCard";
 import { WhatsAppOptInsCard } from "@/components/settings/WhatsAppOptInsCard";
 import { listOptIns, getOptInQrConfig, type OptInRow } from "@/app/actions/whatsapp-optins";
+import { WhatsAppTemplatesCard } from "@/components/settings/WhatsAppTemplatesCard";
+import { waTemplatesStatus, listTemplates, type WaTemplate } from "@/app/actions/whatsapp-templates";
 
 export const dynamic = "force-dynamic";
 
@@ -133,6 +135,15 @@ export default async function SettingsPage() {
     optInCfg = { number: cfg.number, message: cfg.message };
   } catch { /* DB unavailable */ }
 
+  // WhatsApp template manager (create/submit/track approval via the Business Management API).
+  let tplInit: { ready: boolean; missing: string[]; templates: WaTemplate[] } = { ready: false, missing: [], templates: [] };
+  try {
+    const st = await waTemplatesStatus();
+    let templates: WaTemplate[] = [];
+    if (st.ready) { const l = await listTemplates(); if (l.ok && l.templates) templates = l.templates; }
+    tplInit = { ready: st.ready, missing: st.missing, templates };
+  } catch { /* gateway unreachable */ }
+
   const registry: RegistryRow[] = [
     {
       label: "Crop Master",
@@ -166,6 +177,7 @@ export default async function SettingsPage() {
           <SystemConfigCard initial={config} districtOptions={districtOptions} />
           <SmsTestCard plans={plans} smsReady={sms.ready} missing={sms.missing} senderId={sms.cfg.senderId} waReady={wa.ready} waMissing={wa.missing} />
           <WhatsAppOptInsCard initial={optIns} qrConfig={optInCfg} />
+          <WhatsAppTemplatesCard initial={tplInit} />
           <DataManagementCard />
         </div>
       </div>

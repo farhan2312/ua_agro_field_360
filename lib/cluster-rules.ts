@@ -33,6 +33,7 @@ export interface ClusterCriteria {
   zones?: string[]; // multiple regions — match ANY
   district?: string;
   q?: string; // free-text (name/mobile/village/code)
+  whatsappOptIn?: boolean; // only farmers who opted in to WhatsApp (true = filter; false/undefined = ignore)
   explicitIds?: number[]; // hand-picked (static clusters)
 }
 
@@ -66,6 +67,7 @@ export function criteriaToWhere(c: ClusterCriteria): Prisma.FarmerWhereInput {
   if (c.zones?.length) and.push({ zone: { in: c.zones } });
   else if (c.zone) and.push({ zone: c.zone });
   if (c.district) and.push({ district: c.district });
+  if (c.whatsappOptIn) and.push({ whatsappOptIn: true }); // opted-in only (true = filter; false/undefined ignored)
   if (c.category) and.push({ sales: { some: { category: c.category } } });
   if (c.spendMin != null || c.spendMax != null)
     and.push({ p12mSpend: { ...(c.spendMin != null ? { gte: c.spendMin } : {}), ...(c.spendMax != null ? { lt: c.spendMax } : {}) } });
@@ -123,6 +125,7 @@ export function describeCriteria(c: ClusterCriteria, storeNames?: Map<number, st
   else if (c.spendMin != null) parts.push(`Spend ${kFmt(c.spendMin)}+`);
   else if (c.spendMax != null) parts.push(`Spend < ${kFmt(c.spendMax)}`);
   if (c.villages?.length) parts.push(`${c.villages.length} village${c.villages.length > 1 ? "s" : ""}`);
+  if (c.whatsappOptIn) parts.push("WhatsApp opted-in");
   if (c.q?.trim()) parts.push(`"${c.q.trim()}"`);
   if (c.explicitIds?.length) parts.push(`${c.explicitIds.length} hand-picked`);
   return parts.length ? parts.join(" · ") : "All farmers";
