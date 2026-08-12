@@ -55,7 +55,7 @@ const ROLE_CARDS: { accent: string; title: string; body: string }[] = [
   },
   {
     accent: "#1565C0",
-    title: "Agricultural Officer",
+    title: "Agri Officer",
     body: "Personal dashboard, new visits, assigned farmers, lead pipeline",
   },
   {

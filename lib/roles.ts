@@ -25,7 +25,7 @@ export const PERSONAS: Record<RoleKey, Persona> = {
   officer: {
     key: "officer",
     name: "Raj Kumar",
-    role: "Agricultural Officer",
+    role: "Agri Officer",
     init: "RK",
     color: "linear-gradient(135deg,#1565C0,#42A5F5)",
   },
@@ -80,7 +80,7 @@ export const ROLE_GRAD: Record<RoleKey, [string, string]> = {
 
 /** Roles a user may request at registration (admin is granted, not requested). */
 export const REQUESTABLE_ROLES: { key: RoleKey; label: string }[] = [
-  { key: "officer", label: "Agricultural Officer" },
+  { key: "officer", label: "Agri Officer" },
   { key: "regional", label: "Regional Manager" },
   { key: "central", label: "Central Team" },
 ];
