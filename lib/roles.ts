@@ -106,6 +106,7 @@ export const NAV_VISIBILITY: Record<string, (r: RoleKey) => boolean> = {
   actions: (r) =>
     r === "regional" || r === "central" || r === "officer" || r === "sysadmin",
   campaigns: () => true, // all roles; officers/RMs get a store/region-scoped view
+  ghoshti: () => true, // Farmer meetups; scoped per role, with a tiered approval flow
   projects: (r) => r === "central" || r === "sysadmin", // initiated by the central team only
   products: (r) => r === "regional" || r === "central" || r === "sysadmin",
   movement: (r) => r === "regional" || r === "central" || r === "sysadmin",
@@ -188,6 +189,10 @@ export function viewTitle(
       return ["Training & Help", "Guides and how-to videos for the portal"];
     case "campaigns":
       return ["Campaigns", "Segmented customer targeting & outreach"];
+    case "ghoshti":
+      return ["Ghoshti", "Farmer meetups · attendance & approvals"];
+    case "ghoshtiDetail":
+      return ["Ghoshti Detail", ""];
     case "projects":
       return ["Projects", "Bundle farmer clusters into reusable projects"];
     case "products":

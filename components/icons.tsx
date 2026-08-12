@@ -75,6 +75,13 @@ export const NavIcons: Record<NavId, (p: P) => JSX.Element> = {
       <path d="M2 5.5a1.5 1.5 0 011.5-1.5h3l1.5 2h5.5A1.5 1.5 0 0116 7.5v5A1.5 1.5 0 0114.5 14h-11A1.5 1.5 0 012 12.5v-7z" />
     </svg>
   ),
+  ghoshti: ({ className }) => (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <circle cx="9" cy="5" r="2.2" /><path d="M5.3 15c0-2.4 1.65-4 3.7-4s3.7 1.6 3.7 4" />
+      <circle cx="3" cy="7" r="1.6" /><path d="M1 13.5c0-1.7 0.9-2.9 2.2-3.2" />
+      <circle cx="15" cy="7" r="1.6" /><path d="M17 13.5c0-1.7-0.9-2.9-2.2-3.2" />
+    </svg>
+  ),
   products: ({ className }) => (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className={className}>
       <path d="M9 1.5l6.5 3.5v7L9 16.5 2.5 12V5L9 1.5zM2.7 5.2L9 8.7l6.3-3.5M9 8.7V16" />

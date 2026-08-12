@@ -171,6 +171,8 @@ model Farmer {
   visitPestTags     String[]  @default([]) // Pests/Diseases/Weeds recorded during field visits
   whatsappOptIn     Boolean   @default(false) // opted in to WhatsApp marketing (messaged us / scanned the QR)
   whatsappOptInAt   DateTime? // when they first opted in
+  attendedGhoshti   Boolean   @default(false) // ever attended a Ghoshti (farmer meetup) — the only link from the Ghoshti module
+  attendedGhoshtiAt DateTime? // most recent Ghoshti attendance
   p12mSpend         Int? // ₹ base-price spend in past 12 months
   lifetimeSpend     Int? // ₹ all-time base-price spend (LTV) — drives the value tier + the "all spend" filter
   hniGap            Int? // ₹ to reach HNI (for Potential HNI)
@@ -503,6 +505,61 @@ model BroadcastRecipient {
   sentAt      DateTime?
 
   @@index([broadcastId, status])
+}
+
+// ─────────────────────────── Ghoshti (Farmer Meetup) ───────────────────────────
+// A Ghoshti is a farmer meetup event. Phase 1 keeps it DECOUPLED from farmer data: attendees are
+// stored as their own rows (mobile + name), classified against existing farmers only by a loose
+// matchedFarmerId (no FK relation). The single write-back into farmer data is Farmer.attendedGhoshti.
+// Every Ghoshti needs approval before it counts: officer-created → RM(same zone)/central/sysadmin;
+// RM-created → central/sysadmin only. Nothing auto-approves (status starts PENDING).
+model Ghoshti {
+  id            Int      @id @default(autoincrement())
+  date          DateTime // when the meetup happened / is scheduled
+  storeId       Int? // host store (loose — no relation, mirrors the rest of the decoupled module)
+  storeName     String? // snapshot of the store name at creation time
+  zone          String? // snapshot of the host zone (drives RM approval scoping)
+  locationNote  String? // free-text venue / location detail
+  topic         String? // what the meetup was about
+  notes         String? // organiser notes
+  status        String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  createdById   Int? // User.id of the real logged-in creator
+  createdByName String?
+  createdByCode String?
+  createdByRole String? // roleKey at creation (officer | regional) — drives who may approve
+  approvedByName String?
+  approvedByCode String?
+  approvedAt    DateTime?
+  rejectionNote String? // why it was rejected (shown back to the creator)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt @default(now())
+
+  attendees GhoshtiAttendee[]
+
+  @@index([storeId])
+  @@index([status])
+  @@index([zone])
+  @@index([date])
+}
+
+/// One attendee row on a Ghoshti. Captured by mobile; classified against existing farmers by a loose
+/// matchedFarmerId (no FK). `isExisting` marks a mobile that matched a Farmer at capture time.
+model GhoshtiAttendee {
+  id             Int      @id @default(autoincrement())
+  ghoshtiId      Int
+  ghoshti        Ghoshti  @relation(fields: [ghoshtiId], references: [id], onDelete: Cascade)
+  mobile         String // normalized 10-digit
+  name           String?
+  isExisting     Boolean  @default(false) // matched an existing farmer at capture
+  matchedFarmerId Int? // loose link to Farmer.id (no FK) when isExisting
+  attended       Boolean  @default(true) // present flag (Phase 1: everyone recorded attended)
+  remarks        String?
+  recordedByName String?
+  recordedByCode String?
+  createdAt      DateTime @default(now())
+
+  @@index([ghoshtiId])
+  @@index([mobile])
 }
 
 /// A WhatsApp opt-in — someone who messaged our business number (scanned the QR / click-to-chat).

@@ -114,6 +114,7 @@ function buildDetail(
     lifecycle: lMeta?.label ?? "",
     lifeBg: lMeta?.bg ?? FALLBACK_SEG_BG,
     lifeColor: lMeta?.color ?? FALLBACK_SEG_COLOR,
+    attendedGhoshti: farmer.attendedGhoshti ?? false,
     salesCrops: farmer.salesCropTags ?? [],
     visitCrops: farmer.visitCropTags ?? [],
     ltv: inr(ltvBaseNum),

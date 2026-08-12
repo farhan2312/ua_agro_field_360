@@ -61,6 +61,7 @@ export interface FarmerDetail {
   lifecycle: string; // lifecycle display label
   lifeBg: string;
   lifeColor: string;
+  attendedGhoshti: boolean; // has attended at least one Ghoshti (farmer meetup)
   salesCrops: string[]; // crops from the sales upload (labelled)
   visitCrops: string[]; // crops from field visits (labelled)
   ltv: string; // computed lifetime value on BASE price, e.g. "₹0"

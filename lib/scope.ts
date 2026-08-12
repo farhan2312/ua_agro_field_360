@@ -68,6 +68,33 @@ export function visitScopeWhere(scope: Scope): Scoped<Prisma.VisitWhereInput> {
   return null;
 }
 
+/**
+ * Ghoshti (farmer meetup) row-level scope. Ghoshtis carry a snapshot `storeId` + `zone` (no relation),
+ * so scoping keys off those columns directly. Officer → own store; RM → own zone; central/sysadmin → all.
+ */
+export function ghoshtiScopeWhere(scope: Scope): Scoped<Prisma.GhoshtiWhereInput> {
+  if (scope.role === "officer") return scope.storeId != null ? { storeId: scope.storeId } : "none";
+  if (scope.role === "regional") return scope.zone ? { zone: scope.zone } : "none";
+  return null;
+}
+
+/**
+ * Whether `scope` may approve/reject a Ghoshti created under `createdByRole` in `zone`.
+ * Officer-created → RM of the SAME zone, or any central/sysadmin. RM-created → central/sysadmin only.
+ * Nobody may approve their own creation implicitly here — callers still block self-approval by userId.
+ */
+export function canApproveGhoshti(
+  scope: Scope,
+  createdByRole: string | null | undefined,
+  zone: string | null | undefined,
+): boolean {
+  if (scope.role === "central" || scope.role === "sysadmin") return true;
+  if (createdByRole === "officer" && scope.role === "regional") {
+    return !!scope.zone && scope.zone === zone;
+  }
+  return false;
+}
+
 export interface Actor {
   name: string;
   code: string | null; // User.employeeCode, e.g. "UA123"

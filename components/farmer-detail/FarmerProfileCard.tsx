@@ -56,6 +56,15 @@ export function FarmerProfileCard({ farmer }: { farmer: FarmerDetail }) {
                 <InfoTip term={farmer.lifecycle}>{farmer.lifecycle}</InfoTip>
               </div>
             )}
+            {farmer.attendedGhoshti && (
+              <div
+                className="px-2.5 py-[3px] rounded-[20px] text-[10px] font-bold"
+                style={{ background: "#FFF3E0", color: "#E65100" }}
+                title="Attended a Ghoshti (farmer meetup)"
+              >
+                🌾 Ghoshti
+              </div>
+            )}
           </div>
           <div className="text-[12px] text-[#9E9E9E] mt-0.5">
             {farmer.village}
