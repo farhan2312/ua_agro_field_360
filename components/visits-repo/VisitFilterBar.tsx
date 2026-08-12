@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { VisitFilterOptions, VisitFilterState } from "./types";
 
 const PERIOD_PILLS: { label: string; key: string }[] = [
@@ -28,6 +28,7 @@ export function VisitFilterBar({
 
   const navigate = useCallback(
     (params: URLSearchParams) => {
+      params.delete("page"); // any filter/search change resets to page 1
       const qs = params.toString();
       router.push(qs ? `/visits?${qs}` : "/visits");
       router.refresh(); // force the server component to re-run (defeats any stale client router cache)
@@ -57,9 +58,33 @@ export function VisitFilterBar({
     [navigate, searchParams],
   );
 
+  // Debounced free-text search (farmer name / mobile / village / officer).
+  const [q, setQ] = useState(filter.q);
+  useEffect(() => setQ(filter.q), [filter.q]);
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onSearch = (val: string) => {
+    setQ(val);
+    if (debounce.current) clearTimeout(debounce.current);
+    debounce.current = setTimeout(() => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (val.trim()) params.set("q", val.trim()); else params.delete("q");
+      navigate(params);
+    }, 350);
+  };
+
   return (
     <div className="bg-white rounded-xl px-5 py-[14px] shadow-[0_1px_3px_rgba(0,0,0,0.04)] border border-black/[0.03] mb-4">
       <div className="flex items-center gap-[10px] flex-wrap">
+        {/* Search */}
+        <input
+          value={q}
+          onChange={(e) => onSearch(e.target.value)}
+          placeholder="Search farmer, phone, village, officer…"
+          aria-label="Search visits"
+          className="w-[240px] rounded-lg border-[1.5px] border-[#E0E0E0] px-3 py-[6px] text-xs outline-none focus:border-[#2E7D32]"
+        />
+        <div className="w-px h-6 bg-[#F0F0F0] mx-1" />
+
         {/* Period pills */}
         {PERIOD_PILLS.map((p) => {
           const active = filter.period === p.key;

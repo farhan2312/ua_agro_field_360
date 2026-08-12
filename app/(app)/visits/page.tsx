@@ -8,6 +8,7 @@ import { avatarColor } from "@/lib/format";
 import { VisitKpiStrip } from "@/components/visits-repo/VisitKpiStrip";
 import { VisitFilterBar } from "@/components/visits-repo/VisitFilterBar";
 import { VisitRow } from "@/components/visits-repo/VisitRow";
+import { VisitPagination } from "@/components/visits-repo/VisitPagination";
 import type { VisitRecord } from "@/components/visits-repo/types";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +18,11 @@ type SearchParams = {
   store?: string;
   type?: string;
   period?: string;
+  q?: string;
+  page?: string;
 };
+
+const PAGE_SIZE = 50;
 
 const PERIOD_DAYS: Record<string, number | null> = {
   today: 1,
@@ -45,6 +50,8 @@ export default async function VisitRepoPage({
   const store = sp.store ?? "all";
   const type = sp.type ?? "all";
   const period = sp.period && sp.period in PERIOD_DAYS ? sp.period : "month";
+  const q = (sp.q ?? "").trim();
+  const page = Math.max(1, Number.parseInt(sp.page ?? "1", 10) || 1);
 
   let rows: VisitRecord[] = [];
   let officerOptions: string[] = [];
@@ -107,6 +114,16 @@ export default async function VisitRepoPage({
       const ids = allStores.filter((s) => shortStoreName(s.name) === store).map((s) => s.id);
       where.storeId = { in: ids.length ? ids : [-1] };
     }
+    // Free-text search across farmer name / mobile / village + officer name.
+    if (q) {
+      const digits = q.replace(/\D/g, "");
+      where.OR = [
+        { officerName: { contains: q, mode: "insensitive" } },
+        { farmer: { is: { name: { contains: q, mode: "insensitive" } } } },
+        { farmer: { is: { village: { contains: q, mode: "insensitive" } } } },
+        ...(digits ? [{ farmer: { is: { mobile: { contains: digits } } } }] as Prisma.VisitWhereInput[] : []),
+      ];
+    }
     // Scope goes on LAST so no query-string filter can widen it.
     const scopedWhere: Prisma.VisitWhereInput = scopeWhere ? { AND: [where, scopeWhere] } : where;
 
@@ -138,7 +155,8 @@ export default async function VisitRepoPage({
         },
         store: { select: { id: true, name: true } },
       },
-      take: 500,
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
     });
 
     rows = visits
@@ -182,7 +200,7 @@ export default async function VisitRepoPage({
       />
 
       <VisitFilterBar
-        filter={{ officer, store, type, period }}
+        filter={{ officer, store, type, period, q }}
         options={{ officers: officerOptions, stores: storeOptions, types: typeOptions }}
         total={total}
       />
@@ -217,6 +235,8 @@ export default async function VisitRepoPage({
         </div>
         </div>
       </div>
+
+      <VisitPagination page={page} pageCount={Math.max(1, Math.ceil(total / PAGE_SIZE))} total={total} pageSize={PAGE_SIZE} shown={rows.length} />
     </div>
   );
 }

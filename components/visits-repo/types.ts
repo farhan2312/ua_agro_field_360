@@ -20,6 +20,7 @@ export interface VisitFilterState {
   store: string;
   type: string;
   period: string;
+  q: string; // free-text search (farmer name / mobile / village / officer)
 }
 
 export interface VisitFilterOptions {
