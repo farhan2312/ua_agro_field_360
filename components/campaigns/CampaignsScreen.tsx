@@ -572,9 +572,9 @@ export function StatusBadge({ member }: { member: CampaignMemberVM }) {
   return null;
 }
 
-/** Prominent, tappable phone number — what officers dial from. Officers get Call only; the manual
- *  WhatsApp chat link + any admin send controls (`extra`) show only when `canWhatsApp`. */
-function PhoneBlock({ mobile, big, extra, canWhatsApp }: { mobile: string | null; big?: boolean; extra?: ReactNode; canWhatsApp?: boolean }) {
+/** Prominent, tappable phone number — what officers dial from. Everyone gets Call + the manual
+ *  wa.me WhatsApp chat link; only admins get the API send controls (`extra`: SMS / WA API). */
+function PhoneBlock({ mobile, big, extra }: { mobile: string | null; big?: boolean; extra?: ReactNode }) {
   const d10 = digits10(mobile);
   if (!d10) return (
     <div className="flex flex-wrap items-center gap-3 rounded-[12px] bg-[#FFF8E1] px-4 py-3">
@@ -589,7 +589,7 @@ function PhoneBlock({ mobile, big, extra, canWhatsApp }: { mobile: string | null
       </a>
       <div className="ml-auto flex flex-wrap gap-2">
         <a href={`tel:+91${d10}`} className={`rounded-[10px] bg-[#1565C0] font-bold text-white ${big ? "px-5 py-3 text-[14px]" : "px-4 py-2.5 text-[13px]"}`}>Call</a>
-        {canWhatsApp && <a href={`https://wa.me/91${d10}`} target="_blank" rel="noopener noreferrer" className={`rounded-[10px] bg-[#1B8A4B] font-bold text-white ${big ? "px-5 py-3 text-[14px]" : "px-4 py-2.5 text-[13px]"}`}>WhatsApp</a>}
+        <a href={`https://wa.me/91${d10}`} target="_blank" rel="noopener noreferrer" className={`rounded-[10px] bg-[#1B8A4B] font-bold text-white ${big ? "px-5 py-3 text-[14px]" : "px-4 py-2.5 text-[13px]"}`}>WhatsApp</a>
         {extra}
       </div>
     </div>
@@ -835,7 +835,7 @@ function MemberRow({ member, crops, onChange, commPlans, templates, canSms }: { 
         <ResponseBadge member={member} />
         <span className="text-[12px] text-[#9E9E9E]">{member.village ?? "—"}{member.store ? ` · ${member.store}` : ""}</span>
       </div>
-      <div className="mb-3"><PhoneBlock mobile={member.mobile} canWhatsApp={canSms} extra={canSms ? <><SmsSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} /><WaSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} /></> : null} /></div>
+      <div className="mb-3"><PhoneBlock mobile={member.mobile} extra={canSms ? <><SmsSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} /><WaSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} /></> : null} /></div>
       <div className="flex flex-col gap-2.5 rounded-[12px] border border-[#EAEAEA] bg-[#FBFBFB] p-3">
         <ResponsePicker value={o.response} crop={o.crop} crops={crops} onPick={o.pickResponse} onCrop={o.setCrop} disabled={pending} />
         <ApproachPicker value={o.mediums} onToggle={o.toggleChannel} disabled={pending} />
@@ -912,7 +912,7 @@ function FocusCard({ member, crops, onChange, onHandled, onSkip, onBack, remaini
         <span className="ml-auto rounded-full bg-[#F5F7F5] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#616161]">{remaining} left</span>
       </div>
       <div className="mb-3 text-[12.5px] text-[#9E9E9E]">{member.village ?? "—"}{member.store ? ` · ${member.store}` : ""}</div>
-      <div className="mb-4"><PhoneBlock mobile={member.mobile} big canWhatsApp={canSms} extra={canSms ? <><SmsSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} onSent={onHandled} big /><WaSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} onSent={onHandled} big /></> : null} /></div>
+      <div className="mb-4"><PhoneBlock mobile={member.mobile} big extra={canSms ? <><SmsSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} onSent={onHandled} big /><WaSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} onSent={onHandled} big /></> : null} /></div>
       <div className="flex flex-col gap-3 rounded-[12px] border border-[#EAEAEA] bg-[#FBFBFB] p-3.5">
         <ResponsePicker value={o.response} crop={o.crop} crops={crops} onPick={o.pickResponse} onCrop={o.setCrop} disabled={pending} />
         <ApproachPicker value={o.mediums} onToggle={o.toggleChannel} disabled={pending} />
