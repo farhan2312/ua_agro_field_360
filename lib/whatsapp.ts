@@ -20,13 +20,17 @@ export interface WaConfig {
   accessToken: string; phoneNumberId: string; version: string; wabaId: string;
 }
 
+// Trim whitespace AND strip one layer of wrapping quotes — a token pasted as "EAAG…" (quotes included)
+// is a very common cause of Meta "Authentication Error" (the quotes travel in the Bearer header).
+const clean = (v: string | undefined) => (v ?? "").trim().replace(/^['"]|['"]$/g, "").trim();
+
 /** Read + validate env config. `missing` lists which REQUIRED keys are blank. */
 export function waConfig(): { cfg: WaConfig; ready: boolean; missing: string[] } {
   const cfg: WaConfig = {
-    accessToken: (process.env.WHATSAPP_ACCESS_TOKEN ?? "").trim(),
-    phoneNumberId: (process.env.WHATSAPP_PHONE_NUMBER_ID ?? "").trim(),
-    version: (process.env.WHATSAPP_API_VERSION ?? DEFAULT_VERSION).trim() || DEFAULT_VERSION,
-    wabaId: (process.env.WHATSAPP_WABA_ID ?? "").trim(),
+    accessToken: clean(process.env.WHATSAPP_ACCESS_TOKEN),
+    phoneNumberId: clean(process.env.WHATSAPP_PHONE_NUMBER_ID),
+    version: clean(process.env.WHATSAPP_API_VERSION) || DEFAULT_VERSION,
+    wabaId: clean(process.env.WHATSAPP_WABA_ID),
   };
   const missing = (Object.entries({
     WHATSAPP_ACCESS_TOKEN: cfg.accessToken, WHATSAPP_PHONE_NUMBER_ID: cfg.phoneNumberId,
