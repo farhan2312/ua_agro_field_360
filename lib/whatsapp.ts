@@ -100,12 +100,26 @@ export async function sendWhatsApp(opts: {
     const messages = Array.isArray(b.messages) ? (b.messages as Record<string, unknown>[]) : [];
     const providerId = String(messages[0]?.id ?? "") || undefined;
     const ok = res.ok && !err && !!providerId;
+
+    // Meta returns { error: { message, code, error_subcode, error_data: { details }, error_user_msg } }.
+    // Surface the code + detail so the failure is actionable (e.g. 190 = bad/expired token).
+    let detail = "";
+    if (err) {
+      const ed = (err.error_data ?? {}) as Record<string, unknown>;
+      const bits = [
+        err.message ? String(err.message) : "",
+        err.code != null ? `code ${err.code}${err.error_subcode != null ? `/${err.error_subcode}` : ""}` : "",
+        ed.details ? String(ed.details) : err.error_user_msg ? String(err.error_user_msg) : "",
+      ].filter(Boolean);
+      detail = bits.join(" · ");
+    }
+
     return {
       ok,
       providerId,
-      status: ok ? "Sent" : String(err?.message ?? `HTTP ${res.status}`),
+      status: ok ? "Sent" : detail || `HTTP ${res.status}`,
       raw,
-      error: ok ? undefined : String(err?.message ?? `Gateway returned ${res.status}`),
+      error: ok ? undefined : detail || `Gateway returned ${res.status}`,
     };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Network error contacting WhatsApp." };
