@@ -8,6 +8,7 @@ import { segMeta, fillTemplate, SEGMENT_COLUMNS, VALUE_TITLE, LIFECYCLE_TITLE } 
 import { SmsSender } from "./SmsSender";
 import { WaSender } from "./WaSender";
 import { BroadcastPanel } from "./BroadcastPanel";
+import { BroadcastHistory } from "./BroadcastHistory";
 import { WA_VAR_TOKENS } from "@/lib/campaign-vars";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { cropLabel } from "@/lib/crops";
@@ -259,6 +260,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
   const [memberPage, setMemberPage] = useState(0);
   const [focusMode, setFocusMode] = useState(false);
   const [broadcasting, setBroadcasting] = useState(false); // admin mass-send panel
+  const [bcReload, setBcReload] = useState(0); // bump to refresh broadcast history after a run
   const [focusCurrent, setFocusCurrent] = useState<CampaignMemberVM | null>(null); // Focus view's current farmer → drives the script panel
   const [extendOf, setExtendOf] = useState<CampaignListItem | null>(null);
 
@@ -412,6 +414,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
                     )}
                     <div className="min-w-0 flex-1 lg:overflow-y-auto">
                     <OutreachProgress members={members} />
+                    {canManage && <BroadcastHistory campaignId={membersOf.id} reloadKey={bcReload} />}
                     <div className="mb-3 mt-3 flex flex-wrap items-center justify-between gap-2">
                       <div className="text-[12px] text-[#757575]">{focusMode ? "Focus mode — one farmer at a time" : "Work the list, switch to Focus mode, or open the full-page matrix."}</div>
                       <div className="flex flex-wrap gap-2">
@@ -488,7 +491,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
 
       {extendOf && <ExtendModal campaign={extendOf} project={projects.find((p) => p.id === projectId) ?? null} onClose={() => setExtendOf(null)} />}
       {broadcasting && membersOf && (
-        <BroadcastPanel campaignId={membersOf.id} campaignName={membersOf.name} commPlans={membersOf.commPlans ?? []} templates={templates} onClose={() => setBroadcasting(false)} />
+        <BroadcastPanel campaignId={membersOf.id} campaignName={membersOf.name} commPlans={membersOf.commPlans ?? []} templates={templates} onClose={() => { setBroadcasting(false); setBcReload((k) => k + 1); }} />
       )}
     </div>
   );
