@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { listOptIns, generateOptInQr, type OptInRow } from "@/app/actions/whatsapp-optins";
+import { listOptIns, generateOptInQr, saveOptInQrConfig, type OptInRow } from "@/app/actions/whatsapp-optins";
 
 const DEFAULT_MSG = "Hi UA Agro, I'd like to receive product updates & offers on WhatsApp.";
 const fmt = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-GB", { day: "numeric", month: "short" }); };
@@ -12,14 +12,16 @@ const fmt = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.ge
  *    number with the opt-in message pre-filled. When they send it, the inbound webhook records them.
  *  • Opt-ins list — everyone captured by the webhook (marketable, opted-in contacts).
  */
-export function WhatsAppOptInsCard({ initial }: { initial: { total: number; rows: OptInRow[] } }) {
-  // QR generator state
-  const [num, setNum] = useState("");
-  const [msg, setMsg] = useState(DEFAULT_MSG);
+export function WhatsAppOptInsCard({ initial, qrConfig }: { initial: { total: number; rows: OptInRow[] }; qrConfig: { number: string; message: string } }) {
+  // QR generator state — prefilled from the saved visit-form config.
+  const [num, setNum] = useState(qrConfig.number || "");
+  const [msg, setMsg] = useState(qrConfig.message || DEFAULT_MSG);
   const [link, setLink] = useState("");
   const [qr, setQr] = useState("");
   const [qrErr, setQrErr] = useState<string | null>(null);
   const [gen, startGen] = useTransition();
+  const [saved, setSaved] = useState<string | null>(null);
+  const [savingCfg, startSaveCfg] = useTransition();
 
   // Opt-ins list state
   const [rows, setRows] = useState(initial.rows);
@@ -36,6 +38,14 @@ export function WhatsAppOptInsCard({ initial }: { initial: { total: number; rows
     });
   };
   const refresh = (term = q) => startLoad(async () => { const r = await listOptIns(term); setRows(r.rows); setTotal(r.total); });
+  const saveForVisitForm = () => {
+    setSaved(null); setQrErr(null);
+    startSaveCfg(async () => {
+      const r = await saveOptInQrConfig({ number: num, message: msg });
+      if (!r.ok) { setQrErr(r.error ?? "Save failed."); return; }
+      setSaved(num.trim() ? "Saved — this QR now shows on the visit form's last page." : "Cleared — the visit form will not show a QR.");
+    });
+  };
 
   const inputCls = "w-full rounded-[10px] border border-[#E0E0E0] px-3 py-2.5 text-[13px] outline-none focus:border-[#0B8A3D]";
 
@@ -55,9 +65,16 @@ export function WhatsAppOptInsCard({ initial }: { initial: { total: number; rows
           value={num} onChange={(e) => setNum(e.target.value)} />
         <label className="mt-3 block text-[11px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Opt-in message (what the customer sends)</label>
         <textarea className={`${inputCls} mt-1 resize-y`} rows={2} value={msg} onChange={(e) => setMsg(e.target.value)} />
-        <button type="button" onClick={makeQr} disabled={gen}
-          className="mt-3 rounded-[10px] bg-[#0B8A3D] px-4 py-2 text-[13px] font-bold text-white hover:bg-[#0A6E31] disabled:opacity-50">
-          {gen ? "Generating…" : "Generate QR + link"}</button>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button type="button" onClick={makeQr} disabled={gen}
+            className="rounded-[10px] bg-[#0B8A3D] px-4 py-2 text-[13px] font-bold text-white hover:bg-[#0A6E31] disabled:opacity-50">
+            {gen ? "Generating…" : "Generate QR + link"}</button>
+          <button type="button" onClick={saveForVisitForm} disabled={savingCfg}
+            className="rounded-[10px] border border-[#0B8A3D] px-4 py-2 text-[13px] font-bold text-[#0B8A3D] hover:bg-[#E8F5E9] disabled:opacity-50"
+            title="Show this exact QR on the last page of the New Visit form so officers can get farmers to opt in during a visit">
+            {savingCfg ? "Saving…" : "★ Use on visit form"}</button>
+        </div>
+        {saved && <div className="mt-2 rounded-[8px] bg-[#E8F5E9] px-3 py-2 text-[12px] font-semibold text-[#2E7D32]">{saved}</div>}
         {qrErr && <div className="mt-2 rounded-[8px] bg-[#FDECEA] px-3 py-2 text-[12px] font-semibold text-[#C62828]">{qrErr}</div>}
 
         {qr && (

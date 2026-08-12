@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getRole } from "@/lib/session";
 import { getScope } from "@/lib/scope";
+import { getOptInQrConfig } from "@/app/actions/whatsapp-optins";
 import { NewVisitWizard } from "@/components/new-visit/NewVisitWizard";
 import {
   resolveOptions,
@@ -70,6 +71,10 @@ export default async function NewVisitPage() {
     // Tolerate a missing/empty DB — fall back to the spec's default option lists.
   }
 
+  // WhatsApp opt-in QR shown on the last step — the officer has the farmer scan it to opt in.
+  let optInQr: string | null = null;
+  try { optInQr = (await getOptInQrConfig()).qr; } catch { /* no config / DB down → no QR */ }
+
   return (
     <NewVisitWizard
       options={options}
@@ -77,6 +82,7 @@ export default async function NewVisitPage() {
       villages={villages}
       visitReasons={VISIT_REASONS}
       stores={stores}
+      optInQr={optInQr}
     />
   );
 }

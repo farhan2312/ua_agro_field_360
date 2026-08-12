@@ -47,18 +47,54 @@ export async function listOptIns(q?: string): Promise<{ total: number; rows: Opt
   };
 }
 
-/** Build a WhatsApp click-to-chat link + a QR PNG (data URL) for the opt-in poster. Admin-only. */
-export async function generateOptInQr(input: { businessNumber: string; message: string }): Promise<{ ok: boolean; link?: string; qr?: string; error?: string }> {
-  if (!(await adminOnly())) return { ok: false, error: "Admins only." };
-  const num = (input.businessNumber ?? "").replace(/\D/g, "").replace(/^0+/, "");
-  if (num.length < 10) return { ok: false, error: "Enter a valid business WhatsApp number (with country code, e.g. 91XXXXXXXXXX)." };
+const OPTIN_NUMBER_KEY = "whatsapp.optInNumber";
+const OPTIN_MESSAGE_KEY = "whatsapp.optInMessage";
+const DEFAULT_OPTIN_MESSAGE = "Hi UA Agro, I'd like to receive product updates & offers on WhatsApp.";
+
+/** wa.me link + QR PNG data URL for a number + message (no persistence). "" number → nulls. */
+export async function buildOptInQr(businessNumber: string, message: string): Promise<{ link: string | null; qr: string | null }> {
+  const num = (businessNumber ?? "").replace(/\D/g, "").replace(/^0+/, "");
+  if (num.length < 10) return { link: null, qr: null };
   const to = num.length === 10 ? `91${num}` : num; // default India code if a bare 10-digit was given
-  const msg = (input.message ?? "").trim();
+  const msg = (message ?? "").trim();
   const link = `https://wa.me/${to}${msg ? `?text=${encodeURIComponent(msg)}` : ""}`;
   try {
     const qr = await QRCode.toDataURL(link, { margin: 1, width: 512, errorCorrectionLevel: "M" });
-    return { ok: true, link, qr };
+    return { link, qr };
+  } catch {
+    return { link, qr: null };
+  }
+}
+
+/** Ad-hoc QR generator for the Settings card. Admin-only. */
+export async function generateOptInQr(input: { businessNumber: string; message: string }): Promise<{ ok: boolean; link?: string; qr?: string; error?: string }> {
+  if (!(await adminOnly())) return { ok: false, error: "Admins only." };
+  const num = (input.businessNumber ?? "").replace(/\D/g, "");
+  if (num.length < 10) return { ok: false, error: "Enter a valid business WhatsApp number (with country code, e.g. 91XXXXXXXXXX)." };
+  const { link, qr } = await buildOptInQr(input.businessNumber, input.message);
+  return qr ? { ok: true, link: link ?? "", qr } : { ok: false, error: "Could not generate the QR." };
+}
+
+/** The saved opt-in QR config used on the visit form's last page. */
+export async function getOptInQrConfig(): Promise<{ number: string; message: string; qr: string | null; link: string | null }> {
+  const rows = await prisma.setting.findMany({ where: { key: { in: [OPTIN_NUMBER_KEY, OPTIN_MESSAGE_KEY] } } });
+  const map = new Map(rows.map((r) => [r.key, r.value]));
+  const number = map.get(OPTIN_NUMBER_KEY) ?? "";
+  const message = map.get(OPTIN_MESSAGE_KEY) ?? DEFAULT_OPTIN_MESSAGE;
+  const { qr, link } = number ? await buildOptInQr(number, message) : { qr: null, link: null };
+  return { number, message, qr, link };
+}
+
+/** Save the number + message shown as the visit-form opt-in QR. Admin-only. */
+export async function saveOptInQrConfig(input: { number: string; message: string }): Promise<{ ok: boolean; error?: string }> {
+  if (!(await adminOnly())) return { ok: false, error: "Admins only." };
+  const num = (input.number ?? "").replace(/\D/g, "");
+  if (num && num.length < 10) return { ok: false, error: "Enter a valid number with country code, or clear it to hide the QR." };
+  try {
+    await prisma.setting.upsert({ where: { key: OPTIN_NUMBER_KEY }, create: { key: OPTIN_NUMBER_KEY, value: num }, update: { value: num } });
+    await prisma.setting.upsert({ where: { key: OPTIN_MESSAGE_KEY }, create: { key: OPTIN_MESSAGE_KEY, value: (input.message ?? "").trim() }, update: { value: (input.message ?? "").trim() } });
+    return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Could not generate the QR." };
+    return { ok: false, error: e instanceof Error ? e.message : "Save failed." };
   }
 }

@@ -10,7 +10,7 @@ import {
 import { DataManagementCard } from "@/components/settings/DataManagementCard";
 import { SmsTestCard } from "@/components/settings/SmsTestCard";
 import { WhatsAppOptInsCard } from "@/components/settings/WhatsAppOptInsCard";
-import { listOptIns, type OptInRow } from "@/app/actions/whatsapp-optins";
+import { listOptIns, getOptInQrConfig, type OptInRow } from "@/app/actions/whatsapp-optins";
 
 export const dynamic = "force-dynamic";
 
@@ -126,7 +126,12 @@ export default async function SettingsPage() {
   }
 
   let optIns: { total: number; rows: OptInRow[] } = { total: 0, rows: [] };
-  try { optIns = await listOptIns(); } catch { /* DB unavailable */ }
+  let optInCfg = { number: "", message: "" };
+  try {
+    optIns = await listOptIns();
+    const cfg = await getOptInQrConfig();
+    optInCfg = { number: cfg.number, message: cfg.message };
+  } catch { /* DB unavailable */ }
 
   const registry: RegistryRow[] = [
     {
@@ -160,7 +165,7 @@ export default async function SettingsPage() {
         <div className="flex flex-col gap-[18px]">
           <SystemConfigCard initial={config} districtOptions={districtOptions} />
           <SmsTestCard plans={plans} smsReady={sms.ready} missing={sms.missing} senderId={sms.cfg.senderId} waReady={wa.ready} waMissing={wa.missing} />
-          <WhatsAppOptInsCard initial={optIns} />
+          <WhatsAppOptInsCard initial={optIns} qrConfig={optInCfg} />
           <DataManagementCard />
         </div>
       </div>

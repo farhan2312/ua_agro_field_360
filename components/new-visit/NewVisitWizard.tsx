@@ -123,6 +123,7 @@ export function NewVisitWizard({
   villages,
   visitReasons,
   stores = [],
+  optInQr = null,
   primaryIdLabel = "Mobile Number",
   visitReasonRequired = true,
 }: {
@@ -131,6 +132,8 @@ export function NewVisitWizard({
   villages: string[];
   visitReasons: string[];
   stores?: { id: number; name: string }[];
+  /** WhatsApp opt-in QR (PNG data URL) shown on the last step; null = not configured. */
+  optInQr?: string | null;
   primaryIdLabel?: string;
   visitReasonRequired?: boolean;
 }) {
@@ -1019,6 +1022,23 @@ export function NewVisitWizard({
                 ))}
               </div>
             </div>
+
+            {optInQr && (
+              <div className="mb-5 rounded-xl border-[1.5px] border-[#A5D6A7] bg-[#F1F8F1] p-[18px]">
+                <div className="mb-1 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.7px] text-[#0B8A3D]">
+                  ⚡ WhatsApp updates
+                </div>
+                <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-center">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={optInQr} alt="Scan to opt in to WhatsApp updates" className="h-40 w-40 shrink-0 rounded-[10px] border border-[#C8E6C9] bg-white p-1.5" />
+                  <div className="text-[13px] leading-relaxed text-[#33691E]">
+                    <div className="font-bold text-[#1B5E20]">Ask the farmer to scan this</div>
+                    <div className="mt-1">They&apos;ll open WhatsApp with a ready message — they just tap <b>send</b>. That opts them in to receive product updates &amp; offers from UA Agro on WhatsApp.</div>
+                    <div className="mt-1.5 text-[11.5px] text-[#558B2F]">Optional — the visit still submits either way.</div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="grid gap-5 sm:grid-cols-2">
               <div>
