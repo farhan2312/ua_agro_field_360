@@ -14,6 +14,8 @@
  *                outreach; the approved template's body variables are filled from `bodyParams`.
  */
 
+import { createHmac } from "crypto";
+
 const DEFAULT_VERSION = "v21.0";
 
 export interface WaConfig {
@@ -23,6 +25,23 @@ export interface WaConfig {
 // Trim whitespace AND strip one layer of wrapping quotes — a token pasted as "EAAG…" (quotes included)
 // is a very common cause of Meta "Authentication Error" (the quotes travel in the Bearer header).
 const clean = (v: string | undefined) => (v ?? "").trim().replace(/^['"]|['"]$/g, "").trim();
+
+// Meta apps with "Require app secret proof for server API calls" ON reject every Graph call that
+// lacks an appsecret_proof (error code 100: "appsecret_proof is required but not provided"). The proof
+// is HMAC-SHA256(access_token) keyed by the app secret, sent as a query param. We attach it whenever
+// WHATSAPP_APP_SECRET is set; if the setting is off, the extra param is simply ignored by Meta.
+function appSecretProof(accessToken: string): string {
+  const secret = clean(process.env.WHATSAPP_APP_SECRET);
+  if (!secret || !accessToken) return "";
+  return createHmac("sha256", secret).update(accessToken).digest("hex");
+}
+
+/** Append `appsecret_proof` to a Graph URL when an app secret is configured. */
+function withProof(url: string, accessToken: string): string {
+  const proof = appSecretProof(accessToken);
+  if (!proof) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}appsecret_proof=${proof}`;
+}
 
 /** Read + validate env config. `missing` lists which REQUIRED keys are blank. */
 export function waConfig(): { cfg: WaConfig; ready: boolean; missing: string[] } {
@@ -105,7 +124,7 @@ export async function sendWhatsApp(opts: {
   }
 
   try {
-    const res = await fetch(`https://graph.facebook.com/${cfg.version}/${cfg.phoneNumberId}/messages`, {
+    const res = await fetch(withProof(`https://graph.facebook.com/${cfg.version}/${cfg.phoneNumberId}/messages`, cfg.accessToken), {
       method: "POST",
       headers: { Authorization: `Bearer ${cfg.accessToken}`, "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -171,7 +190,7 @@ function graphError(b: Record<string, unknown>, httpStatus: number): string {
 
 async function graph(path: string, init: RequestInit): Promise<{ ok: boolean; body: any; status: number }> {
   const { cfg } = waConfig();
-  const res = await fetch(`https://graph.facebook.com/${cfg.version}/${path}`, {
+  const res = await fetch(withProof(`https://graph.facebook.com/${cfg.version}/${path}`, cfg.accessToken), {
     ...init,
     headers: { Authorization: `Bearer ${cfg.accessToken}`, "Content-Type": "application/json", ...(init.headers ?? {}) },
     cache: "no-store",
