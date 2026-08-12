@@ -261,6 +261,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
   const [focusMode, setFocusMode] = useState(false);
   const [broadcasting, setBroadcasting] = useState(false); // admin mass-send panel
   const [bcReload, setBcReload] = useState(0); // bump to refresh broadcast history after a run
+  const [historyOf, setHistoryOf] = useState<CampaignListItem | null>(null); // broadcast history modal from a card
   const [focusCurrent, setFocusCurrent] = useState<CampaignMemberVM | null>(null); // Focus view's current farmer → drives the script panel
   const [extendOf, setExtendOf] = useState<CampaignListItem | null>(null);
 
@@ -393,6 +394,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
             <button type="button" onClick={() => openAnalytics(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#00838F] hover:bg-[#E0F7FA]">Analytics</button>
             {canManage && <button type="button" onClick={() => openTracker(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9]">Campaign Tracker</button>}
             {canManage && <button type="button" onClick={() => setExtendOf(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#6A1B9A] hover:bg-[#F3E5F5]">Extend</button>}
+            {canManage && <button type="button" onClick={() => setHistoryOf(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#0B8A3D] hover:bg-[#E8F5E9]">📣 Broadcasts</button>}
           </div>
         ))}
       </div>
@@ -492,6 +494,12 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
       {extendOf && <ExtendModal campaign={extendOf} project={projects.find((p) => p.id === projectId) ?? null} onClose={() => setExtendOf(null)} />}
       {broadcasting && membersOf && (
         <BroadcastPanel campaignId={membersOf.id} campaignName={membersOf.name} commPlans={membersOf.commPlans ?? []} templates={templates} onClose={() => { setBroadcasting(false); setBcReload((k) => k + 1); }} />
+      )}
+      {historyOf && (
+        <Modal open onClose={() => setHistoryOf(null)} className="max-w-[720px]">
+          <ModalHeader eyebrow="Campaign · broadcasts" eyebrowColor="#0B8A3D" title={historyOf.name} subtitle="Past mass-sends (SMS / WhatsApp)" onClose={() => setHistoryOf(null)} />
+          <div className="px-5 py-4"><BroadcastHistory campaignId={historyOf.id} defaultOpen /></div>
+        </Modal>
       )}
     </div>
   );

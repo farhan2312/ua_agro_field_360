@@ -12,9 +12,9 @@ const STATUS: Record<string, { bg: string; c: string; label: string }> = {
 };
 
 /** Past mass-sends for a campaign (admin-only). `reloadKey` bumps to refetch after a broadcast finishes. */
-export function BroadcastHistory({ campaignId, reloadKey = 0 }: { campaignId: number; reloadKey?: number }) {
+export function BroadcastHistory({ campaignId, reloadKey = 0, defaultOpen = false }: { campaignId: number; reloadKey?: number; defaultOpen?: boolean }) {
   const [rows, setRows] = useState<BroadcastVM[] | null>(null);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [loading, start] = useTransition();
 
   const load = () => start(async () => setRows(await listBroadcasts(campaignId)));
