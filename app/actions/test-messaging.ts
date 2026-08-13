@@ -84,8 +84,12 @@ export async function sendTestSms(input: {
  */
 export async function sendTestWhatsApp(input: {
   mobile: string;
-  message: string;
+  message?: string;
   farmerId?: number | null;
+  // Template mode (bypasses Meta's 24h session window — the reliable way to reach a cold number).
+  templateName?: string | null;
+  languageCode?: string | null;
+  bodyParams?: string[];
 }): Promise<TestSmsResult> {
   if (!(await adminOnly())) return { ok: false, error: "Test WhatsApp is available to admins only." };
 
@@ -94,18 +98,27 @@ export async function sendTestWhatsApp(input: {
   // (sendWhatsApp prefixes 91). SMS and the rest of the portal stay India-only.
   const mobile = (input.mobile ?? "").replace(/\D/g, "");
   if (!/^\d{8,15}$/.test(mobile)) return { ok: false, error: "Enter a valid international number incl. country code (8–15 digits, no +)." };
+
+  const isTemplate = !!input.templateName;
   const message = (input.message ?? "").trim();
-  if (!message) return { ok: false, error: "Message is empty." };
+  if (!isTemplate && !message) return { ok: false, error: "Message is empty." };
 
   const { ready, missing } = waConfig();
   if (!ready) return { ok: false, error: `WhatsApp not configured — set ${missing.join(", ")} in the environment.` };
 
   try {
     const actor = await getActor();
-    const res = await sendWhatsApp({ mobile, message });
+    const res = isTemplate
+      ? await sendWhatsApp({ mobile, templateName: input.templateName, languageCode: input.languageCode ?? "en", bodyParams: input.bodyParams ?? [] })
+      : await sendWhatsApp({ mobile, message });
+    // Log a readable summary for template sends (the actual text lives in the approved template).
+    const logMsg = isTemplate
+      ? `[template ${input.templateName}${input.bodyParams?.length ? ` · ${input.bodyParams.join(" | ")}` : ""}]`
+      : message;
     await prisma.whatsAppLog.create({
       data: {
-        farmerId: input.farmerId ?? null, mobile, kind: "text", message,
+        farmerId: input.farmerId ?? null, mobile, kind: isTemplate ? "template" : "text",
+        templateName: isTemplate ? input.templateName : null, message: logMsg,
         ok: res.ok, providerId: res.providerId ?? null,
         status: res.status ? `TEST · ${res.status}` : "TEST", error: res.error ?? null,
         sentByName: actor.name, sentByCode: actor.code,

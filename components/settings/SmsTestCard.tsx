@@ -3,21 +3,27 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { searchFarmersForAction } from "@/app/actions/action-registry";
 import { sendTestSms, sendTestWhatsApp, getRecentWhatsAppLogs, type WaLogRow } from "@/app/actions/test-messaging";
+import { fillPreview } from "@/lib/wa-template-presets";
 import type { FarmerPick } from "@/lib/action-constants";
 
 type Plan = { id: number; name: string; template: string; dltTemplateId: string | null };
+type WaTemplateOpt = { name: string; language: string; body: string; varCount: number };
 type Channel = "sms" | "whatsapp";
+type WaMode = "text" | "template";
 
 /**
  * Settings → Test messaging bench. Pick a farmer (search) or type any number, compose a message
  * (free text, optionally loaded from a saved Comm Plan), and fire one SMS (ZapSMS) or WhatsApp
  * (Meta Cloud API). Admin-only (Settings is sysadmin); every send is logged.
  */
-export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMissing }: {
+export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMissing, waTemplates = [] }: {
   plans: Plan[]; smsReady: boolean; missing: string[]; senderId: string;
-  waReady: boolean; waMissing: string[];
+  waReady: boolean; waMissing: string[]; waTemplates?: WaTemplateOpt[];
 }) {
   const [channel, setChannel] = useState<Channel>("sms");
+  const [waMode, setWaMode] = useState<WaMode>("text");
+  const [tplName, setTplName] = useState<string>("");
+  const [tplParams, setTplParams] = useState<string[]>([]);
   const [q, setQ] = useState("");
   const [results, setResults] = useState<FarmerPick[]>([]);
   const [picked, setPicked] = useState<FarmerPick | null>(null);
@@ -62,7 +68,19 @@ export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMis
   // SMS is India-only (10 digits, 6–9). WhatsApp test allows a full international number incl. country
   // code (e.g. a UAE 971… number) — testing convenience only; the portal still serves India everywhere else.
   const mobileValid = isWa ? /^\d{8,15}$/.test(mobile) : /^[6-9]\d{9}$/.test(mobile);
-  const canSend = ready && mobileValid && message.trim().length > 0 && !sending;
+
+  const isTemplateMode = isWa && waMode === "template";
+  const selectedTpl = waTemplates.find((t) => t.name === tplName) ?? null;
+  const paramsFilled = !selectedTpl || tplParams.slice(0, selectedTpl.varCount).filter((s) => s.trim()).length === selectedTpl.varCount;
+  const pickTemplate = (name: string) => {
+    setTplName(name);
+    const t = waTemplates.find((x) => x.name === name);
+    setTplParams(t ? Array(t.varCount).fill("") : []);
+  };
+
+  const canSend = ready && mobileValid && !sending && (
+    isTemplateMode ? !!selectedTpl && paramsFilled : message.trim().length > 0
+  );
 
   const [waLogs, setWaLogs] = useState<WaLogRow[] | null>(null);
   const refreshLogs = () => getRecentWhatsAppLogs(8).then(setWaLogs);
@@ -71,7 +89,11 @@ export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMis
     setResult(null);
     startSend(async () => {
       const r = isWa
-        ? await sendTestWhatsApp({ mobile, message, farmerId: picked?.id ?? null })
+        ? await sendTestWhatsApp(
+            isTemplateMode && selectedTpl
+              ? { mobile, templateName: selectedTpl.name, languageCode: selectedTpl.language, bodyParams: tplParams.slice(0, selectedTpl.varCount), farmerId: picked?.id ?? null }
+              : { mobile, message, farmerId: picked?.id ?? null },
+          )
         : await sendTestSms({ mobile, message, commTemplateId: planId, farmerId: picked?.id ?? null });
       setResult(r.ok
         ? { ok: true, text: `Accepted by Meta${r.providerId ? ` · id ${r.providerId}` : ""}${r.status ? ` · ${r.status}` : ""} — watch delivery status below.` }
@@ -116,9 +138,23 @@ export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMis
       )}
 
       {isWa && (
-        <div className="mb-4 rounded-[10px] bg-[#FFF8E1] px-3 py-2 text-[11.5px] text-[#8D6E00]">
-          Free-text WhatsApp only reaches numbers that messaged you in the last 24h or your Meta app's registered test numbers. Cold numbers need an approved template.
-        </div>
+        <>
+          {/* Send mode: free text (needs the 24h window) vs approved template (reaches any number). */}
+          <div className="mb-3 inline-flex rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] p-1">
+            {([["text", "Free text"], ["template", "Approved template"]] as [WaMode, string][]).map(([m, label]) => (
+              <button key={m} type="button" onClick={() => { setWaMode(m); setResult(null); }}
+                className="rounded-[8px] px-3.5 py-1.5 text-[12px] font-semibold transition-colors"
+                style={{ background: waMode === m ? "#fff" : "transparent", color: waMode === m ? "#0B8A3D" : "#9E9E9E", boxShadow: waMode === m ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="mb-4 rounded-[10px] px-3 py-2 text-[11.5px]" style={{ background: isTemplateMode ? "#E8F5E9" : "#FFF8E1", color: isTemplateMode ? "#2E7D32" : "#8D6E00" }}>
+            {isTemplateMode
+              ? "Approved templates reach any number, even a cold one — the reliable way to test (bypasses Meta's 24h window)."
+              : "Free-text WhatsApp only reaches numbers that messaged you in the last 24h or your Meta app's registered test numbers. Cold numbers need an approved template."}
+          </div>
+        </>
       )}
 
       {/* Recipient: farmer search */}
@@ -154,23 +190,66 @@ export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMis
       )}
       {isWa && <div className="mt-1 text-[11px] text-[#9E9E9E]">Testing only — include the country code (a UAE number is 971…). Everywhere else the portal is India-only.</div>}
 
-      {/* Message + optional plan loader */}
-      <div className="mt-3 flex items-end justify-between gap-2">
-        <label className="text-[11px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Message *</label>
-        {plans.length > 0 && (
-          <select value={planId ?? ""} onChange={(e) => loadPlan(e.target.value ? Number(e.target.value) : null)}
-            className="rounded-[8px] border border-[#E0E0E0] bg-white px-2 py-1 text-[11.5px] text-[#616161] outline-none focus:border-[#2E7D32]">
-            <option value="">Load from a Comm Plan…</option>
-            {plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        )}
-      </div>
-      <textarea className={`${inputCls} mt-1 resize-y`} rows={4} value={message} onChange={(e) => setMessage(e.target.value)}
-        placeholder="Type your test message…" />
-      <div className="mt-1 flex items-center justify-between text-[11px] text-[#9E9E9E]">
-        <span>{planId != null ? "Loaded from a Comm Plan — placeholders like [Naam] are sent as-is in a test." : "Free text."}</span>
-        <span>{message.length} chars</span>
-      </div>
+      {/* Approved-template picker (WhatsApp template mode) */}
+      {isTemplateMode ? (
+        <div className="mt-3">
+          <label className="block text-[11px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Approved template *</label>
+          {waTemplates.length === 0 ? (
+            <div className="mt-1 rounded-[10px] bg-[#FFF8E1] px-3 py-2 text-[12px] text-[#8D6E00]">
+              No approved templates yet. Create &amp; submit one in the <b>WhatsApp Templates</b> tab — once Meta approves it, it appears here.
+            </div>
+          ) : (
+            <>
+              <select className={`${inputCls} mt-1 bg-white`} value={tplName} onChange={(e) => pickTemplate(e.target.value)}>
+                <option value="">Pick an approved template…</option>
+                {waTemplates.map((t) => <option key={`${t.name}-${t.language}`} value={t.name}>{t.name} ({t.language}){t.varCount ? ` · ${t.varCount} var` : ""}</option>)}
+              </select>
+              {selectedTpl && (
+                <>
+                  {selectedTpl.varCount > 0 && (
+                    <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {Array.from({ length: selectedTpl.varCount }).map((_, i) => (
+                        <div key={i}>
+                          <label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Value for {`{{${i + 1}}}`}</label>
+                          <input className={`${inputCls} mt-1`} value={tplParams[i] ?? ""}
+                            onChange={(e) => setTplParams((p) => { const n = [...p]; n[i] = e.target.value; return n; })}
+                            placeholder={`{{${i + 1}}}`} />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="mt-2">
+                    <div className="text-[10px] font-bold uppercase text-[#9E9E9E]">Preview</div>
+                    <div className="mt-1 rounded-[10px] rounded-tl-[3px] bg-[#DCF8C6] px-3 py-2 text-[12.5px] leading-relaxed text-[#1A1C1A] shadow-[0_1px_1px_rgba(0,0,0,0.08)]" dir="auto" style={{ whiteSpace: "pre-wrap" }}>
+                      {fillPreview(selectedTpl.body, tplParams)}
+                    </div>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      ) : (
+        <>
+          {/* Message + optional plan loader */}
+          <div className="mt-3 flex items-end justify-between gap-2">
+            <label className="text-[11px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Message *</label>
+            {plans.length > 0 && (
+              <select value={planId ?? ""} onChange={(e) => loadPlan(e.target.value ? Number(e.target.value) : null)}
+                className="rounded-[8px] border border-[#E0E0E0] bg-white px-2 py-1 text-[11.5px] text-[#616161] outline-none focus:border-[#2E7D32]">
+                <option value="">Load from a Comm Plan…</option>
+                {plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            )}
+          </div>
+          <textarea className={`${inputCls} mt-1 resize-y`} rows={4} value={message} onChange={(e) => setMessage(e.target.value)}
+            placeholder="Type your test message…" />
+          <div className="mt-1 flex items-center justify-between text-[11px] text-[#9E9E9E]">
+            <span>{planId != null ? "Loaded from a Comm Plan — placeholders like [Naam] are sent as-is in a test." : "Free text."}</span>
+            <span>{message.length} chars</span>
+          </div>
+        </>
+      )}
 
       {result && (
         <div className={`mt-3 rounded-[10px] px-3 py-2 text-[12px] font-medium ${result.ok ? "bg-[#E8F5E9] text-[#2E7D32]" : "bg-[#FDECEA] text-[#C62828]"}`}>

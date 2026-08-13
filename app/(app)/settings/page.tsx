@@ -12,6 +12,7 @@ import { listOptIns, getOptInQrConfig, type OptInRow } from "@/app/actions/whats
 import { WhatsAppTemplatesCard } from "@/components/settings/WhatsAppTemplatesCard";
 import { waTemplatesStatus, listTemplates, type WaTemplate } from "@/app/actions/whatsapp-templates";
 import { SettingsTabs } from "@/components/settings/SettingsTabs";
+import { countVars } from "@/lib/wa-template-presets";
 
 export const dynamic = "force-dynamic";
 
@@ -137,7 +138,8 @@ export default async function SettingsPage() {
           icon: "📣",
           content: (
             <div className="mx-auto flex max-w-3xl flex-col gap-[18px]">
-              <SmsTestCard plans={plans} smsReady={sms.ready} missing={sms.missing} senderId={sms.cfg.senderId} waReady={wa.ready} waMissing={wa.missing} />
+              <SmsTestCard plans={plans} smsReady={sms.ready} missing={sms.missing} senderId={sms.cfg.senderId} waReady={wa.ready} waMissing={wa.missing}
+                waTemplates={tplInit.templates.filter((t) => t.status === "APPROVED").map((t) => ({ name: t.name, language: t.language, body: t.body, varCount: countVars(t.body) }))} />
               <WhatsAppOptInsCard initial={optIns} qrConfig={optInCfg} />
             </div>
           ),
