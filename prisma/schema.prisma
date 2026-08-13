@@ -546,8 +546,10 @@ model WhatsAppLog {
   message      String   @db.Text // text body (or a summary of the template)
   ok           Boolean  @default(false)
   providerId   String? // wamid.* message id returned by Meta
-  status       String? // short status / result
+  status       String? // short status / result (updated by the delivery-status webhook: SENT/DELIVERED/READ/FAILED)
   error        String?
+  deliveredAt  DateTime? // set when Meta's status webhook reports "delivered"
+  readAt       DateTime? // set when Meta's status webhook reports "read"
   sentByName   String?
   sentByCode   String?
   createdAt    DateTime @default(now())
@@ -555,6 +557,7 @@ model WhatsAppLog {
   @@index([campaignId])
   @@index([farmerId])
   @@index([createdAt])
+  @@index([providerId]) // delivery-status webhook matches on wamid
 }
 
 /// A mass send (SMS or WhatsApp) run against a campaign's TEST group — the broadcast job + audit.

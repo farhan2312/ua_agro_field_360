@@ -18,6 +18,22 @@ export interface TestSmsResult {
   status?: string;
 }
 
+export interface WaLogRow {
+  id: number; mobile: string; kind: string; status: string | null; error: string | null;
+  ok: boolean; deliveredAt: string | null; readAt: string | null; createdAt: string;
+}
+
+/** Recent WhatsApp sends + their live delivery status (updated by Meta's status webhook). Admin-only. */
+export async function getRecentWhatsAppLogs(limit = 8): Promise<WaLogRow[]> {
+  if (!(await adminOnly())) return [];
+  const rows = await prisma.whatsAppLog.findMany({ orderBy: { createdAt: "desc" }, take: Math.min(25, limit) });
+  return rows.map((r) => ({
+    id: r.id, mobile: r.mobile, kind: r.kind, status: r.status, error: r.error, ok: r.ok,
+    deliveredAt: r.deliveredAt?.toISOString() ?? null, readAt: r.readAt?.toISOString() ?? null,
+    createdAt: r.createdAt.toISOString(),
+  }));
+}
+
 /**
  * Fire a one-off test SMS to any number (a picked farmer or a typed-in mobile), straight through the
  * ZapSMS gateway. Not tied to a campaign — for verifying the gateway + credentials from Settings.

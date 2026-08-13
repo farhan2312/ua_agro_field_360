@@ -49,6 +49,31 @@ export async function POST(req: NextRequest) {
         const value = change?.value ?? {};
         const contacts: any[] = value.contacts ?? [];
         const messages: any[] = value.messages ?? [];
+
+        // Delivery-status callbacks (sent → delivered → read, or failed with an error code). These tell
+        // us what actually happened AFTER Meta accepted the message. Match our WhatsAppLog by wamid.
+        const statuses: any[] = value.statuses ?? [];
+        for (const s of statuses) {
+          const wamid = String(s?.id ?? "");
+          if (!wamid) continue;
+          const state = String(s?.status ?? "").toUpperCase(); // SENT | DELIVERED | READ | FAILED
+          const tsMs = s?.timestamp ? Number(s.timestamp) * 1000 : Date.now();
+          const at = Number.isFinite(tsMs) ? new Date(tsMs) : new Date();
+          const errs: any[] = s?.errors ?? [];
+          const err = errs[0]
+            ? [errs[0].code != null ? `code ${errs[0].code}` : "", errs[0].title, errs[0].error_data?.details ?? errs[0].message]
+                .filter(Boolean).join(" · ")
+            : null;
+          await prisma.whatsAppLog.updateMany({
+            where: { providerId: wamid },
+            data: {
+              status: state,
+              ...(state === "FAILED" ? { ok: false, error: err } : {}),
+              ...(state === "DELIVERED" ? { deliveredAt: at } : {}),
+              ...(state === "READ" ? { readAt: at } : {}),
+            },
+          });
+        }
         // Map wa_id -> profile name for this batch.
         const nameByWaId = new Map<string, string>();
         for (const c of contacts) if (c?.wa_id) nameByWaId.set(String(c.wa_id), c?.profile?.name ?? "");
