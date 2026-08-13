@@ -59,7 +59,9 @@ export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMis
     if (p) setMessage(p.template || "");
   };
 
-  const mobileValid = /^[6-9]\d{9}$/.test(mobile);
+  // SMS is India-only (10 digits, 6–9). WhatsApp test allows a full international number incl. country
+  // code (e.g. a UAE 971… number) — testing convenience only; the portal still serves India everywhere else.
+  const mobileValid = isWa ? /^\d{8,15}$/.test(mobile) : /^[6-9]\d{9}$/.test(mobile);
   const canSend = ready && mobileValid && message.trim().length > 0 && !sending;
 
   const send = () => {
@@ -136,9 +138,14 @@ export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMis
       {/* Recipient: number */}
       <label className="mt-3 block text-[11px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Mobile number *</label>
       <input className={`${inputCls} mt-1 tracking-[1px] ${mobile && !mobileValid ? "border-[#EF9A9A]" : ""}`} inputMode="numeric"
-        placeholder="10-digit number" value={mobile} maxLength={10}
-        onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))} />
-      {mobile && !mobileValid && <div className="mt-1 text-[11px] text-[#C62828]">Must be 10 digits starting 6, 7, 8 or 9.</div>}
+        placeholder={isWa ? "Full international number, e.g. 9715XXXXXXXX" : "10-digit number"} value={mobile} maxLength={isWa ? 15 : 10}
+        onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, isWa ? 15 : 10))} />
+      {mobile && !mobileValid && (
+        <div className="mt-1 text-[11px] text-[#C62828]">
+          {isWa ? "Enter the full international number incl. country code (8–15 digits, no +)." : "Must be 10 digits starting 6, 7, 8 or 9."}
+        </div>
+      )}
+      {isWa && <div className="mt-1 text-[11px] text-[#9E9E9E]">Testing only — include the country code (a UAE number is 971…). Everywhere else the portal is India-only.</div>}
 
       {/* Message + optional plan loader */}
       <div className="mt-3 flex items-end justify-between gap-2">

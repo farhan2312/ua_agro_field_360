@@ -73,8 +73,11 @@ export async function sendTestWhatsApp(input: {
 }): Promise<TestSmsResult> {
   if (!(await adminOnly())) return { ok: false, error: "Test WhatsApp is available to admins only." };
 
+  // WhatsApp test bench only: accept a full international number incl. country code (e.g. a UAE 971…
+  // number) so an admin abroad can test. A bare 10-digit number is still treated as Indian downstream
+  // (sendWhatsApp prefixes 91). SMS and the rest of the portal stay India-only.
   const mobile = (input.mobile ?? "").replace(/\D/g, "");
-  if (!/^[6-9]\d{9}$/.test(mobile)) return { ok: false, error: "Enter a valid 10-digit mobile number (starts 6–9)." };
+  if (!/^\d{8,15}$/.test(mobile)) return { ok: false, error: "Enter a valid international number incl. country code (8–15 digits, no +)." };
   const message = (input.message ?? "").trim();
   if (!message) return { ok: false, error: "Message is empty." };
 
