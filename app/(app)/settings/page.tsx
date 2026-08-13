@@ -1,8 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { grouped } from "@/lib/format";
 import { zapConfig } from "@/lib/zapsms";
 import { waConfig } from "@/lib/whatsapp";
-import { MasterDataCard, type RegistryRow } from "@/components/settings/MasterDataCard";
 import {
   SystemConfigCard,
   type ConfigState,
@@ -13,27 +11,16 @@ import { WhatsAppOptInsCard } from "@/components/settings/WhatsAppOptInsCard";
 import { listOptIns, getOptInQrConfig, type OptInRow } from "@/app/actions/whatsapp-optins";
 import { WhatsAppTemplatesCard } from "@/components/settings/WhatsAppTemplatesCard";
 import { waTemplatesStatus, listTemplates, type WaTemplate } from "@/app/actions/whatsapp-templates";
+import { SettingsTabs } from "@/components/settings/SettingsTabs";
 
 export const dynamic = "force-dynamic";
 
-type Counts = {
-  crops: number;
-  villages: number;
-  districts: number;
-  products: number;
-  stores: number;
-  problemTypes: number;
-  fieldOptions: number;
-};
-
 type LoadResult = {
-  counts: Counts;
   config: ConfigState;
   districtOptions: string[];
 };
 
 const EMPTY: LoadResult = {
-  counts: { crops: 0, villages: 0, districts: 0, products: 0, stores: 0, problemTypes: 0, fieldOptions: 0 },
   config: {
     primaryIdLabel: "Mobile Number",
     visitReasonRequired: true,
@@ -45,22 +32,7 @@ const EMPTY: LoadResult = {
 
 async function load(): Promise<LoadResult> {
   try {
-    const [
-      cropOpt,
-      villageOpt,
-      productOpt,
-      problemOpt,
-      fieldOptionCount,
-      storeCount,
-      districtRows,
-      settingRows,
-    ] = await Promise.all([
-      prisma.fieldOption.findUnique({ where: { fieldName: "Crop" } }),
-      prisma.fieldOption.findUnique({ where: { fieldName: "Village" } }),
-      prisma.fieldOption.findUnique({ where: { fieldName: "Product" } }),
-      prisma.fieldOption.findUnique({ where: { fieldName: "Problem" } }),
-      prisma.fieldOption.count(),
-      prisma.store.count(),
+    const [districtRows, settingRows] = await Promise.all([
       prisma.store.findMany({
         where: { zone: { not: null } },
         distinct: ["zone"],
@@ -89,15 +61,6 @@ async function load(): Promise<LoadResult> {
     const get = (k: string, fallback: string) => settingMap.get(k) ?? fallback;
 
     return {
-      counts: {
-        crops: cropOpt?.options.length ?? 0,
-        villages: villageOpt?.options.length ?? 0,
-        districts: districts.length,
-        products: productOpt?.options.length ?? 0,
-        stores: storeCount,
-        problemTypes: problemOpt?.options.length ?? 0,
-        fieldOptions: fieldOptionCount,
-      },
       config: {
         primaryIdLabel: get("config.primaryIdLabel", EMPTY.config.primaryIdLabel),
         visitReasonRequired: get("config.visitReasonRequired", "true") === "true",
@@ -112,7 +75,7 @@ async function load(): Promise<LoadResult> {
 }
 
 export default async function SettingsPage() {
-  const { counts, config, districtOptions } = await load();
+  const { config, districtOptions } = await load();
 
   // Test-messaging bench data: gateway status + saved comm plans to optionally load a message from.
   const sms = zapConfig();
@@ -144,43 +107,42 @@ export default async function SettingsPage() {
     tplInit = { ready: st.ready, missing: st.missing, templates };
   } catch { /* gateway unreachable */ }
 
-  const registry: RegistryRow[] = [
-    {
-      label: "Crop Master",
-      caption: `${grouped(counts.crops)} crops configured`,
-    },
-    {
-      label: "Village Directory",
-      caption: `${grouped(counts.villages)} villages across ${counts.districts} districts`,
-    },
-    {
-      label: "Product Catalog",
-      caption: `${grouped(counts.products)} products configured`,
-      href: "/products",
-    },
-    {
-      label: "Store Locations",
-      caption: `${grouped(counts.stores)} stores configured`,
-      href: "/users",
-    },
-    {
-      label: "Problem Categories",
-      caption: `${grouped(counts.problemTypes)} problem types · ${grouped(counts.fieldOptions)} field options`,
-    },
-  ];
-
   return (
-    <div className="animate-fadeUp">
-      <div className="grid grid-cols-1 gap-[18px] md:grid-cols-2">
-        <MasterDataCard rows={registry} />
-        <div className="flex flex-col gap-[18px]">
-          <SystemConfigCard initial={config} districtOptions={districtOptions} />
-          <SmsTestCard plans={plans} smsReady={sms.ready} missing={sms.missing} senderId={sms.cfg.senderId} waReady={wa.ready} waMissing={wa.missing} />
-          <WhatsAppOptInsCard initial={optIns} qrConfig={optInCfg} />
-          <WhatsAppTemplatesCard initial={tplInit} />
-          <DataManagementCard />
-        </div>
-      </div>
-    </div>
+    <SettingsTabs
+      tabs={[
+        {
+          key: "general",
+          label: "General",
+          icon: "⚙",
+          content: (
+            <div className="mx-auto flex max-w-3xl flex-col gap-[18px]">
+              <SystemConfigCard initial={config} districtOptions={districtOptions} />
+              <DataManagementCard />
+            </div>
+          ),
+        },
+        {
+          key: "templates",
+          label: "WhatsApp Templates",
+          icon: "💬",
+          content: (
+            <div className="mx-auto max-w-3xl">
+              <WhatsAppTemplatesCard initial={tplInit} />
+            </div>
+          ),
+        },
+        {
+          key: "messaging",
+          label: "Messaging & Opt-ins",
+          icon: "📣",
+          content: (
+            <div className="mx-auto flex max-w-3xl flex-col gap-[18px]">
+              <SmsTestCard plans={plans} smsReady={sms.ready} missing={sms.missing} senderId={sms.cfg.senderId} waReady={wa.ready} waMissing={wa.missing} />
+              <WhatsAppOptInsCard initial={optIns} qrConfig={optInCfg} />
+            </div>
+          ),
+        },
+      ]}
+    />
   );
 }

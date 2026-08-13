@@ -3,9 +3,11 @@
 import { useState, useTransition } from "react";
 import { listTemplates, createTemplate, deleteTemplate, type WaTemplate } from "@/app/actions/whatsapp-templates";
 import { useConfirm } from "@/components/ConfirmDialog";
+import { WA_PRESETS, fillPreview, countVars, type PresetLang } from "@/lib/wa-template-presets";
 
 const CATEGORIES = ["MARKETING", "UTILITY", "AUTHENTICATION"];
 const LANGS = ["en", "en_US", "hi", "en_GB"];
+const LANG_LABEL: Record<string, string> = { en: "English", en_US: "English (US)", en_GB: "English (UK)", hi: "Hindi" };
 
 const STATUS_STYLE: Record<string, { bg: string; c: string }> = {
   APPROVED: { bg: "#E8F5E9", c: "#2E7D32" },
@@ -34,7 +36,25 @@ export function WhatsAppTemplatesCard({ initial }: {
   const [busy, start] = useTransition();
   const { confirm, dialog } = useConfirm();
 
-  const varCount = new Set((body.match(/\{\{\s*(\d+)\s*\}\}/g) ?? []).map((m) => m.replace(/\D/g, ""))).size;
+  const varCount = countVars(body);
+  const exampleArr = examples.split(",").map((s) => s.trim());
+  const preview = fillPreview(body, exampleArr);
+
+  // Apply a bilingual preset in the chosen language: fills body + examples + category + a suggested name.
+  const applyPreset = (key: string, lang: PresetLang) => {
+    const preset = WA_PRESETS.find((x) => x.key === key);
+    if (!preset) return;
+    const b = preset[lang];
+    setBody(b.body);
+    setExamples(b.examples.join(", "));
+    setCategory(preset.category);
+    setLanguage(lang === "hi" ? "hi" : "en");
+    setName(`${preset.key}_${lang}`);
+    setMsg(null);
+  };
+
+  // Insert the next {{n}} variable at the end of the body.
+  const insertVar = () => setBody((b) => `${b}${b.endsWith(" ") || b === "" ? "" : " "}{{${countVars(b) + 1}}}`);
 
   const refresh = () => start(async () => { const r = await listTemplates(); if (r.ok && r.templates) setRows(r.templates); });
 
@@ -71,6 +91,22 @@ export function WhatsAppTemplatesCard({ initial }: {
         </div>
       ) : (
         <>
+          {/* Preset library — pick a ready-made English/Hindi starter */}
+          <div className="mb-3 rounded-[12px] border border-[#E3F2FD] bg-[#F5FBFF] p-3">
+            <div className="mb-2 text-[12px] font-bold text-[#1565C0]">✨ Start from a template</div>
+            <div className="flex flex-col gap-1.5">
+              {WA_PRESETS.map((pr) => (
+                <div key={pr.key} className="flex flex-wrap items-center gap-2">
+                  <span className="min-w-[170px] text-[12px] font-semibold text-[#1A1C1A]">{pr.label}</span>
+                  <span className="rounded-full bg-[#F5F7F5] px-2 py-0.5 text-[9.5px] font-bold text-[#616161]">{pr.category}</span>
+                  <button type="button" onClick={() => applyPreset(pr.key, "en")} className="rounded-md border border-[#CFE3D4] bg-white px-2.5 py-1 text-[11px] font-semibold text-[#0B8A3D] hover:bg-[#E8F5E9]">English</button>
+                  <button type="button" onClick={() => applyPreset(pr.key, "hi")} className="rounded-md border border-[#CFE3D4] bg-white px-2.5 py-1 text-[11px] font-semibold text-[#0B8A3D] hover:bg-[#E8F5E9]">हिंदी</button>
+                  <span className="text-[10.5px] text-[#9E9E9E]">{pr.vars.map((v, i) => `{{${i + 1}}} ${v}`).join(" · ")}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
           {/* Create form */}
           <div className="rounded-[12px] border border-[#ECEFEC] bg-[#FAFBFA] p-4">
             <div className="mb-2.5 text-[12px] font-bold text-[#3A3A3A]">New template</div>
@@ -83,7 +119,7 @@ export function WhatsAppTemplatesCard({ initial }: {
               <div>
                 <label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Language</label>
                 <select className={`${inputCls} mt-1 bg-white`} value={language} onChange={(e) => setLanguage(e.target.value)}>
-                  {LANGS.map((l) => <option key={l} value={l}>{l}</option>)}
+                  {LANGS.map((l) => <option key={l} value={l}>{LANG_LABEL[l] ?? l}</option>)}
                 </select>
               </div>
               <div>
@@ -93,14 +129,29 @@ export function WhatsAppTemplatesCard({ initial }: {
                 </select>
               </div>
             </div>
-            <label className="mt-3 block text-[10px] font-bold uppercase text-[#9E9E9E]">Body — use {"{{1}}"}, {"{{2}}"} for variables</label>
-            <textarea className={`${inputCls} mt-1 resize-y`} rows={3} value={body} onChange={(e) => setBody(e.target.value)}
+            <div className="mt-3 flex items-center justify-between">
+              <label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Body — use {"{{1}}"}, {"{{2}}"} for variables</label>
+              <button type="button" onClick={insertVar} className="rounded-md border border-[#E0E0E0] bg-white px-2 py-0.5 text-[10.5px] font-semibold text-[#0B8A3D] hover:bg-[#E8F5E9]">+ Insert {`{{${varCount + 1}}}`}</button>
+            </div>
+            <textarea className={`${inputCls} mt-1 resize-y`} rows={3} value={body} onChange={(e) => setBody(e.target.value)} dir="auto"
               placeholder={"Namaste {{1}}! UA Agro has a special offer on {{2}} this week. Visit your nearest store."} />
             {varCount > 0 && (
               <>
                 <label className="mt-2 block text-[10px] font-bold uppercase text-[#9E9E9E]">Example values for {"{{1}}"}…{`{{${varCount}}}`} (comma-separated) — Meta needs these to review</label>
                 <input className={`${inputCls} mt-1`} placeholder="Ramesh, Wheat" value={examples} onChange={(e) => setExamples(e.target.value)} />
               </>
+            )}
+            {/* Live preview with the example values filled in */}
+            {body.trim() && (
+              <div className="mt-2.5">
+                <div className="text-[10px] font-bold uppercase text-[#9E9E9E]">Preview</div>
+                <div className="mt-1 rounded-[10px] rounded-tl-[3px] bg-[#DCF8C6] px-3 py-2 text-[12.5px] leading-relaxed text-[#1A1C1A] shadow-[0_1px_1px_rgba(0,0,0,0.08)]" dir="auto" style={{ whiteSpace: "pre-wrap" }}>
+                  {preview}
+                </div>
+                {varCount > 0 && exampleArr.filter(Boolean).length < varCount && (
+                  <div className="mt-1 text-[10.5px] text-[#E65100]">Fill an example for each {"{{n}}"} so Meta can review it.</div>
+                )}
+              </div>
             )}
             {msg && <div className={`mt-2 rounded-[8px] px-3 py-2 text-[12px] font-medium ${msg.ok ? "bg-[#E8F5E9] text-[#2E7D32]" : "bg-[#FDECEA] text-[#C62828]"}`}>{msg.text}</div>}
             <div className="mt-3 flex flex-wrap gap-2">
