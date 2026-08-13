@@ -369,8 +369,15 @@ model Campaign {
   status         String           @default("DRAFT") // DRAFT | ACTIVE | CLOSED
   projectId      Int? // Step 3: campaign runs on a project (all its clusters)…
   clusterId      Int? // …or one specific cluster within it
+  // Phased-campaign status mapping (which product-catalogue categories count as fertiliser vs combo —
+  // combo is campaign-specific). Used by the status engine to auto-derive member purchase flags.
+  fertiliserCategories String[]    @default([])
+  comboCategories      String[]    @default([])
   createdAt      DateTime         @default(now())
   members        CampaignMember[]
+  phases         CampaignPhase[]
+  storeStates    CampaignStoreState[]
+  phaseAdvances  CampaignPhaseAdvance[]
 }
 
 /// A farmer enrolled in a campaign (test/control split + outreach log).
@@ -395,10 +402,91 @@ model CampaignMember {
   response      String? // interest outcome: INTERESTED | NOT_INTERESTED | OTHER_CROP (null = not asked). Any of these ⇒ reached.
   responseCrop  String? // crop key when response = OTHER_CROP (from the global crop list)
 
+  // Phased-campaign purchase status (hybrid: SALES-derived, OFFICER can override). Each flag records
+  // its source so a sales recompute never clobbers an officer override. Drives the phase cohort routing.
+  booked            Boolean   @default(false)
+  boughtFertiliser  Boolean   @default(false)
+  boughtCombo       Boolean   @default(false)
+  bookedSource      String? // SALES | OFFICER (null = never set)
+  fertiliserSource  String? // SALES | OFFICER
+  comboSource       String? // SALES | OFFICER
+  bookedAt          DateTime?
+  fertiliserAt      DateTime?
+  comboAt           DateTime?
+
   @@unique([campaignId, farmerId])
   @@index([campaignId])
   @@index([campaignId, storeId])
   @@index([campaignId, zone])
+}
+
+// ─────────────────────────── Phased campaigns ───────────────────────────
+// A campaign runs in ordered phases (Advance Booking → Fertiliser → Combo). Each phase has a default
+// date window (optionally overridden per store), a behaviour-driven cohort (from `type`), coupons, and
+// a per-cohort × value-band messaging map. Stores advance through phases MANUALLY & INDEPENDENTLY,
+// gated by an admin attestation that the phase's sales data has been uploaded.
+model CampaignPhase {
+  id           Int      @id @default(autoincrement())
+  campaignId   Int
+  campaign     Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  ordinal      Int // 1,2,3… order within the campaign
+  name         String // "Advance Booking", "Fertiliser Purchase", "Combo Only"
+  type         String   @default("CUSTOM") // BOOKING | FERTILISER | COMBO | CUSTOM (drives cohort logic)
+  defaultStart DateTime
+  defaultEnd   DateTime
+  coupons      Json?    // [{ label, code, minSpend }] — offers active in this phase
+  commConfig   Json?    // { "<subCohort>": { HNI: {commPlan, channel}, OTHERS: {commPlan, channel} } }
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt @default(now())
+
+  windows CampaignPhaseWindow[]
+
+  @@unique([campaignId, ordinal])
+  @@index([campaignId])
+}
+
+/// Per-store date override for a phase (only present when a store's window differs from the default).
+model CampaignPhaseWindow {
+  id      Int           @id @default(autoincrement())
+  phaseId Int
+  phase   CampaignPhase @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  storeId Int
+  start   DateTime
+  end     DateTime
+
+  @@unique([phaseId, storeId])
+  @@index([phaseId])
+}
+
+/// Per-store phase cursor — which phase ordinal a store is currently in (manual, per-store advancement).
+model CampaignStoreState {
+  id             Int      @id @default(autoincrement())
+  campaignId     Int
+  campaign       Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  storeId        Int
+  currentOrdinal Int      @default(1)
+  advancedAt     DateTime @default(now())
+  advancedByName String?
+  advancedByCode String?
+
+  @@unique([campaignId, storeId])
+  @@index([campaignId])
+}
+
+/// Audit + attestation log of a per-store phase advance (records the "Phase N sales uploaded" tick).
+model CampaignPhaseAdvance {
+  id              Int      @id @default(autoincrement())
+  campaignId      Int
+  campaign        Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  storeId         Int
+  fromOrdinal     Int
+  toOrdinal       Int
+  attestationNote String?
+  byName          String?
+  byCode          String?
+  createdAt       DateTime @default(now())
+
+  @@index([campaignId, storeId])
 }
 
 /// Editable communication plan template (WF3) — many per segment, per language & promotion type.

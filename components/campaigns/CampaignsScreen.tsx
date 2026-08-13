@@ -9,6 +9,8 @@ import { SmsSender } from "./SmsSender";
 import { WaSender } from "./WaSender";
 import { BroadcastPanel } from "./BroadcastPanel";
 import { BroadcastHistory } from "./BroadcastHistory";
+import { PhasesPanel } from "./phases/PhasesPanel";
+import { PhaseOutreachPanel } from "./phases/PhaseOutreachPanel";
 import { WA_VAR_TOKENS } from "@/lib/campaign-vars";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { cropLabel } from "@/lib/crops";
@@ -264,6 +266,8 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
   const [historyOf, setHistoryOf] = useState<CampaignListItem | null>(null); // broadcast history modal from a card
   const [focusCurrent, setFocusCurrent] = useState<CampaignMemberVM | null>(null); // Focus view's current farmer → drives the script panel
   const [extendOf, setExtendOf] = useState<CampaignListItem | null>(null);
+  const [phasesOf, setPhasesOf] = useState<CampaignListItem | null>(null); // manager phase setup/board
+  const [phaseOutreachOf, setPhaseOutreachOf] = useState<CampaignListItem | null>(null); // phase-routed outreach (all roles)
 
   // The comm-plan scripts tagged to the open campaign (by name) — shown as the outreach left panel.
   const scripts = membersOf ? templates.filter((t) => membersOf.commPlans.includes(t.name)) : [];
@@ -392,6 +396,8 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
             <div className="text-[12px] text-[#616161]">{n(c.members)} farmers</div>
             <button type="button" onClick={() => openMembers(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#1565C0] hover:bg-[#E3F2FD]">{canManage ? "Farmers" : "Contact"}</button>
             <button type="button" onClick={() => openAnalytics(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#00838F] hover:bg-[#E0F7FA]">Analytics</button>
+            <button type="button" onClick={() => setPhaseOutreachOf(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#1565C0] hover:bg-[#E3F2FD]">⏱ Phase</button>
+            {canManage && <button type="button" onClick={() => setPhasesOf(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#E65100] hover:bg-[#FFF3E0]">⚙ Phase setup</button>}
             {canManage && <button type="button" onClick={() => openTracker(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9]">Campaign Tracker</button>}
             {canManage && <button type="button" onClick={() => setExtendOf(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#6A1B9A] hover:bg-[#F3E5F5]">Extend</button>}
             {canManage && <button type="button" onClick={() => setHistoryOf(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#0B8A3D] hover:bg-[#E8F5E9]">📣 Broadcasts</button>}
@@ -492,6 +498,13 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
       </Modal>
 
       {extendOf && <ExtendModal campaign={extendOf} project={projects.find((p) => p.id === projectId) ?? null} onClose={() => setExtendOf(null)} />}
+      {phasesOf && (
+        <PhasesPanel campaignId={phasesOf.id} campaignName={phasesOf.name} campaignStart={phasesOf.startDate} campaignEnd={phasesOf.endDate}
+          commPlanNames={commPlanNames} onClose={() => setPhasesOf(null)} />
+      )}
+      {phaseOutreachOf && (
+        <PhaseOutreachPanel campaignId={phaseOutreachOf.id} campaignName={phaseOutreachOf.name} onClose={() => setPhaseOutreachOf(null)} />
+      )}
       {broadcasting && membersOf && (
         <BroadcastPanel campaignId={membersOf.id} campaignName={membersOf.name} commPlans={membersOf.commPlans ?? []} templates={templates} onClose={() => { setBroadcasting(false); setBcReload((k) => k + 1); }} />
       )}

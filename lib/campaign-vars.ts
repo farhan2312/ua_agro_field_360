@@ -18,6 +18,7 @@ export const WA_VAR_TOKENS: { key: string; label: string; slot: string }[] = [
   { key: "gap", label: "₹ to reach HNI", slot: "[gap]" },
   { key: "mobile", label: "Mobile number", slot: "[number]" },
   { key: "date", label: "Campaign end date", slot: "[date]" },
+  { key: "coupon", label: "Offer / coupon code", slot: "[coupon]" },
 ];
 export const VAR_LABEL: Record<string, string> = Object.fromEntries(WA_VAR_TOKENS.map((t) => [t.key, t.label]));
 
@@ -31,8 +32,8 @@ export interface FarmerVarSource {
   storeName: string | null;
 }
 
-/** token → resolved string for one farmer. */
-export function resolveVars(f: FarmerVarSource, endDate?: Date | null): Record<string, string> {
+/** token → resolved string for one farmer. `extra.coupon` fills the phase's [coupon] offer code. */
+export function resolveVars(f: FarmerVarSource, endDate?: Date | null, extra?: { coupon?: string }): Record<string, string> {
   const first = (f.name ?? "").trim().split(/\s+/)[0] || "";
   const crop = f.cropTags?.[0] ? cropLabel(f.cropTags[0]) : (f.crop ?? "");
   return {
@@ -44,6 +45,7 @@ export function resolveVars(f: FarmerVarSource, endDate?: Date | null): Record<s
     gap: f.hniGap != null && f.hniGap > 0 ? Math.round(f.hniGap).toLocaleString("en-IN") : "",
     mobile: (f.mobile ?? "").trim(),
     date: endDate ? new Date(endDate).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "",
+    coupon: (extra?.coupon ?? "").trim(),
   };
 }
 
