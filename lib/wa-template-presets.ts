@@ -79,6 +79,34 @@ export const WA_PRESETS: WaPreset[] = [
     },
   },
   {
+    key: "crop_offer_advance_booking",
+    label: "Crop/product offer — with advance booking",
+    category: "MARKETING",
+    vars: ["Farmer name", "Crop", "Product", "Min spend (₹)", "Discount (₹)", "Offer end date"],
+    en: {
+      body: "Namaste {{1}} ji, the {{2}} season is here! Pre-book {{3}} — spend over ₹{{4}} and get ₹{{5}} off. Offer valid till {{6}}.",
+      examples: ["Ramesh", "potato", "urea", "4500", "300", "10 Sep"],
+    },
+    hi: {
+      body: "नमस्ते {{1}} जी, {{2}} का सीज़न आ गया है! {{3}} की एडवांस बुकिंग करें और ₹{{4}} से अधिक की खरीद पर ₹{{5}} की छूट पाएं। ऑफर {{6}} तक।",
+      examples: ["रमेश", "आलू", "यूरिया", "4500", "300", "10 सितंबर"],
+    },
+  },
+  {
+    key: "crop_offer_no_booking",
+    label: "Crop/product offer — without advance booking",
+    category: "MARKETING",
+    vars: ["Farmer name", "Crop", "Product", "Min spend (₹)", "Discount (₹)", "Offer end date"],
+    en: {
+      body: "Namaste {{1}} ji, the {{2}} season is here! Buy {{3}} — spend over ₹{{4}} and get ₹{{5}} off. Offer valid till {{6}}.",
+      examples: ["Ramesh", "potato", "urea", "4500", "300", "10 Sep"],
+    },
+    hi: {
+      body: "नमस्ते {{1}} जी, {{2}} का सीज़न आ गया है! {{3}} खरीदें और ₹{{4}} से अधिक की खरीद पर ₹{{5}} की छूट पाएं। ऑफर {{6}} तक।",
+      examples: ["रमेश", "आलू", "यूरिया", "4500", "300", "10 सितंबर"],
+    },
+  },
+  {
     key: "meetup_invite",
     label: "Farmer meet (Ghoshti) invite",
     category: "MARKETING",
