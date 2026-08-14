@@ -34,6 +34,7 @@ function fmtFollowUp(iso: string | null | undefined): string {
 function buildDetail(
   farmer: NonNullable<Awaited<ReturnType<typeof loadFarmer>>>,
   baseBySale: Map<number, number>,
+  storeOfficers: { name: string }[],
 ): FarmerDetail {
   const vMeta = farmer.valueSegment ? segMeta(farmer.valueSegment) : null;
   const lMeta = farmer.lifecycleSegment ? segMeta(farmer.lifecycleSegment) : null;
@@ -93,7 +94,9 @@ function buildDetail(
         code: farmer.store.code,
         color: storeColor(farmer.store.id),
         address: farmer.store.address ?? "",
-        officers: farmer.store.employees.map((e) => ({ name: e.name })),
+        // Relationship officers come from the LIVE User↔store mapping (managed on /users); the legacy
+        // Employee table is only a fallback (it's blank for most stores).
+        officers: storeOfficers.length ? storeOfficers : farmer.store.employees.map((e) => ({ name: e.name })),
       }
     : null;
 
@@ -182,7 +185,23 @@ export default async function FarmerDetailPage({
     baseBySale = new Map();
   }
 
-  const detail = buildDetail(farmer, baseBySale);
+  // Relationship officers = the agri officers/managers mapped to this farmer's store on /users.
+  let storeOfficers: { name: string }[] = [];
+  if (farmer.storeId) {
+    try {
+      const us = await prisma.user.findMany({
+        where: { storeId: farmer.storeId, role: { in: ["ASR", "STORE_MANAGER"] }, active: true },
+        select: { name: true },
+        orderBy: { id: "asc" },
+        take: 2,
+      });
+      storeOfficers = us.map((u) => ({ name: u.name }));
+    } catch {
+      storeOfficers = [];
+    }
+  }
+
+  const detail = buildDetail(farmer, baseBySale, storeOfficers);
 
   // Accurate lifetime value across ALL bills (list above is capped): base LTV from SaleLine.basic,
   // GST-inclusive total from Sale.amountNum (display only), invoice count from Sale.
