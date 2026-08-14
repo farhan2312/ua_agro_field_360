@@ -4,14 +4,14 @@ import { useEffect, useState, useTransition } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
 import {
   getCampaignPhaseConfig, saveCampaignPhases, setCampaignCategories, getProductCategoryOptions,
-  recomputeCampaignStatuses, getPhaseBoard, advanceStorePhase, getPhaseFunnel,
-  type CampaignPhaseConfig, type PhaseVM, type PhaseInput, type PhaseBoard, type StorePhaseRow, type PhaseFunnel,
+  recomputeCampaignStatuses, getRoundStatus, advanceCampaignRound, getPhaseFunnel,
+  type CampaignPhaseConfig, type PhaseVM, type PhaseInput, type RoundStatus, type PhaseFunnel,
 } from "@/app/actions/campaign-phases";
 import {
   PHASE_TYPES, CHANNELS, DEFAULT_PHASES, subCohortsFor, type Coupon, type CommConfig, type Channel,
 } from "@/lib/campaign-phases";
 
-type Tab = "define" | "categories" | "board";
+type Tab = "define" | "categories" | "status";
 const LBL = "text-[11px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]";
 const INPUT = "rounded-[10px] border border-[#E0E0E0] px-3 py-2 text-[13px] outline-none focus:border-[#2E7D32]";
 const BTN = "rounded-[10px] px-4 py-2 text-[12.5px] font-semibold";
@@ -31,11 +31,11 @@ export function PhasesPanel({
 
   return (
     <Modal open onClose={onClose} className="max-w-[1080px]">
-      <ModalHeader eyebrow="Campaign · phases" eyebrowColor="#2E7D32" title={campaignName}
-        subtitle={`${campaignStart} → ${campaignEnd} · define phases, map sale categories, advance stores`} onClose={onClose} />
+      <ModalHeader eyebrow="Campaign · rounds" eyebrowColor="#2E7D32" title={campaignName}
+        subtitle={`${campaignStart} → ${campaignEnd} · define rounds, map sale categories, advance the campaign`} onClose={onClose} />
       <div className="px-5 py-4">
         <div className="mb-4 inline-flex rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] p-1">
-          {([["define", "Phases"], ["categories", "Categories"], ["board", "Store board"]] as [Tab, string][]).map(([k, l]) => (
+          {([["define", "Rounds"], ["categories", "Categories"], ["status", "Round status"]] as [Tab, string][]).map(([k, l]) => (
             <button key={k} type="button" onClick={() => setTab(k)}
               className="rounded-[8px] px-3.5 py-1.5 text-[12.5px] font-semibold transition-colors"
               style={{ background: tab === k ? "#fff" : "transparent", color: tab === k ? "#2E7D32" : "#9E9E9E", boxShadow: tab === k ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}>
@@ -48,7 +48,7 @@ export function PhasesPanel({
           <>
             {tab === "define" && <DefineTab cfg={cfg} commPlanNames={commPlanNames} onSaved={load} />}
             {tab === "categories" && <CategoriesTab cfg={cfg} allCategories={cats} onSaved={load} />}
-            {tab === "board" && <BoardTab campaignId={campaignId} />}
+            {tab === "status" && <RoundStatusTab campaignId={campaignId} />}
           </>
         )}
       </div>
@@ -56,7 +56,7 @@ export function PhasesPanel({
   );
 }
 
-/* ─────────────────── Define tab: phase list + dates + coupons + messaging ─────────────────── */
+/* ─────────────────── Define tab: rounds + dates + coupons + messaging ─────────────────── */
 
 function DefineTab({ cfg, commPlanNames, onSaved }: { cfg: CampaignPhaseConfig; commPlanNames: string[]; onSaved: () => void }) {
   const [phases, setPhases] = useState<PhaseVM[]>(cfg.phases);
@@ -67,13 +67,13 @@ function DefineTab({ cfg, commPlanNames, onSaved }: { cfg: CampaignPhaseConfig; 
   const seedDefault = () => {
     setPhases(DEFAULT_PHASES.map((t) => ({
       id: -t.ordinal, ordinal: t.ordinal, name: t.name, type: t.type,
-      defaultStart: cfg.campaignStart, defaultEnd: cfg.campaignEnd, coupons: [], commConfig: {}, windows: [],
+      defaultStart: cfg.campaignStart, defaultEnd: cfg.campaignEnd, coupons: [], commConfig: {},
     })));
   };
   const patch = (i: number, p: Partial<PhaseVM>) => setPhases((ps) => ps.map((x, j) => j === i ? { ...x, ...p } : x));
   const addPhase = () => setPhases((ps) => [...ps, {
-    id: -(ps.length + 1) - 100, ordinal: (ps.at(-1)?.ordinal ?? 0) + 1, name: `Phase ${(ps.at(-1)?.ordinal ?? 0) + 1}`,
-    type: "CUSTOM", defaultStart: cfg.campaignStart, defaultEnd: cfg.campaignEnd, coupons: [], commConfig: {}, windows: [],
+    id: -(ps.length + 1) - 100, ordinal: (ps.at(-1)?.ordinal ?? 0) + 1, name: `Round ${(ps.at(-1)?.ordinal ?? 0) + 1}`,
+    type: "CUSTOM", defaultStart: cfg.campaignStart, defaultEnd: cfg.campaignEnd, coupons: [], commConfig: {},
   }]);
   const removePhase = (i: number) => setPhases((ps) => ps.filter((_, j) => j !== i).map((x, k) => ({ ...x, ordinal: k + 1 })));
 
@@ -81,46 +81,46 @@ function DefineTab({ cfg, commPlanNames, onSaved }: { cfg: CampaignPhaseConfig; 
     setErr(null); setMsg(null);
     const input: PhaseInput[] = phases.map((p) => ({
       ordinal: p.ordinal, name: p.name, type: p.type, defaultStart: p.defaultStart, defaultEnd: p.defaultEnd,
-      coupons: p.coupons, commConfig: p.commConfig, windows: p.windows,
+      coupons: p.coupons, commConfig: p.commConfig,
     }));
     startSave(async () => {
       const r = await saveCampaignPhases(cfg.campaignId, input);
       if (!r.ok) { setErr(r.error ?? "Save failed."); return; }
-      setMsg("Phases saved."); onSaved();
+      setMsg("Rounds saved."); onSaved();
     });
   };
 
   if (phases.length === 0) {
     return (
       <div className="rounded-[12px] border border-dashed border-[#C8E6C9] bg-[#F1F8F1] px-5 py-10 text-center">
-        <div className="text-[14px] font-bold text-[#1B5E20]">No phases defined yet</div>
-        <div className="mt-1 text-[12.5px] text-[#66857A]">Start with the standard Advance Booking → Fertiliser → Combo flow, then tweak dates & messaging.</div>
-        <button type="button" onClick={seedDefault} className={`${BTN} mt-4 bg-[#2E7D32] text-white`}>Create default 3 phases</button>
+        <div className="text-[14px] font-bold text-[#1B5E20]">No rounds defined yet</div>
+        <div className="mt-1 text-[12.5px] text-[#66857A]">Start with the standard Advance Booking → Fertiliser → Combo flow, then tweak dates &amp; messaging.</div>
+        <button type="button" onClick={seedDefault} className={`${BTN} mt-4 bg-[#2E7D32] text-white`}>Create default 3 rounds</button>
       </div>
     );
   }
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="text-[11.5px] text-[#9E9E9E]">Each phase auto-routes farmers into sub-cohorts by their purchase status. Dates below are the campaign-wide defaults — set per-store overrides in the Store board.</div>
+      <div className="text-[11.5px] text-[#9E9E9E]">Each round auto-routes farmers into sub-cohorts by their purchase status. Dates &amp; coupons apply to the whole campaign — store-level differences are handled with separate clusters.</div>
       {phases.map((p, i) => (
-        <PhaseCard key={p.id} phase={p} idx={i} commPlanNames={commPlanNames}
+        <PhaseCard key={p.id} phase={p} commPlanNames={commPlanNames}
           onPatch={(x) => patch(i, x)} onRemove={() => removePhase(i)} canRemove={phases.length > 1} />
       ))}
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" onClick={addPhase} className={`${BTN} border border-[#E0E0E0] text-[#616161] hover:bg-[#F5F5F5]`}>+ Add phase</button>
+        <button type="button" onClick={addPhase} className={`${BTN} border border-[#E0E0E0] text-[#616161] hover:bg-[#F5F5F5]`}>+ Add round</button>
         <div className="ml-auto flex items-center gap-2">
           {err && <span className="text-[12px] font-semibold text-[#C62828]">{err}</span>}
           {msg && <span className="text-[12px] font-semibold text-[#2E7D32]">{msg}</span>}
-          <button type="button" onClick={save} disabled={saving} className={`${BTN} bg-[#2E7D32] text-white disabled:opacity-50`}>{saving ? "Saving…" : "Save phases"}</button>
+          <button type="button" onClick={save} disabled={saving} className={`${BTN} bg-[#2E7D32] text-white disabled:opacity-50`}>{saving ? "Saving…" : "Save rounds"}</button>
         </div>
       </div>
     </div>
   );
 }
 
-function PhaseCard({ phase, idx, commPlanNames, onPatch, onRemove, canRemove }: {
-  phase: PhaseVM; idx: number; commPlanNames: string[];
+function PhaseCard({ phase, commPlanNames, onPatch, onRemove, canRemove }: {
+  phase: PhaseVM; commPlanNames: string[];
   onPatch: (p: Partial<PhaseVM>) => void; onRemove: () => void; canRemove: boolean;
 }) {
   const cohorts = subCohortsFor(phase.type);
@@ -137,7 +137,7 @@ function PhaseCard({ phase, idx, commPlanNames, onPatch, onRemove, canRemove }: 
       <div className="flex flex-wrap items-end gap-3">
         <div className="grid h-7 w-7 place-items-center rounded-full bg-[#2E7D32] text-[12px] font-bold text-white">{phase.ordinal}</div>
         <div className="flex-1 min-w-[160px]">
-          <label className={LBL}>Phase name</label>
+          <label className={LBL}>Round name</label>
           <input value={phase.name} onChange={(e) => onPatch({ name: e.target.value })} className={`${INPUT} mt-1 w-full`} />
         </div>
         <div>
@@ -157,11 +157,10 @@ function PhaseCard({ phase, idx, commPlanNames, onPatch, onRemove, canRemove }: 
         {canRemove && <button type="button" onClick={onRemove} className="rounded-md bg-[#FDECEA] px-2 py-1.5 text-[11px] font-semibold text-[#C62828] hover:bg-[#FADBD8]">Remove</button>}
       </div>
 
-      {/* Coupons */}
       <div className="mt-3 border-t border-[#F5F5F5] pt-3">
         <div className="mb-1.5 flex items-center justify-between"><span className={LBL}>Offers / coupons (fill message [coupon])</span>
           <button type="button" onClick={addCoupon} className="text-[11px] font-semibold text-[#2E7D32]">+ Add coupon</button></div>
-        {phase.coupons.length === 0 ? <div className="text-[11.5px] text-[#BDBDBD]">No coupons for this phase.</div> : (
+        {phase.coupons.length === 0 ? <div className="text-[11.5px] text-[#BDBDBD]">No coupons for this round.</div> : (
           <div className="flex flex-col gap-1.5">
             {phase.coupons.map((c, ci) => (
               <div key={ci} className="flex flex-wrap items-center gap-2">
@@ -175,9 +174,8 @@ function PhaseCard({ phase, idx, commPlanNames, onPatch, onRemove, canRemove }: 
         )}
       </div>
 
-      {/* Messaging per sub-cohort × value band */}
       <div className="mt-3 border-t border-[#F5F5F5] pt-3">
-        <div className={`${LBL} mb-1.5`}>Messaging — who to contact & how</div>
+        <div className={`${LBL} mb-1.5`}>Messaging — who to contact &amp; how</div>
         <div className="flex flex-col gap-2">
           {cohorts.map((co) => (
             <div key={co.key} className="rounded-[10px] bg-[#FAFBFA] p-2.5">
@@ -208,7 +206,7 @@ function PhaseCard({ phase, idx, commPlanNames, onPatch, onRemove, canRemove }: 
   );
 }
 
-/* ─────────────────── Categories tab: fertiliser / combo mapping + recompute ─────────────────── */
+/* ─────────────────── Categories tab ─────────────────── */
 
 function CategoriesTab({ cfg, allCategories, onSaved }: { cfg: CampaignPhaseConfig; allCategories: string[]; onSaved: () => void }) {
   const [fert, setFert] = useState<string[]>(cfg.fertiliserCategories);
@@ -256,24 +254,64 @@ function CategoriesTab({ cfg, allCategories, onSaved }: { cfg: CampaignPhaseConf
   );
 }
 
-/* ─────────────────── Board tab: per-store phase + advance ─────────────────── */
+/* ─────────────────── Round status: current round + advance ─────────────────── */
 
-function BoardTab({ campaignId }: { campaignId: number }) {
-  const [board, setBoard] = useState<PhaseBoard | null>(null);
+function RoundStatusTab({ campaignId }: { campaignId: number }) {
+  const [status, setStatus] = useState<RoundStatus | null>(null);
   const [funnel, setFunnel] = useState<PhaseFunnel | null>(null);
-  const [advancing, setAdvancing] = useState<StorePhaseRow | null>(null);
-  const load = () => { getPhaseBoard(campaignId).then(setBoard); getPhaseFunnel(campaignId).then(setFunnel); };
+  const [advancing, setAdvancing] = useState(false);
+  const load = () => { getRoundStatus(campaignId).then(setStatus); getPhaseFunnel(campaignId).then(setFunnel); };
   useEffect(() => { load(); }, [campaignId]); // eslint-disable-line
 
-  if (board == null) return <div className="py-10 text-center text-[13px] text-[#9E9E9E]">Loading…</div>;
-  if (board.rows.length === 0) return <div className="py-10 text-center text-[13px] text-[#9E9E9E]">No stores with enrolled farmers, or no phases defined yet.</div>;
+  if (status == null) return <div className="py-10 text-center text-[13px] text-[#9E9E9E]">Loading…</div>;
+  if (status.rounds.length === 0) return <div className="py-10 text-center text-[13px] text-[#9E9E9E]">No rounds defined yet.</div>;
 
   return (
-    <div className="overflow-x-auto">
+    <div className="flex flex-col gap-4">
+      {/* Round timeline */}
+      <div className="flex flex-wrap items-center gap-2">
+        {status.rounds.map((r) => {
+          const on = r.ordinal === status.currentOrdinal;
+          const done = r.ordinal < status.currentOrdinal;
+          return (
+            <div key={r.ordinal} className="flex items-center gap-2">
+              <div className="rounded-full px-3 py-1 text-[12px] font-bold"
+                style={{ background: on ? "#2E7D32" : done ? "#E8F5E9" : "#F5F5F5", color: on ? "#fff" : done ? "#2E7D32" : "#9E9E9E" }}>
+                {r.ordinal}. {r.name}{done ? " ✓" : ""}
+              </div>
+              {r.ordinal < status.rounds.length && <span className="text-[#BDBDBD]">→</span>}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Current round card */}
+      <div className="rounded-[12px] border border-[#EAEAEA] bg-white p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <span className="rounded-full bg-[#E8F5E9] px-2.5 py-0.5 text-[11.5px] font-bold text-[#2E7D32]">Current — Round {status.currentOrdinal}: {status.roundName}</span>
+            <span className="ml-2 text-[12px] text-[#757575]">{status.windowStart} → {status.windowEnd} · {status.memberCount} test farmers</span>
+            {status.advancedByName && <div className="mt-1 text-[10.5px] text-[#9E9E9E]">Last advanced by {status.advancedByName} · {status.advancedAt}</div>}
+          </div>
+          {status.canManage && (status.hasNext
+            ? <button type="button" onClick={() => setAdvancing(true)} className={`${BTN} bg-[#2E7D32] text-white`}>→ Advance to {status.nextRoundName}</button>
+            : <span className="text-[12px] font-semibold text-[#9E9E9E]">Final round</span>)}
+        </div>
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {status.cohorts.map((c) => (
+            <div key={c.key} className="flex items-baseline gap-2 rounded-[10px] bg-[#FAFBFA] px-3 py-2">
+              <span className="text-[18px] font-bold text-[#1A1C1A]">{c.count}</span>
+              <span className="text-[12px] text-[#616161]">{c.label} <span className="text-[#9E9E9E]">— {c.goal}</span></span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Funnel */}
       {funnel && (
-        <div className="mb-4">
+        <div>
           <div className="mb-1.5 flex flex-wrap items-center gap-2 text-[11px] text-[#757575]">
-            <b className="text-[#1A1C1A]">Funnel</b> · {funnel.totalTest} test farmers · {funnel.booked} booked · {funnel.boughtFertiliser} fertiliser · {funnel.boughtCombo} combo · {funnel.reached} contacted ({funnel.contactTouches} touches)
+            <b className="text-[#1A1C1A]">Funnel</b> · {funnel.totalTest} test · {funnel.booked} booked · {funnel.boughtFertiliser} fertiliser · {funnel.boughtCombo} combo · {funnel.reached} contacted ({funnel.contactTouches} touches)
           </div>
           <div className="flex flex-wrap gap-2">
             {funnel.buckets.map((b) => (
@@ -285,43 +323,13 @@ function BoardTab({ campaignId }: { campaignId: number }) {
           </div>
         </div>
       )}
-      <table className="w-full min-w-[720px] text-[12.5px]">
-        <thead>
-          <tr className="border-b border-[#EEE] text-left text-[10.5px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">
-            <th className="px-3 py-2.5">Store</th><th className="px-3 py-2.5">Current phase</th><th className="px-3 py-2.5">Window</th>
-            <th className="px-3 py-2.5">Cohorts (to contact)</th><th className="px-3 py-2.5 text-right">Advance</th>
-          </tr>
-        </thead>
-        <tbody>
-          {board.rows.map((r) => (
-            <tr key={r.storeId} className="border-b border-[#F5F5F5] last:border-0 align-top">
-              <td className="px-3 py-2.5 font-semibold text-[#1A1C1A]">{r.storeName}<div className="text-[10.5px] font-normal text-[#9E9E9E]">{r.memberCount} test farmers</div></td>
-              <td className="px-3 py-2.5"><span className="rounded-full bg-[#E8F5E9] px-2 py-0.5 text-[11px] font-bold text-[#2E7D32]">{r.currentOrdinal}. {r.phaseName}</span>
-                {r.advancedByName && <div className="mt-0.5 text-[10px] text-[#9E9E9E]">by {r.advancedByName} · {r.advancedAt}</div>}</td>
-              <td className="px-3 py-2.5 text-[#616161]">{r.windowStart} → {r.windowEnd}</td>
-              <td className="px-3 py-2.5">
-                <div className="flex flex-col gap-0.5">
-                  {r.cohorts.map((c) => <div key={c.key} className="text-[11.5px] text-[#424242]"><b>{c.count}</b> {c.label}</div>)}
-                </div>
-              </td>
-              <td className="px-3 py-2.5 text-right">
-                {board.canManage
-                  ? (r.hasNext
-                    ? <button type="button" onClick={() => setAdvancing(r)} className="rounded-md bg-[#2E7D32] px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-[#1B5E20]">→ {r.nextPhaseName}</button>
-                    : <span className="text-[11px] font-semibold text-[#9E9E9E]">Final phase</span>)
-                  : <span className="text-[11px] text-[#BDBDBD]">—</span>}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
 
-      {advancing && <AdvanceModal campaignId={campaignId} row={advancing} onClose={() => setAdvancing(null)} onDone={() => { setAdvancing(null); load(); }} />}
+      {advancing && <AdvanceModal campaignId={campaignId} status={status} onClose={() => setAdvancing(false)} onDone={() => { setAdvancing(false); load(); }} />}
     </div>
   );
 }
 
-function AdvanceModal({ campaignId, row, onClose, onDone }: { campaignId: number; row: StorePhaseRow; onClose: () => void; onDone: () => void }) {
+function AdvanceModal({ campaignId, status, onClose, onDone }: { campaignId: number; status: RoundStatus; onClose: () => void; onDone: () => void }) {
   const [attested, setAttested] = useState(false);
   const [note, setNote] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -329,21 +337,21 @@ function AdvanceModal({ campaignId, row, onClose, onDone }: { campaignId: number
   const go = () => {
     setErr(null);
     startSave(async () => {
-      const r = await advanceStorePhase({ campaignId, storeId: row.storeId, attested, note: note || undefined });
+      const r = await advanceCampaignRound({ campaignId, attested, note: note || undefined });
       if (!r.ok) { setErr(r.error ?? "Failed."); return; }
       onDone();
     });
   };
   return (
     <Modal open onClose={onClose} className="max-w-[460px]">
-      <ModalHeader eyebrow="Advance phase" eyebrowColor="#2E7D32" title={`${row.storeName} → ${row.nextPhaseName}`} onClose={onClose} />
+      <ModalHeader eyebrow="Advance round" eyebrowColor="#2E7D32" title={`${status.roundName} → ${status.nextRoundName}`} onClose={onClose} />
       <div className="px-5 py-4">
         <div className="rounded-[10px] bg-[#FFF8E1] px-3.5 py-2.5 text-[12px] text-[#8D6E00]">
-          Moving from <b>{row.phaseName}</b> to <b>{row.nextPhaseName}</b>. Confirm the sales data for the phase you&apos;re leaving is uploaded — cohorts route off that data.
+          Moving the whole campaign from <b>{status.roundName}</b> to <b>{status.nextRoundName}</b>. Confirm the sales data for the round you&apos;re leaving is uploaded — cohorts route off that data.
         </div>
         <label className="mt-3 flex items-start gap-2 text-[13px] text-[#333]">
           <input type="checkbox" checked={attested} onChange={(e) => setAttested(e.target.checked)} className="mt-0.5" />
-          <span>I confirm the <b>{row.phaseName}</b> sales data has been uploaded for this store.</span>
+          <span>I confirm the <b>{status.roundName}</b> sales data has been uploaded.</span>
         </label>
         <div className="mt-3">
           <label className={LBL}>Note (optional)</label>
