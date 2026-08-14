@@ -45,13 +45,16 @@ export function VisitRow({ row }: { row: VisitRecord }) {
       {/* Officer */}
       <div className="text-xs text-[#616161]">{row.officer}</div>
 
-      {/* Store */}
-      <div className="flex items-center gap-[5px]">
-        <div
-          className="w-[7px] h-[7px] rounded-[2px] shrink-0"
-          style={{ background: swatch }}
-        />
-        <span className="text-xs text-[#616161]">{row.storeName}</span>
+      {/* Store + Regional Manager */}
+      <div className="min-w-0">
+        <div className="flex items-center gap-[5px]">
+          <div
+            className="w-[7px] h-[7px] rounded-[2px] shrink-0"
+            style={{ background: swatch }}
+          />
+          <span className="truncate text-xs text-[#616161]">{row.storeName}</span>
+        </div>
+        {row.rm && <div className="truncate text-[10px] text-[#BDBDBD]">RM: {row.rm}</div>}
       </div>
 
       {/* Crop */}

@@ -137,6 +137,21 @@ export function VisitFilterBar({
           ))}
         </select>
 
+        {/* Regional Manager filter */}
+        <select
+          value={filter.rm}
+          onChange={(e) => setParam("rm", e.target.value)}
+          className={SELECT_CLASS}
+          aria-label="Filter by regional manager"
+        >
+          <option value="all">All RMs</option>
+          {options.rms.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
+        </select>
+
         {/* Visit type filter */}
         <select
           value={filter.type}

@@ -10,6 +10,7 @@ export interface VisitRecord {
   purpose: string;
   storeName: string;
   storeId: number | null;
+  rm: string; // the store's Regional Manager (denormalized name), "" if none
   avBg: string;
   needsFollowup: boolean;
   followUp: string; // display date of the scheduled follow-up, or ""
@@ -18,6 +19,7 @@ export interface VisitRecord {
 export interface VisitFilterState {
   officer: string;
   store: string;
+  rm: string; // regional manager filter
   type: string;
   period: string;
   q: string; // free-text search (farmer name / mobile / village / officer)
@@ -26,5 +28,6 @@ export interface VisitFilterState {
 export interface VisitFilterOptions {
   officers: string[];
   stores: string[];
+  rms: string[];
   types: string[];
 }

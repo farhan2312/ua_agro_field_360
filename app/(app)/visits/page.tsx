@@ -16,6 +16,7 @@ export const dynamic = "force-dynamic";
 type SearchParams = {
   officer?: string;
   store?: string;
+  rm?: string;
   type?: string;
   period?: string;
   q?: string;
@@ -48,6 +49,7 @@ export default async function VisitRepoPage({
   const sp = searchParams ?? {};
   const officer = sp.officer ?? "all";
   const store = sp.store ?? "all";
+  const rm = sp.rm ?? "all";
   const type = sp.type ?? "all";
   const period = sp.period && sp.period in PERIOD_DAYS ? sp.period : "month";
   const q = (sp.q ?? "").trim();
@@ -56,6 +58,7 @@ export default async function VisitRepoPage({
   let rows: VisitRecord[] = [];
   let officerOptions: string[] = [];
   let storeOptions: string[] = [];
+  let rmOptions: string[] = [];
   let typeOptions: string[] = [];
   let total = 0, followup = 0, officers = 0, farmers = 0;
 
@@ -89,7 +92,7 @@ export default async function VisitRepoPage({
       }),
       prisma.store.findMany({
         where: storeWhere && storeWhere !== "none" ? storeWhere : undefined,
-        select: { id: true, name: true },
+        select: { id: true, name: true, regionalManager: true },
       }),
     ]);
 
@@ -102,6 +105,9 @@ export default async function VisitRepoPage({
     storeOptions = Array.from(
       new Set(allStores.map((s) => shortStoreName(s.name)).filter(Boolean)),
     ).sort();
+    rmOptions = Array.from(
+      new Set(allStores.map((s) => (s.regionalManager ?? "").trim()).filter(Boolean)),
+    ).sort();
 
     // Re-query visits with the active filters applied server-side.
     const where: Prisma.VisitWhereInput = {};
@@ -109,11 +115,14 @@ export default async function VisitRepoPage({
     if (type !== "all") where.purpose = type;
     const cutoff = periodCutoff(period);
     if (cutoff) where.visitedAt = { gte: cutoff };
-    // Store filter is a SHORT name (may cover several stores) → map to store IDs so it runs in the DB.
-    if (store !== "all") {
-      const ids = allStores.filter((s) => shortStoreName(s.name) === store).map((s) => s.id);
-      where.storeId = { in: ids.length ? ids : [-1] };
-    }
+    // Store filter is a SHORT name (may cover several stores); RM filter is a manager name (covers their
+    // stores). Both map to store-id sets — intersect when both are set — and run in the DB.
+    const storeIds = store !== "all" ? allStores.filter((s) => shortStoreName(s.name) === store).map((s) => s.id) : null;
+    const rmIds = rm !== "all" ? allStores.filter((s) => (s.regionalManager ?? "").trim() === rm).map((s) => s.id) : null;
+    let allowedStoreIds: number[] | null = null;
+    if (storeIds && rmIds) allowedStoreIds = storeIds.filter((id) => rmIds.includes(id));
+    else allowedStoreIds = storeIds ?? rmIds;
+    if (allowedStoreIds) where.storeId = { in: allowedStoreIds.length ? allowedStoreIds : [-1] };
     // Free-text search across farmer name / mobile / village + officer name.
     if (q) {
       const digits = q.replace(/\D/g, "");
@@ -153,7 +162,7 @@ export default async function VisitRepoPage({
             crop: true,
           },
         },
-        store: { select: { id: true, name: true } },
+        store: { select: { id: true, name: true, regionalManager: true } },
       },
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
@@ -175,6 +184,7 @@ export default async function VisitRepoPage({
           purpose: v.purpose ?? "—",
           storeName: storeShort || "—",
           storeId: v.store?.id ?? null,
+          rm: v.store?.regionalManager?.trim() || "",
           avBg: avatarColor(i),
           needsFollowup: !!v.followUpDate,
           followUp: v.followUpDate
@@ -186,6 +196,7 @@ export default async function VisitRepoPage({
     rows = [];
     officerOptions = [];
     storeOptions = [];
+    rmOptions = [];
     typeOptions = [];
     total = followup = officers = farmers = 0;
   }
@@ -200,8 +211,8 @@ export default async function VisitRepoPage({
       />
 
       <VisitFilterBar
-        filter={{ officer, store, type, period, q }}
-        options={{ officers: officerOptions, stores: storeOptions, types: typeOptions }}
+        filter={{ officer, store, rm, type, period, q }}
+        options={{ officers: officerOptions, stores: storeOptions, rms: rmOptions, types: typeOptions }}
         total={total}
       />
 
