@@ -99,6 +99,7 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
   const [valueSegs, setValueSegs] = useState<string[]>([]);
   const [lifecycleSegs, setLifecycleSegs] = useState<string[]>([]);
   const [crops, setCrops] = useState<string[]>([]);
+  const [cropSource, setCropSource] = useState<"any" | "sales" | "visit">("any"); // which crop record to match
   const [pests, setPests] = useState<string[]>([]);
   const [zoneList, setZoneList] = useState<string[]>([]);
   const [storeIds, setStoreIds] = useState<number[]>([]);
@@ -119,7 +120,12 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
   const criteria = (): ClusterCriteria => ({
     valueSegments: valueSegs.length ? valueSegs : undefined,
     lifecycleSegments: lifecycleSegs.length ? lifecycleSegs : undefined,
-    cropTags: crops.length ? crops : undefined,
+    // Route the picked crops to the chosen source: sales bought / seen on a visit / either.
+    ...(crops.length
+      ? cropSource === "sales" ? { salesCrops: crops }
+      : cropSource === "visit" ? { visitCrops: crops }
+      : { cropTags: crops }
+      : {}),
     pestTags: pests.length ? pests : undefined,
     zones: zoneList.length ? zoneList : undefined,
     storeIds: storeIds.length ? storeIds : undefined,
@@ -135,7 +141,7 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
     const t = setTimeout(async () => { setCount(await previewClusterCount(criteria())); setCounting(false); }, 350);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [valueSegs, lifecycleSegs, crops, pests, zoneList, storeIds, q, waOptIn]);
+  }, [valueSegs, lifecycleSegs, crops, cropSource, pests, zoneList, storeIds, q, waOptIn]);
 
   const toggle = (arr: string[], set: (a: string[]) => void, v: string) => set(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
   const toggleZone = (z: string) => {
@@ -179,7 +185,23 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
           <button key={s} type="button" title={segDef(s)} onClick={() => toggle(lifecycleSegs, setLifecycleSegs, s)} className="rounded-full border-[1.5px] px-3 py-1 text-[12px] font-semibold" style={{ background: on ? m.bg : "#fff", color: on ? m.color : "#616161", borderColor: on ? m.color : "#E0E0E0" }}>{m.label}</button>
         ); })}</div>
 
-        <div className="mb-1.5 text-[11px] font-semibold uppercase text-[#9E9E9E]">Crop (any of)</div>
+        <div className="mb-1.5 flex flex-wrap items-center gap-2">
+          <span className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Crop (any of)</span>
+          <div className="inline-flex rounded-lg border border-[#E0E0E0] bg-[#F5F7F5] p-0.5">
+            {([["any", "Any source"], ["sales", "Bought"], ["visit", "Seen on visit"]] as const).map(([k, l]) => (
+              <button key={k} type="button" onClick={() => setCropSource(k)}
+                className="rounded-md px-2.5 py-0.5 text-[10.5px] font-semibold transition-colors"
+                style={{ background: cropSource === k ? "#fff" : "transparent", color: cropSource === k ? "#2E7D32" : "#9E9E9E", boxShadow: cropSource === k ? "0 1px 2px rgba(0,0,0,0.12)" : "none" }}>
+                {l}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="mb-1.5 text-[10.5px] text-[#9E9E9E]">
+          {cropSource === "sales" ? "Matches farmers who bought this crop's inputs (from sales uploads)."
+            : cropSource === "visit" ? "Matches farmers an officer recorded growing this crop (from field visits)."
+            : "Matches either source — bought it or seen growing on a visit."}
+        </div>
         <select value="" onChange={(e) => { if (e.target.value) toggle(crops, setCrops, e.target.value); }}
           className="mb-2 w-full rounded-lg border border-[#E0E0E0] bg-white px-3 py-2 text-[13px]">
           <option value="">+ Add a crop…</option>
