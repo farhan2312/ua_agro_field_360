@@ -138,6 +138,14 @@ export async function createGhoshti(input: {
 
 // ─────────────────────────── Attendees ───────────────────────────
 
+/** Live phone → farmer lookup for the attendance form (auto-fills the name when a farmer matches). */
+export async function lookupGhoshtiFarmer(mobile: string): Promise<{ found: boolean; name: string | null }> {
+  const m = toMobile10(mobile);
+  if (!/^[6-9]\d{9}$/.test(m)) return { found: false, name: null };
+  const f = await prisma.farmer.findFirst({ where: { mobile: m }, select: { name: true } });
+  return { found: !!f, name: f?.name ?? null };
+}
+
 /** Classify + record attendees on a Ghoshti (read-only lookup against existing farmers by mobile). */
 export async function addGhoshtiAttendees(input: {
   ghoshtiId: number;
