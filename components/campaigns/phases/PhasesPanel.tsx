@@ -3,15 +3,16 @@
 import { useEffect, useState, useTransition } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
 import {
-  getCampaignPhaseConfig, saveCampaignPhases, setCampaignCategories, getProductCategoryOptions,
-  recomputeCampaignStatuses, getRoundStatus, advanceCampaignRound, getPhaseFunnel,
-  type CampaignPhaseConfig, type PhaseVM, type PhaseInput, type RoundStatus, type PhaseFunnel,
+  getCampaignPhaseConfig, saveCampaignPhases, getRoundStatus, advanceCampaignRound,
+  type CampaignPhaseConfig, type PhaseVM, type PhaseInput, type RoundStatus,
 } from "@/app/actions/campaign-phases";
 import {
-  PHASE_TYPES, CHANNELS, DEFAULT_PHASES, subCohortsFor, type Coupon, type CommConfig, type Channel,
+  CHANNELS, PURCHASED_LABEL, NOT_PURCHASED_LABEL, newTarget,
+  type Coupon, type MessageTarget, type RoundMessaging, type Channel,
 } from "@/lib/campaign-phases";
+import { VALUE_SEGMENTS, LIFECYCLE_SEGMENTS, segMeta } from "@/lib/campaign-segments";
 
-type Tab = "define" | "categories" | "status";
+type Tab = "define" | "status";
 const LBL = "text-[11px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]";
 const INPUT = "rounded-[10px] border border-[#E0E0E0] px-3 py-2 text-[13px] outline-none focus:border-[#2E7D32]";
 const BTN = "rounded-[10px] px-4 py-2 text-[12.5px] font-semibold";
@@ -24,18 +25,16 @@ export function PhasesPanel({
 }) {
   const [tab, setTab] = useState<Tab>("define");
   const [cfg, setCfg] = useState<CampaignPhaseConfig | null>(null);
-  const [cats, setCats] = useState<string[]>([]);
-
   const load = () => getCampaignPhaseConfig(campaignId).then((c) => { if (c) setCfg(c); });
-  useEffect(() => { load(); getProductCategoryOptions().then(setCats); }, [campaignId]); // eslint-disable-line
+  useEffect(() => { load(); }, [campaignId]); // eslint-disable-line
 
   return (
     <Modal open onClose={onClose} className="max-w-[1080px]">
       <ModalHeader eyebrow="Campaign · rounds" eyebrowColor="#2E7D32" title={campaignName}
-        subtitle={`${campaignStart} → ${campaignEnd} · define rounds, map sale categories, advance the campaign`} onClose={onClose} />
+        subtitle={`${campaignStart} → ${campaignEnd} · define rounds and advance the campaign`} onClose={onClose} />
       <div className="px-5 py-4">
         <div className="mb-4 inline-flex rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] p-1">
-          {([["define", "Rounds"], ["categories", "Categories"], ["status", "Round status"]] as [Tab, string][]).map(([k, l]) => (
+          {([["define", "Rounds"], ["status", "Round status"]] as [Tab, string][]).map(([k, l]) => (
             <button key={k} type="button" onClick={() => setTab(k)}
               className="rounded-[8px] px-3.5 py-1.5 text-[12.5px] font-semibold transition-colors"
               style={{ background: tab === k ? "#fff" : "transparent", color: tab === k ? "#2E7D32" : "#9E9E9E", boxShadow: tab === k ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}>
@@ -47,7 +46,6 @@ export function PhasesPanel({
         {cfg == null ? <div className="py-10 text-center text-[13px] text-[#9E9E9E]">Loading…</div> : (
           <>
             {tab === "define" && <DefineTab cfg={cfg} commPlanNames={commPlanNames} onSaved={load} />}
-            {tab === "categories" && <CategoriesTab cfg={cfg} allCategories={cats} onSaved={load} />}
             {tab === "status" && <RoundStatusTab campaignId={campaignId} />}
           </>
         )}
@@ -56,7 +54,7 @@ export function PhasesPanel({
   );
 }
 
-/* ─────────────────── Define tab: rounds + dates + coupons + messaging ─────────────────── */
+/* ─────────────────── Define tab ─────────────────── */
 
 function DefineTab({ cfg, commPlanNames, onSaved }: { cfg: CampaignPhaseConfig; commPlanNames: string[]; onSaved: () => void }) {
   const [phases, setPhases] = useState<PhaseVM[]>(cfg.phases);
@@ -64,24 +62,19 @@ function DefineTab({ cfg, commPlanNames, onSaved }: { cfg: CampaignPhaseConfig; 
   const [msg, setMsg] = useState<string | null>(null);
   const [saving, startSave] = useTransition();
 
-  const seedDefault = () => {
-    setPhases(DEFAULT_PHASES.map((t) => ({
-      id: -t.ordinal, ordinal: t.ordinal, name: t.name, type: t.type,
-      defaultStart: cfg.campaignStart, defaultEnd: cfg.campaignEnd, coupons: [], commConfig: {},
-    })));
-  };
   const patch = (i: number, p: Partial<PhaseVM>) => setPhases((ps) => ps.map((x, j) => j === i ? { ...x, ...p } : x));
   const addPhase = () => setPhases((ps) => [...ps, {
-    id: -(ps.length + 1) - 100, ordinal: (ps.at(-1)?.ordinal ?? 0) + 1, name: `Round ${(ps.at(-1)?.ordinal ?? 0) + 1}`,
-    type: "CUSTOM", defaultStart: cfg.campaignStart, defaultEnd: cfg.campaignEnd, coupons: [], commConfig: {},
+    id: -(ps.length + 1) - 100, ordinal: (ps.at(-1)?.ordinal ?? 0) + 1, name: "",
+    defaultStart: cfg.campaignStart, defaultEnd: cfg.campaignEnd, coupons: [],
+    messaging: { targets: [], purchased: [], notPurchased: [] },
   }]);
   const removePhase = (i: number) => setPhases((ps) => ps.filter((_, j) => j !== i).map((x, k) => ({ ...x, ordinal: k + 1 })));
 
   const save = () => {
     setErr(null); setMsg(null);
     const input: PhaseInput[] = phases.map((p) => ({
-      ordinal: p.ordinal, name: p.name, type: p.type, defaultStart: p.defaultStart, defaultEnd: p.defaultEnd,
-      coupons: p.coupons, commConfig: p.commConfig,
+      ordinal: p.ordinal, name: p.name, defaultStart: p.defaultStart, defaultEnd: p.defaultEnd,
+      coupons: p.coupons, messaging: p.messaging,
     }));
     startSave(async () => {
       const r = await saveCampaignPhases(cfg.campaignId, input);
@@ -94,15 +87,15 @@ function DefineTab({ cfg, commPlanNames, onSaved }: { cfg: CampaignPhaseConfig; 
     return (
       <div className="rounded-[12px] border border-dashed border-[#C8E6C9] bg-[#F1F8F1] px-5 py-10 text-center">
         <div className="text-[14px] font-bold text-[#1B5E20]">No rounds defined yet</div>
-        <div className="mt-1 text-[12.5px] text-[#66857A]">Start with the standard Advance Booking → Fertiliser → Combo flow, then tweak dates &amp; messaging.</div>
-        <button type="button" onClick={seedDefault} className={`${BTN} mt-4 bg-[#2E7D32] text-white`}>Create default 3 rounds</button>
+        <div className="mt-1 text-[12.5px] text-[#66857A]">Add a round, name it for this campaign, set its dates, coupons &amp; messaging.</div>
+        <button type="button" onClick={addPhase} className={`${BTN} mt-4 bg-[#2E7D32] text-white`}>+ Add first round</button>
       </div>
     );
   }
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="text-[11.5px] text-[#9E9E9E]">Each round auto-routes farmers into sub-cohorts by their purchase status. Dates &amp; coupons apply to the whole campaign — store-level differences are handled with separate clusters.</div>
+      <div className="text-[11.5px] text-[#9E9E9E]">Each round is a stage of the campaign with its own dates, coupons &amp; messaging. Round 2 onward splits messaging by whether the farmer has purchased.</div>
       {phases.map((p, i) => (
         <PhaseCard key={p.id} phase={p} commPlanNames={commPlanNames}
           onPatch={(x) => patch(i, x)} onRemove={() => removePhase(i)} canRemove={phases.length > 1} />
@@ -123,14 +116,11 @@ function PhaseCard({ phase, commPlanNames, onPatch, onRemove, canRemove }: {
   phase: PhaseVM; commPlanNames: string[];
   onPatch: (p: Partial<PhaseVM>) => void; onRemove: () => void; canRemove: boolean;
 }) {
-  const cohorts = subCohortsFor(phase.type);
   const setCoupon = (ci: number, c: Partial<Coupon>) => onPatch({ coupons: phase.coupons.map((x, j) => j === ci ? { ...x, ...c } : x) });
   const addCoupon = () => onPatch({ coupons: [...phase.coupons, { label: "", code: "" }] });
   const rmCoupon = (ci: number) => onPatch({ coupons: phase.coupons.filter((_, j) => j !== ci) });
-  const setComm = (cohort: string, band: "HNI" | "OTHERS", slot: { commPlan?: string; channel?: Channel }) => {
-    const cc: CommConfig = { ...phase.commConfig, [cohort]: { ...(phase.commConfig[cohort] ?? {}), [band]: { ...(phase.commConfig[cohort]?.[band] ?? {}), ...slot } } };
-    onPatch({ commConfig: cc });
-  };
+  const setMessaging = (patch: Partial<RoundMessaging>) => onPatch({ messaging: { ...phase.messaging, ...patch } });
+  const split = phase.ordinal >= 2;
 
   return (
     <div className="rounded-[12px] border border-[#EAEAEA] bg-white p-4">
@@ -138,13 +128,7 @@ function PhaseCard({ phase, commPlanNames, onPatch, onRemove, canRemove }: {
         <div className="grid h-7 w-7 place-items-center rounded-full bg-[#2E7D32] text-[12px] font-bold text-white">{phase.ordinal}</div>
         <div className="flex-1 min-w-[160px]">
           <label className={LBL}>Round name</label>
-          <input value={phase.name} onChange={(e) => onPatch({ name: e.target.value })} className={`${INPUT} mt-1 w-full`} />
-        </div>
-        <div>
-          <label className={LBL}>Type (routing)</label>
-          <select value={phase.type} onChange={(e) => onPatch({ type: e.target.value })} className={`${INPUT} mt-1 bg-white`}>
-            {PHASE_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
-          </select>
+          <input value={phase.name} onChange={(e) => onPatch({ name: e.target.value })} placeholder="e.g. Advance booking" className={`${INPUT} mt-1 w-full`} />
         </div>
         <div>
           <label className={LBL}>Start</label>
@@ -157,6 +141,7 @@ function PhaseCard({ phase, commPlanNames, onPatch, onRemove, canRemove }: {
         {canRemove && <button type="button" onClick={onRemove} className="rounded-md bg-[#FDECEA] px-2 py-1.5 text-[11px] font-semibold text-[#C62828] hover:bg-[#FADBD8]">Remove</button>}
       </div>
 
+      {/* Coupons */}
       <div className="mt-3 border-t border-[#F5F5F5] pt-3">
         <div className="mb-1.5 flex items-center justify-between"><span className={LBL}>Offers / coupons (fill message [coupon])</span>
           <button type="button" onClick={addCoupon} className="text-[11px] font-semibold text-[#2E7D32]">+ Add coupon</button></div>
@@ -174,93 +159,97 @@ function PhaseCard({ phase, commPlanNames, onPatch, onRemove, canRemove }: {
         )}
       </div>
 
+      {/* Messaging */}
       <div className="mt-3 border-t border-[#F5F5F5] pt-3">
-        <div className={`${LBL} mb-1.5`}>Messaging — who to contact &amp; how</div>
-        <div className="flex flex-col gap-2">
-          {cohorts.map((co) => (
-            <div key={co.key} className="rounded-[10px] bg-[#FAFBFA] p-2.5">
-              <div className="text-[12px] font-semibold text-[#1A1C1A]">{co.label} <span className="font-normal text-[#9E9E9E]">— {co.goal}</span></div>
-              <div className="mt-1.5 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {(["HNI", "OTHERS"] as const).map((band) => {
-                  const slot = phase.commConfig[co.key]?.[band] ?? {};
-                  return (
-                    <div key={band} className="flex items-center gap-1.5">
-                      <span className="w-[52px] text-[11px] font-bold" style={{ color: band === "HNI" ? "#6A1B9A" : "#00838F" }}>{band === "HNI" ? "HNI" : "Others"}</span>
-                      <select value={slot.commPlan ?? ""} onChange={(e) => setComm(co.key, band, { commPlan: e.target.value || undefined })} className={`${INPUT} min-w-0 flex-1 bg-white`}>
-                        <option value="">Comm plan…</option>
-                        {commPlanNames.map((n) => <option key={n} value={n}>{n}</option>)}
-                      </select>
-                      <select value={slot.channel ?? ""} onChange={(e) => setComm(co.key, band, { channel: (e.target.value || undefined) as Channel | undefined })} className={`${INPUT} bg-white`}>
-                        <option value="">Channel…</option>
-                        {CHANNELS.map((ch) => <option key={ch.key} value={ch.key}>{ch.label}</option>)}
-                      </select>
-                    </div>
-                  );
-                })}
-              </div>
+        <div className={`${LBL} mb-2`}>Messaging — who to contact &amp; how</div>
+        {!split ? (
+          <MessageTargets targets={phase.messaging.targets} commPlanNames={commPlanNames} onChange={(targets) => setMessaging({ targets })} />
+        ) : (
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <div className="rounded-[10px] border border-[#C8E6C9] bg-[#F1F8F1] p-2.5">
+              <div className="mb-1.5 text-[12px] font-bold text-[#2E7D32]">✓ {PURCHASED_LABEL}</div>
+              <MessageTargets targets={phase.messaging.purchased} commPlanNames={commPlanNames} onChange={(purchased) => setMessaging({ purchased })} />
             </div>
-          ))}
-        </div>
+            <div className="rounded-[10px] border border-[#FFE0B2] bg-[#FFF8F0] p-2.5">
+              <div className="mb-1.5 text-[12px] font-bold text-[#E65100]">○ {NOT_PURCHASED_LABEL}</div>
+              <MessageTargets targets={phase.messaging.notPurchased} commPlanNames={commPlanNames} onChange={(notPurchased) => setMessaging({ notPurchased })} />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-/* ─────────────────── Categories tab ─────────────────── */
+/* ─────────────────── Message targets editor ─────────────────── */
 
-function CategoriesTab({ cfg, allCategories, onSaved }: { cfg: CampaignPhaseConfig; allCategories: string[]; onSaved: () => void }) {
-  const [fert, setFert] = useState<string[]>(cfg.fertiliserCategories);
-  const [combo, setCombo] = useState<string[]>(cfg.comboCategories);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [saving, startSave] = useTransition();
-  const [recomputing, startRecompute] = useTransition();
-
-  const toggle = (set: string[], v: string, fn: (s: string[]) => void) => fn(set.includes(v) ? set.filter((x) => x !== v) : [...set, v]);
-
-  const save = () => startSave(async () => { await setCampaignCategories(cfg.campaignId, fert, combo); setMsg("Category mapping saved."); onSaved(); });
-  const recompute = () => startRecompute(async () => {
-    const r = await recomputeCampaignStatuses(cfg.campaignId);
-    setMsg(r.ok ? `Recomputed from sales — ${r.fertiliser ?? 0} fertiliser, ${r.combo ?? 0} combo buyers flagged.` : (r.error ?? "Recompute failed."));
-  });
-
+function MessageTargets({ targets, commPlanNames, onChange }: {
+  targets: MessageTarget[]; commPlanNames: string[]; onChange: (t: MessageTarget[]) => void;
+}) {
+  const setT = (i: number, patch: Partial<MessageTarget>) => onChange(targets.map((t, j) => j === i ? { ...t, ...patch } : t));
   return (
-    <div className="flex flex-col gap-4">
-      <div className="text-[11.5px] text-[#9E9E9E]">Map product categories (from real sales) to fertiliser vs combo. The status engine flags a farmer once a matching sale lands in the campaign window. &apos;Booked&apos; stays officer-marked (a deposit isn&apos;t a sale).</div>
-      {allCategories.length === 0 ? <div className="text-[12.5px] text-[#BDBDBD]">No product categories found in sales yet.</div> : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {([["Fertiliser categories", fert, setFert, "#2E7D32"], ["Combo categories", combo, setCombo, "#6A1B9A"]] as const).map(([title, set, fn, color]) => (
-            <div key={title} className="rounded-[12px] border border-[#EAEAEA] p-3">
-              <div className="mb-2 text-[12.5px] font-bold" style={{ color }}>{title} <span className="font-normal text-[#9E9E9E]">({set.length})</span></div>
-              <div className="flex max-h-[280px] flex-col gap-1 overflow-y-auto">
-                {allCategories.map((c) => (
-                  <label key={c} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-[12.5px] hover:bg-[#FAFBFA]">
-                    <input type="checkbox" checked={set.includes(c)} onChange={() => toggle(set, c, fn)} />
-                    <span className="text-[#424242]">{c}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          ))}
+    <div className="flex flex-col gap-2">
+      {targets.length === 0 && <div className="text-[11.5px] text-[#BDBDBD]">No targets — add one to say who gets which comm plan.</div>}
+      {targets.map((t, i) => (
+        <TargetRow key={i} t={t} commPlanNames={commPlanNames} onChange={(p) => setT(i, p)} onRemove={() => onChange(targets.filter((_, j) => j !== i))} />
+      ))}
+      <button type="button" onClick={() => onChange([...targets, newTarget()])}
+        className="self-start rounded-[8px] border border-dashed border-[#C8E6C9] bg-[#F1F8F1] px-3 py-1 text-[11.5px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9]">+ Add target</button>
+    </div>
+  );
+}
+
+function TargetRow({ t, commPlanNames, onChange, onRemove }: {
+  t: MessageTarget; commPlanNames: string[]; onChange: (p: Partial<MessageTarget>) => void; onRemove: () => void;
+}) {
+  const toggle = (dim: "value" | "lifecycle", seg: string) => {
+    const arr = t[dim];
+    onChange({ [dim]: arr.includes(seg) ? arr.filter((x) => x !== seg) : [...arr, seg] } as Partial<MessageTarget>);
+  };
+  const chip = (seg: string, dim: "value" | "lifecycle") => {
+    const on = t[dim].includes(seg); const m = segMeta(seg);
+    return (
+      <button key={seg} type="button" onClick={() => toggle(dim, seg)}
+        className="rounded-full border px-2 py-0.5 text-[10.5px] font-semibold"
+        style={{ background: on ? m.bg : "#fff", color: on ? m.color : "#9E9E9E", borderColor: on ? m.color : "#E0E0E0" }}>
+        {m.label}
+      </button>
+    );
+  };
+  return (
+    <div className="rounded-[10px] border border-[#EEE] bg-white p-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="flex items-center gap-1.5 text-[11.5px] font-semibold text-[#333]">
+          <input type="checkbox" checked={t.all} onChange={(e) => onChange({ all: e.target.checked })} /> All farmers
+        </label>
+        <select value={t.commPlan ?? ""} onChange={(e) => onChange({ commPlan: e.target.value || undefined })} className="min-w-0 flex-1 rounded-[8px] border border-[#E0E0E0] bg-white px-2.5 py-1.5 text-[12px] outline-none focus:border-[#2E7D32]">
+          <option value="">Comm plan…</option>
+          {commPlanNames.map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+        <select value={t.channel ?? ""} onChange={(e) => onChange({ channel: (e.target.value || undefined) as Channel | undefined })} className="rounded-[8px] border border-[#E0E0E0] bg-white px-2.5 py-1.5 text-[12px] outline-none focus:border-[#2E7D32]">
+          <option value="">Channel…</option>
+          {CHANNELS.map((ch) => <option key={ch.key} value={ch.key}>{ch.label}</option>)}
+        </select>
+        <button type="button" onClick={onRemove} className="rounded-md bg-[#FDECEA] px-2 py-1 text-[11px] font-semibold text-[#C62828] hover:bg-[#FADBD8]">✕</button>
+      </div>
+      {!t.all && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-[9.5px] font-bold uppercase text-[#9E9E9E]">Value</span>
+          {VALUE_SEGMENTS.map((s) => chip(s, "value"))}
+          <span className="ml-2 text-[9.5px] font-bold uppercase text-[#9E9E9E]">Lifecycle</span>
+          {LIFECYCLE_SEGMENTS.map((s) => chip(s, "lifecycle"))}
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-2">
-        {msg && <span className="text-[12px] font-semibold text-[#2E7D32]">{msg}</span>}
-        <div className="ml-auto flex items-center gap-2">
-          <button type="button" onClick={recompute} disabled={recomputing} className={`${BTN} border border-[#2E7D32] text-[#2E7D32] hover:bg-[#E8F5E9] disabled:opacity-50`}>{recomputing ? "Recomputing…" : "↻ Recompute from sales"}</button>
-          <button type="button" onClick={save} disabled={saving} className={`${BTN} bg-[#2E7D32] text-white disabled:opacity-50`}>{saving ? "Saving…" : "Save mapping"}</button>
-        </div>
-      </div>
     </div>
   );
 }
 
-/* ─────────────────── Round status: current round + advance ─────────────────── */
+/* ─────────────────── Round status ─────────────────── */
 
 function RoundStatusTab({ campaignId }: { campaignId: number }) {
   const [status, setStatus] = useState<RoundStatus | null>(null);
-  const [funnel, setFunnel] = useState<PhaseFunnel | null>(null);
   const [advancing, setAdvancing] = useState(false);
-  const load = () => { getRoundStatus(campaignId).then(setStatus); getPhaseFunnel(campaignId).then(setFunnel); };
+  const load = () => getRoundStatus(campaignId).then(setStatus);
   useEffect(() => { load(); }, [campaignId]); // eslint-disable-line
 
   if (status == null) return <div className="py-10 text-center text-[13px] text-[#9E9E9E]">Loading…</div>;
@@ -268,7 +257,6 @@ function RoundStatusTab({ campaignId }: { campaignId: number }) {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Round timeline */}
       <div className="flex flex-wrap items-center gap-2">
         {status.rounds.map((r) => {
           const on = r.ordinal === status.currentOrdinal;
@@ -277,7 +265,7 @@ function RoundStatusTab({ campaignId }: { campaignId: number }) {
             <div key={r.ordinal} className="flex items-center gap-2">
               <div className="rounded-full px-3 py-1 text-[12px] font-bold"
                 style={{ background: on ? "#2E7D32" : done ? "#E8F5E9" : "#F5F5F5", color: on ? "#fff" : done ? "#2E7D32" : "#9E9E9E" }}>
-                {r.ordinal}. {r.name}{done ? " ✓" : ""}
+                {r.ordinal}. {r.name || "(unnamed)"}{done ? " ✓" : ""}
               </div>
               {r.ordinal < status.rounds.length && <span className="text-[#BDBDBD]">→</span>}
             </div>
@@ -285,11 +273,10 @@ function RoundStatusTab({ campaignId }: { campaignId: number }) {
         })}
       </div>
 
-      {/* Current round card */}
       <div className="rounded-[12px] border border-[#EAEAEA] bg-white p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <span className="rounded-full bg-[#E8F5E9] px-2.5 py-0.5 text-[11.5px] font-bold text-[#2E7D32]">Current — Round {status.currentOrdinal}: {status.roundName}</span>
+            <span className="rounded-full bg-[#E8F5E9] px-2.5 py-0.5 text-[11.5px] font-bold text-[#2E7D32]">Current — Round {status.currentOrdinal}: {status.roundName || "(unnamed)"}</span>
             <span className="ml-2 text-[12px] text-[#757575]">{status.windowStart} → {status.windowEnd} · {status.memberCount} test farmers</span>
             {status.advancedByName && <div className="mt-1 text-[10.5px] text-[#9E9E9E]">Last advanced by {status.advancedByName} · {status.advancedAt}</div>}
           </div>
@@ -297,32 +284,13 @@ function RoundStatusTab({ campaignId }: { campaignId: number }) {
             ? <button type="button" onClick={() => setAdvancing(true)} className={`${BTN} bg-[#2E7D32] text-white`}>→ Advance to {status.nextRoundName}</button>
             : <span className="text-[12px] font-semibold text-[#9E9E9E]">Final round</span>)}
         </div>
-        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {status.cohorts.map((c) => (
-            <div key={c.key} className="flex items-baseline gap-2 rounded-[10px] bg-[#FAFBFA] px-3 py-2">
-              <span className="text-[18px] font-bold text-[#1A1C1A]">{c.count}</span>
-              <span className="text-[12px] text-[#616161]">{c.label} <span className="text-[#9E9E9E]">— {c.goal}</span></span>
-            </div>
-          ))}
-        </div>
+        {status.purchaseSplit && (
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <div className="rounded-[10px] bg-[#F1F8F1] px-3 py-2"><span className="text-[18px] font-bold text-[#2E7D32]">{status.purchasedCount}</span> <span className="text-[12px] text-[#616161]">{PURCHASED_LABEL}</span></div>
+            <div className="rounded-[10px] bg-[#FFF8F0] px-3 py-2"><span className="text-[18px] font-bold text-[#E65100]">{status.notPurchasedCount}</span> <span className="text-[12px] text-[#616161]">{NOT_PURCHASED_LABEL}</span></div>
+          </div>
+        )}
       </div>
-
-      {/* Funnel */}
-      {funnel && (
-        <div>
-          <div className="mb-1.5 flex flex-wrap items-center gap-2 text-[11px] text-[#757575]">
-            <b className="text-[#1A1C1A]">Funnel</b> · {funnel.totalTest} test · {funnel.booked} booked · {funnel.boughtFertiliser} fertiliser · {funnel.boughtCombo} combo · {funnel.reached} contacted ({funnel.contactTouches} touches)
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {funnel.buckets.map((b) => (
-              <div key={b.key} className="rounded-[10px] border border-[#EEE] bg-[#FAFBFA] px-3 py-1.5">
-                <div className="text-[15px] font-bold text-[#1A1C1A]">{b.count}</div>
-                <div className="text-[10.5px] text-[#9E9E9E]">{b.label}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {advancing && <AdvanceModal campaignId={campaignId} status={status} onClose={() => setAdvancing(false)} onDone={() => { setAdvancing(false); load(); }} />}
     </div>
@@ -344,14 +312,14 @@ function AdvanceModal({ campaignId, status, onClose, onDone }: { campaignId: num
   };
   return (
     <Modal open onClose={onClose} className="max-w-[460px]">
-      <ModalHeader eyebrow="Advance round" eyebrowColor="#2E7D32" title={`${status.roundName} → ${status.nextRoundName}`} onClose={onClose} />
+      <ModalHeader eyebrow="Advance round" eyebrowColor="#2E7D32" title={`${status.roundName || "Round"} → ${status.nextRoundName}`} onClose={onClose} />
       <div className="px-5 py-4">
         <div className="rounded-[10px] bg-[#FFF8E1] px-3.5 py-2.5 text-[12px] text-[#8D6E00]">
-          Moving the whole campaign from <b>{status.roundName}</b> to <b>{status.nextRoundName}</b>. Confirm the sales data for the round you&apos;re leaving is uploaded — cohorts route off that data.
+          Moving the whole campaign to <b>{status.nextRoundName}</b>. From Round 2 on, messaging splits by whether each farmer has purchased — so confirm this round&apos;s sales data is uploaded first.
         </div>
         <label className="mt-3 flex items-start gap-2 text-[13px] text-[#333]">
           <input type="checkbox" checked={attested} onChange={(e) => setAttested(e.target.checked)} className="mt-0.5" />
-          <span>I confirm the <b>{status.roundName}</b> sales data has been uploaded.</span>
+          <span>I confirm the sales data for <b>{status.roundName || "this round"}</b> has been uploaded.</span>
         </label>
         <div className="mt-3">
           <label className={LBL}>Note (optional)</label>

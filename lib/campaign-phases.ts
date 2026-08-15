@@ -1,59 +1,16 @@
 /**
- * Phased-campaign domain model (pure — safe to import from server actions AND client components).
+ * Campaign rounds domain model (pure — safe to import from server actions AND client components).
  *
- * A campaign runs in ordered phases. Each phase's `type` fixes its behaviour-driven sub-cohorts (who
- * to contact and why), derived from each member's purchase status {booked, fertiliser, combo}. Within
- * a sub-cohort, farmers split by value band (HNI vs Others) — matching the "HNI : Call / Others : Text"
- * routing in the consumer-journey flow. `commConfig` maps sub-cohort × band → a comm plan + channel.
+ * A campaign runs in ordered ROUNDS. Each round carries its own dates, coupons and a MESSAGING config:
+ *   • Round 1        — a single list of "message targets".
+ *   • Round 2 and up — split into two buckets, "Purchased" and "Not yet purchased" (by whether the
+ *                      farmer made any purchase in the campaign window), EACH with its own target list.
+ * A message target = a group of value+lifecycle segments (or "All") mapped to a comm plan + channel.
+ * Farmers are matched to the first target they satisfy, in order.
  */
+import { segMeta } from "@/lib/campaign-segments";
 
-export type PhaseType = "BOOKING" | "FERTILISER" | "COMBO" | "CUSTOM";
-export type ValueBand = "HNI" | "OTHERS";
 export type Channel = "CALL" | "SMS" | "WHATSAPP" | "VOICE_NOTE" | "IN_PERSON";
-
-export interface Coupon { label: string; code: string; minSpend?: number }
-export interface CommSlot { commPlan?: string; channel?: Channel }
-/** { "<subCohortKey>": { HNI: {...}, OTHERS: {...} } } */
-export type CommConfig = Record<string, Partial<Record<ValueBand, CommSlot>>>;
-
-/** The three purchase flags that route a farmer through the phases. */
-export interface MemberStatus { booked: boolean; boughtFertiliser: boolean; boughtCombo: boolean }
-
-export interface SubCohortDef {
-  key: string;
-  label: string;
-  goal: string; // what this phase tries to make them do
-  match: (s: MemberStatus) => boolean;
-}
-
-/**
- * Sub-cohorts per phase type (straight from the consumer-journey decision tree). A member who matches
- * NONE of a phase's sub-cohorts is "converted/done" for that phase and receives no message.
- * Order matters — first match wins.
- */
-export const PHASE_SUBCOHORTS: Record<PhaseType, SubCohortDef[]> = {
-  BOOKING: [
-    { key: "all", label: "All farmers", goal: "1:1 follow-up to book", match: () => true },
-  ],
-  FERTILISER: [
-    { key: "booked_no_fertiliser", label: "Booked · no fertiliser yet", goal: "Push fertiliser purchase", match: (s) => s.booked && !s.boughtFertiliser },
-    { key: "not_booked", label: "Not booked", goal: "Final booking / fertiliser follow-up", match: (s) => !s.booked && !s.boughtFertiliser },
-  ],
-  COMBO: [
-    { key: "fertiliser_no_combo", label: "Bought fertiliser · no combo", goal: "Push combo", match: (s) => s.boughtFertiliser && !s.boughtCombo },
-    { key: "no_fertiliser", label: "No fertiliser", goal: "Stop fertiliser msgs · combo only", match: (s) => !s.boughtFertiliser && !s.boughtCombo },
-  ],
-  CUSTOM: [
-    { key: "all", label: "All farmers", goal: "Custom outreach", match: () => true },
-  ],
-};
-
-export const PHASE_TYPES: { key: PhaseType; label: string }[] = [
-  { key: "BOOKING", label: "Advance Booking" },
-  { key: "FERTILISER", label: "Fertiliser Purchase" },
-  { key: "COMBO", label: "Combo Only" },
-  { key: "CUSTOM", label: "Custom" },
-];
 
 export const CHANNELS: { key: Channel; label: string }[] = [
   { key: "CALL", label: "Call" },
@@ -62,37 +19,35 @@ export const CHANNELS: { key: Channel; label: string }[] = [
   { key: "VOICE_NOTE", label: "Voice note" },
   { key: "IN_PERSON", label: "In person" },
 ];
-
-export interface PhaseTemplate { ordinal: number; name: string; type: PhaseType }
-/** The default 3-phase potato-campaign shape (add/remove/rename per campaign). */
-export const DEFAULT_PHASES: PhaseTemplate[] = [
-  { ordinal: 1, name: "Advance Booking", type: "BOOKING" },
-  { ordinal: 2, name: "Fertiliser Purchase", type: "FERTILISER" },
-  { ordinal: 3, name: "Combo Only", type: "COMBO" },
-];
-
-/** HNI is its own band; Potential-HNI + Regular collapse to "Others". */
-export function valueBand(valueSegment: string | null | undefined): ValueBand {
-  return valueSegment === "HNI" ? "HNI" : "OTHERS";
-}
-
-export function subCohortsFor(type: string): SubCohortDef[] {
-  return PHASE_SUBCOHORTS[(type as PhaseType)] ?? PHASE_SUBCOHORTS.CUSTOM;
-}
-
-/** Which sub-cohort key a member falls in for a phase type — null = not targeted (converted/done). */
-export function subCohortOf(type: string, s: MemberStatus): string | null {
-  return subCohortsFor(type).find((d) => d.match(s))?.key ?? null;
-}
-
-export function phaseTypeLabel(type: string): string {
-  return PHASE_TYPES.find((t) => t.key === type)?.label ?? "Custom";
-}
 export function channelLabel(ch: string | null | undefined): string {
   return CHANNELS.find((c) => c.key === ch)?.label ?? (ch ?? "—");
 }
 
-/** Coerce an unknown JSON blob (Prisma Json) into a Coupon[] safely. */
+export interface Coupon { label: string; code: string; minSpend?: number }
+
+/** A message target — a group of value+lifecycle segments (or All) → a comm plan + channel. */
+export interface MessageTarget {
+  all: boolean;          // "All farmers" — matches everyone (ignores the segment lists)
+  value: string[];       // value segments (empty = any)
+  lifecycle: string[];   // lifecycle segments (empty = any)
+  commPlan?: string;
+  channel?: Channel;
+}
+
+/** Round 1 uses `targets`. Round 2+ splits into `purchased` / `notPurchased`, each a target list. */
+export interface RoundMessaging {
+  targets: MessageTarget[];
+  purchased: MessageTarget[];
+  notPurchased: MessageTarget[];
+}
+export const EMPTY_MESSAGING: RoundMessaging = { targets: [], purchased: [], notPurchased: [] };
+
+export const PURCHASED_LABEL = "Purchased";
+export const NOT_PURCHASED_LABEL = "Not yet purchased";
+
+export function newTarget(): MessageTarget { return { all: false, value: [], lifecycle: [] }; }
+
+/** Coerce a Prisma Json blob into a Coupon[] safely. */
 export function asCoupons(v: unknown): Coupon[] {
   if (!Array.isArray(v)) return [];
   return v
@@ -105,24 +60,47 @@ export function asCoupons(v: unknown): Coupon[] {
     .filter((c) => c.code);
 }
 
-/** Coerce an unknown JSON blob into a CommConfig safely. */
-export function asCommConfig(v: unknown): CommConfig {
-  if (!v || typeof v !== "object") return {};
-  const out: CommConfig = {};
-  for (const [cohort, bands] of Object.entries(v as Record<string, unknown>)) {
-    if (!bands || typeof bands !== "object") continue;
-    const b: Partial<Record<ValueBand, CommSlot>> = {};
-    for (const band of ["HNI", "OTHERS"] as ValueBand[]) {
-      const slot = (bands as Record<string, unknown>)[band];
-      if (slot && typeof slot === "object") {
-        const s = slot as Record<string, unknown>;
-        b[band] = {
-          commPlan: s.commPlan ? String(s.commPlan) : undefined,
-          channel: s.channel ? (String(s.channel) as Channel) : undefined,
-        };
-      }
-    }
-    out[cohort] = b;
+function oneTarget(x: unknown): MessageTarget {
+  const o = (x && typeof x === "object" ? x : {}) as Record<string, unknown>;
+  return {
+    all: !!o.all,
+    value: Array.isArray(o.value) ? o.value.map(String) : [],
+    lifecycle: Array.isArray(o.lifecycle) ? o.lifecycle.map(String) : [],
+    commPlan: o.commPlan ? String(o.commPlan) : undefined,
+    channel: o.channel ? (String(o.channel) as Channel) : undefined,
+  };
+}
+export function asTargets(v: unknown): MessageTarget[] {
+  return Array.isArray(v) ? v.map(oneTarget) : [];
+}
+
+/** Coerce the round's `commConfig` Json into the RoundMessaging shape (back-compat tolerant). */
+export function asRoundMessaging(v: unknown): RoundMessaging {
+  const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+  return {
+    targets: asTargets(o.targets),
+    purchased: asTargets(o.purchased),
+    notPurchased: asTargets(o.notPurchased),
+  };
+}
+
+/** First target a farmer satisfies (order matters). `all` matches everyone; empty lists = any. */
+export function matchTarget(
+  targets: MessageTarget[],
+  seg: { value: string | null | undefined; lifecycle: string | null | undefined },
+): MessageTarget | null {
+  for (const t of targets) {
+    if (t.all) return t;
+    const vOk = t.value.length === 0 || (seg.value != null && t.value.includes(seg.value));
+    const lOk = t.lifecycle.length === 0 || (seg.lifecycle != null && t.lifecycle.includes(seg.lifecycle));
+    if (vOk && lOk) return t;
   }
-  return out;
+  return null;
+}
+
+/** Human label for a target — "All farmers" or the segment names joined. */
+export function targetLabel(t: MessageTarget): string {
+  if (t.all) return "All farmers";
+  const parts = [...t.value, ...t.lifecycle];
+  return parts.length ? parts.map((s) => segMeta(s).label).join(" · ") : "All farmers";
 }
