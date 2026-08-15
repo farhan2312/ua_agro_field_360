@@ -23,6 +23,7 @@ export const SEGMENT_META: Record<string, SegMeta> = {
   NEW:           { label: "New",           priority: 6, color: "#7B1FA2", bg: "#F3E5F5", medium: "Whatsapp" },
   LAPSED:        { label: "Lapsed",        priority: 7, color: "#616161", bg: "#EEEEEE", medium: "Whatsapp + Call" },
   LEAD:          { label: "Lead",          priority: 9, color: "#00838F", bg: "#E0F7FA", medium: "Whatsapp" },
+  NO_SPEND:      { label: "No Spend",      priority: 10, color: "#546E7A", bg: "#ECEFF1", medium: "Whatsapp" },
   OTHER:         { label: "Other",         priority: 8, color: "#9E9E9E", bg: "#F5F5F5", medium: "Whatsapp" },
 };
 
@@ -34,8 +35,12 @@ export function segMeta(seg: string | null | undefined): SegMeta {
 export const SEGMENT_COLUMNS: string[] = ["HNI", "POTENTIAL_HNI", "REGULAR", "AT_RISK", "NEW", "LAPSED"];
 
 /* ── The two independent dimensions the single segment was split into ── */
-/** Value tier — by P12M spend. HNI ≥ ₹12k · Potential HNI ₹8k–<12k · Regular = the rest. */
-export const VALUE_SEGMENTS = ["HNI", "POTENTIAL_HNI", "REGULAR"] as const;
+/**
+ * Value tier — by lifetime spend. HNI ≥ ₹12k · Potential HNI ₹8k–<12k · Regular = the rest with a
+ * purchase · No Spend = no purchase on record (a lead — so leads carry a value segment too, and don't
+ * fall out of value-segment filters).
+ */
+export const VALUE_SEGMENTS = ["HNI", "POTENTIAL_HNI", "REGULAR", "NO_SPEND"] as const;
 export type ValueSegment = (typeof VALUE_SEGMENTS)[number];
 export const VALUE_HNI_MIN = 12000;
 export const VALUE_POTENTIAL_MIN = 8000;
@@ -68,6 +73,7 @@ export function segDef(k: string): string {
     case "HNI": return `Value tier — spends ${inr(VALUE_HNI_MIN)}+ in the period`;
     case "POTENTIAL_HNI": return `Value tier — spends ${inr(VALUE_POTENTIAL_MIN)}–${inr(VALUE_HNI_MIN)} in the period`;
     case "REGULAR": return `Value tier — spends under ${inr(VALUE_POTENTIAL_MIN)} in the period`;
+    case "NO_SPEND": return `Value tier — no purchase on record yet (a lead / no spend)`;
     case "LEAD": return `Lifecycle — registered in the system but no purchase yet (a lead)`;
     case "NEW": return `Lifecycle — first & only purchases within the last ${LIFECYCLE_RECENT_MONTHS} months (new customer)`;
     case "RECENT": return `Lifecycle — bought in the last ${LIFECYCLE_RECENT_MONTHS} months and earlier too (active)`;

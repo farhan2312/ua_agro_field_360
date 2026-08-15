@@ -181,10 +181,11 @@ async function main() {
   }
   process.stdout.write("\n");
 
-  // REAL farmers with NO purchase history at all (no sale line, no bill) → LEAD (in the system,
-  // never bought). Leads have NO value tier — a value tier is meaningless before any purchase.
+  // REAL farmers with NO purchase history at all (no sale line, no bill) → LEAD (lifecycle) + NO_SPEND
+  // (value). Giving leads a value tier keeps them from falling out of value-segment filters — both
+  // dimensions stay filled (No Spend value ↔ Lead lifecycle are the same people, complementary).
   const filled = await prisma.$executeRawUnsafe(
-    `UPDATE "Farmer" f SET "lifecycleSegment"='LEAD', "valueSegment"=NULL
+    `UPDATE "Farmer" f SET "lifecycleSegment"='LEAD', "valueSegment"='NO_SPEND'
      WHERE f."source"='REAL'
        AND NOT EXISTS (SELECT 1 FROM "SaleLine" sl WHERE sl."farmerId" = f.id)
        AND NOT EXISTS (SELECT 1 FROM "Sale" s WHERE s."farmerId" = f.id)`,
