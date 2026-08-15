@@ -500,7 +500,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
       {extendOf && <ExtendModal campaign={extendOf} project={projects.find((p) => p.id === projectId) ?? null} onClose={() => setExtendOf(null)} />}
       {phasesOf && (
         <PhasesPanel campaignId={phasesOf.id} campaignName={phasesOf.name} campaignStart={phasesOf.startDate} campaignEnd={phasesOf.endDate}
-          commPlanNames={commPlanNames} onClose={() => setPhasesOf(null)} />
+          commPlanNames={phasesOf.commPlans ?? []} onClose={() => setPhasesOf(null)} />
       )}
       {phaseOutreachOf && (
         <PhaseOutreachPanel campaignId={phaseOutreachOf.id} campaignName={phaseOutreachOf.name} onClose={() => setPhaseOutreachOf(null)} />
