@@ -73,6 +73,11 @@ export async function POST(req: NextRequest) {
               ...(state === "READ" ? { readAt: at } : {}),
             },
           });
+          // Keep the Inbox thread's outbound bubble in sync (SENT → DELIVERED → READ, or FAILED).
+          await prisma.whatsAppMessage.updateMany({
+            where: { waMessageId: wamid },
+            data: { status: state, ...(state === "FAILED" ? { errorText: err } : {}) },
+          });
         }
         // Map wa_id -> profile name for this batch.
         const nameByWaId = new Map<string, string>();

@@ -4,6 +4,9 @@ import { revalidatePath } from "next/cache";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getRole } from "@/lib/session";
+import { getActor } from "@/lib/scope";
+import { sendWhatsApp, waListTemplates } from "@/lib/whatsapp";
+import { countVars } from "@/lib/wa-template-presets";
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
@@ -105,4 +108,84 @@ export async function markConversationRead(mobile: string): Promise<{ ok: boolea
   await prisma.whatsAppOptIn.update({ where: { mobile: m }, data: { unreadCount: 0 } }).catch(() => null);
   revalidatePath("/whatsapp");
   return { ok: true };
+}
+
+/* ─────────────────────────── Phase 2 — replies ─────────────────────────── */
+
+/** Record an outbound message on the thread + roll the header forward. */
+async function logOutbound(mobile: string, type: string, text: string, farmerId: number | null, res: { ok: boolean; providerId?: string; error?: string }) {
+  const actor = await getActor();
+  const now = new Date();
+  await prisma.whatsAppMessage.create({
+    data: {
+      mobile, direction: "OUT", type, text,
+      waMessageId: res.providerId ?? null, status: res.ok ? "SENT" : "FAILED", errorText: res.error ?? null,
+      sentByName: actor.name, sentByCode: actor.code, farmerId, waTimestamp: now,
+    },
+  });
+  await prisma.whatsAppOptIn.update({ where: { mobile }, data: { lastMessage: text, lastMessageAt: now, lastDirection: "OUT" } }).catch(() => null);
+  revalidatePath("/whatsapp");
+}
+
+/** Free-text reply — only valid inside the 24-hour customer-service window. */
+export async function sendReply(mobile: string, text: string): Promise<{ ok: boolean; error?: string }> {
+  if (!(await admin())) return { ok: false, error: "System admins only." };
+  const m = mobile.replace(/\D/g, "").slice(-10);
+  const header = await prisma.whatsAppOptIn.findUnique({ where: { mobile: m } });
+  if (!header) return { ok: false, error: "Unknown contact." };
+  const within = !!header.lastInboundAt && Date.now() - header.lastInboundAt.getTime() < WINDOW_MS;
+  if (!within) return { ok: false, error: "The 24-hour reply window has closed — send an approved template instead." };
+  const body = text.trim();
+  if (!body) return { ok: false, error: "Message is empty." };
+
+  const res = await sendWhatsApp({ mobile: m, message: body });
+  await logOutbound(m, "text", body, header.farmerId, res);
+  return { ok: res.ok, error: res.error };
+}
+
+/** Template reply — works any time (needed once the 24h window is closed). */
+export async function sendTemplateReply(input: { mobile: string; templateName: string; language?: string; bodyParams?: string[] }): Promise<{ ok: boolean; error?: string }> {
+  if (!(await admin())) return { ok: false, error: "System admins only." };
+  const m = input.mobile.replace(/\D/g, "").slice(-10);
+  const header = await prisma.whatsAppOptIn.findUnique({ where: { mobile: m } });
+  if (!header) return { ok: false, error: "Unknown contact." };
+  if (!input.templateName) return { ok: false, error: "Pick a template." };
+
+  const res = await sendWhatsApp({ mobile: m, templateName: input.templateName, languageCode: input.language ?? "en", bodyParams: input.bodyParams ?? [] });
+  const summary = `[template ${input.templateName}${input.bodyParams?.length ? ` · ${input.bodyParams.join(" | ")}` : ""}]`;
+  await logOutbound(m, "template", summary, header.farmerId, res);
+  return { ok: res.ok, error: res.error };
+}
+
+/* ─────────────────────────── Phase 2 — quick replies + templates ─────────────────────────── */
+
+export interface QuickReplyVM { id: number; label: string; text: string }
+export async function listQuickReplies(): Promise<QuickReplyVM[]> {
+  if (!(await admin())) return [];
+  const rows = await prisma.whatsAppQuickReply.findMany({ orderBy: [{ sortOrder: "asc" }, { id: "asc" }] });
+  return rows.map((r) => ({ id: r.id, label: r.label, text: r.text }));
+}
+export async function saveQuickReply(input: { id?: number; label: string; text: string }): Promise<{ ok: boolean; error?: string }> {
+  if (!(await admin())) return { ok: false, error: "System admins only." };
+  const label = input.label.trim(), text = input.text.trim();
+  if (!label || !text) return { ok: false, error: "Both a label and message are required." };
+  if (input.id) await prisma.whatsAppQuickReply.update({ where: { id: input.id }, data: { label, text } });
+  else await prisma.whatsAppQuickReply.create({ data: { label, text } });
+  revalidatePath("/whatsapp");
+  return { ok: true };
+}
+export async function deleteQuickReply(id: number): Promise<{ ok: boolean }> {
+  if (!(await admin())) return { ok: false };
+  await prisma.whatsAppQuickReply.delete({ where: { id } }).catch(() => null);
+  revalidatePath("/whatsapp");
+  return { ok: true };
+}
+
+export interface ReplyTemplate { name: string; language: string; body: string; varCount: number }
+/** Approved WhatsApp templates available for out-of-window replies. */
+export async function getApprovedTemplates(): Promise<ReplyTemplate[]> {
+  if (!(await admin())) return [];
+  const r = await waListTemplates();
+  if (!r.ok || !r.templates) return [];
+  return r.templates.filter((t) => t.status === "APPROVED").map((t) => ({ name: t.name, language: t.language, body: t.body, varCount: countVars(t.body) }));
 }

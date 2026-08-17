@@ -1,9 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { initials } from "@/lib/format";
-import { listConversations, getThread, type InboxData, type ConversationVM, type ThreadVM } from "@/app/actions/whatsapp-inbox";
+import { Modal, ModalHeader } from "@/components/interactive";
+import { useConfirm } from "@/components/ConfirmDialog";
+import { fillPreview } from "@/lib/wa-template-presets";
+import {
+  listConversations, getThread, sendReply, sendTemplateReply,
+  listQuickReplies, saveQuickReply, deleteQuickReply, getApprovedTemplates,
+  type InboxData, type ConversationVM, type ThreadVM, type QuickReplyVM, type ReplyTemplate,
+} from "@/app/actions/whatsapp-inbox";
 
 type Filter = "all" | "unread" | "unmatched";
 const DAY = 86_400_000;
@@ -26,9 +33,15 @@ export function WhatsAppInbox({ initial }: { initial: InboxData | null }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [thread, setThread] = useState<ThreadVM | null>(null);
   const [loadingThread, setLoadingThread] = useState(false);
+  const [quickReplies, setQuickReplies] = useState<QuickReplyVM[]>([]);
+  const [templates, setTemplates] = useState<ReplyTemplate[]>([]);
+  const [manageQR, setManageQR] = useState(false);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = (f: Filter, term: string) => listConversations(f, term).then(setData);
+  const loadQuickReplies = () => listQuickReplies().then(setQuickReplies);
+  useEffect(() => { loadQuickReplies(); getApprovedTemplates().then(setTemplates); }, []);
+  const reloadThread = () => { if (selected) getThread(selected).then(setThread); load(filter, q); };
   useEffect(() => {
     if (debounce.current) clearTimeout(debounce.current);
     debounce.current = setTimeout(() => load(filter, q), 250);
@@ -85,12 +98,16 @@ export function WhatsAppInbox({ initial }: { initial: InboxData | null }) {
           ) : loadingThread || !thread ? (
             <div className="grid h-full place-items-center text-[13px] text-[#9E9E9E]">Loading…</div>
           ) : (
-            <ThreadView thread={thread} onBack={() => { setSelected(null); setThread(null); }} />
+            <ThreadView thread={thread} quickReplies={quickReplies} templates={templates}
+              onBack={() => { setSelected(null); setThread(null); }} onSent={reloadThread}
+              onManageQuickReplies={() => setManageQR(true)} />
           )}
         </div>
       </div>
 
-      <div className="mt-2 text-[11px] text-[#9E9E9E]">Two-way replies &amp; quick responses arrive in Phase 2. This page records every inbound message; reply from WhatsApp directly for now.</div>
+      <div className="mt-2 text-[11px] text-[#9E9E9E]">Free-text replies work inside the 24-hour window; once it closes, use an approved template. Every message is recorded here.</div>
+
+      {manageQR && <QuickRepliesManager initial={quickReplies} onClose={() => setManageQR(false)} onChanged={loadQuickReplies} />}
     </div>
   );
 }
@@ -118,9 +135,12 @@ function ConvRow({ c, active, onClick }: { c: ConversationVM; active: boolean; o
   );
 }
 
-function ThreadView({ thread, onBack }: { thread: ThreadVM; onBack: () => void }) {
+function ThreadView({ thread, quickReplies, templates, onBack, onSent, onManageQuickReplies }: {
+  thread: ThreadVM; quickReplies: QuickReplyVM[]; templates: ReplyTemplate[];
+  onBack: () => void; onSent: () => void; onManageQuickReplies: () => void;
+}) {
   const bottom = useRef<HTMLDivElement>(null);
-  useEffect(() => { bottom.current?.scrollIntoView(); }, [thread.mobile]);
+  useEffect(() => { bottom.current?.scrollIntoView(); }, [thread.mobile, thread.messages.length]);
   return (
     <>
       <div className="flex items-center gap-2.5 border-b border-[#E7E7E7] bg-white px-3.5 py-2.5">
@@ -170,6 +190,149 @@ function ThreadView({ thread, onBack }: { thread: ThreadVM; onBack: () => void }
           </div>
         )}
       </div>
+
+      <Composer thread={thread} quickReplies={quickReplies} templates={templates} onSent={onSent} onManageQuickReplies={onManageQuickReplies} />
     </>
+  );
+}
+
+function Composer({ thread, quickReplies, templates, onSent, onManageQuickReplies }: {
+  thread: ThreadVM; quickReplies: QuickReplyVM[]; templates: ReplyTemplate[]; onSent: () => void; onManageQuickReplies: () => void;
+}) {
+  const [mode, setMode] = useState<"text" | "template">(thread.within24h ? "text" : "template");
+  const [text, setText] = useState("");
+  const [tplName, setTplName] = useState("");
+  const [params, setParams] = useState<string[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+  const [sending, start] = useTransition();
+  const selTpl = templates.find((t) => t.name === tplName) ?? null;
+  const INP = "rounded-[10px] border border-[#E0E0E0] px-3 py-2 text-[13px] outline-none focus:border-[#2E7D32]";
+
+  const pickTpl = (name: string) => { setTplName(name); const t = templates.find((x) => x.name === name); setParams(t ? Array(t.varCount).fill("") : []); };
+
+  const sendText = () => {
+    setErr(null); const body = text.trim(); if (!body) return;
+    start(async () => { const r = await sendReply(thread.mobile, body); if (!r.ok) { setErr(r.error ?? "Failed."); return; } setText(""); onSent(); });
+  };
+  const sendTpl = () => {
+    setErr(null);
+    if (!selTpl) { setErr("Pick a template."); return; }
+    if (selTpl.varCount > 0 && params.slice(0, selTpl.varCount).some((p) => !p.trim())) { setErr("Fill every template value."); return; }
+    start(async () => {
+      const r = await sendTemplateReply({ mobile: thread.mobile, templateName: selTpl.name, language: selTpl.language, bodyParams: params.slice(0, selTpl.varCount) });
+      if (!r.ok) { setErr(r.error ?? "Failed."); return; }
+      setTplName(""); setParams([]); onSent();
+    });
+  };
+
+  return (
+    <div className="border-t border-[#E7E7E7] bg-white p-2.5">
+      <div className="mb-2 flex items-center gap-2">
+        <div className="inline-flex rounded-[8px] border border-[#E0E0E0] bg-[#F5F7F5] p-0.5">
+          {(["text", "template"] as const).map((mo) => {
+            const disabled = mo === "text" && !thread.within24h;
+            return (
+              <button key={mo} type="button" disabled={disabled} onClick={() => setMode(mo)}
+                className="rounded-[6px] px-2.5 py-1 text-[11px] font-semibold disabled:opacity-40"
+                style={{ background: mode === mo ? "#fff" : "transparent", color: mode === mo ? "#0B8A3D" : "#9E9E9E", boxShadow: mode === mo ? "0 1px 2px rgba(0,0,0,0.12)" : "none" }}>
+                {mo === "text" ? "Reply" : "Template"}
+              </button>
+            );
+          })}
+        </div>
+        {!thread.within24h && <span className="text-[10.5px] text-[#E65100]">24h window closed — template only</span>}
+        <button type="button" onClick={onManageQuickReplies} className="ml-auto text-[11px] font-semibold text-[#6A1B9A] hover:underline">⚙ Quick replies</button>
+      </div>
+
+      {mode === "text" ? (
+        <>
+          {quickReplies.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {quickReplies.map((qr) => (
+                <button key={qr.id} type="button" onClick={() => setText(qr.text)} title={qr.text}
+                  className="rounded-full border border-[#E0E0E0] bg-white px-2.5 py-1 text-[11px] font-semibold text-[#616161] hover:border-[#0B8A3D] hover:text-[#0B8A3D]">{qr.label}</button>
+              ))}
+            </div>
+          )}
+          <div className="flex items-end gap-2">
+            <textarea value={text} onChange={(e) => setText(e.target.value)} rows={1} placeholder="Type a reply…"
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendText(); } }}
+              className={`${INP} max-h-[120px] min-h-[40px] flex-1 resize-none`} />
+            <button type="button" onClick={sendText} disabled={sending || !text.trim()}
+              className="rounded-full bg-[#0B8A3D] px-4 py-2 text-[13px] font-bold text-white disabled:opacity-50">{sending ? "…" : "Send"}</button>
+          </div>
+        </>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {templates.length === 0 ? (
+            <div className="rounded-[8px] bg-[#FFF8E1] px-3 py-2 text-[11.5px] text-[#8D6E00]">No approved templates yet. Create &amp; submit one in Settings → WhatsApp Templates.</div>
+          ) : (
+            <>
+              <select value={tplName} onChange={(e) => pickTpl(e.target.value)} className={`${INP} bg-white`}>
+                <option value="">Pick an approved template…</option>
+                {templates.map((t) => <option key={`${t.name}-${t.language}`} value={t.name}>{t.name} ({t.language}){t.varCount ? ` · ${t.varCount} var` : ""}</option>)}
+              </select>
+              {selTpl && selTpl.varCount > 0 && (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {Array.from({ length: selTpl.varCount }).map((_, i) => (
+                    <input key={i} value={params[i] ?? ""} onChange={(e) => setParams((p) => { const n = [...p]; n[i] = e.target.value; return n; })}
+                      placeholder={`{{${i + 1}}}`} className={INP} />
+                  ))}
+                </div>
+              )}
+              {selTpl && (
+                <div className="rounded-[10px] rounded-tl-[3px] bg-[#DCF8C6] px-3 py-2 text-[12.5px] text-[#1A1C1A]" dir="auto" style={{ whiteSpace: "pre-wrap" }}>{fillPreview(selTpl.body, params)}</div>
+              )}
+              <button type="button" onClick={sendTpl} disabled={sending || !selTpl}
+                className="self-end rounded-full bg-[#0B8A3D] px-4 py-2 text-[13px] font-bold text-white disabled:opacity-50">{sending ? "Sending…" : "Send template"}</button>
+            </>
+          )}
+        </div>
+      )}
+      {err && <div className="mt-1.5 text-[11px] font-semibold text-[#C62828]">{err}</div>}
+    </div>
+  );
+}
+
+function QuickRepliesManager({ initial, onClose, onChanged }: { initial: QuickReplyVM[]; onClose: () => void; onChanged: () => void }) {
+  const { confirm, dialog } = useConfirm();
+  const [rows, setRows] = useState(initial);
+  const [label, setLabel] = useState("");
+  const [text, setText] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [, start] = useTransition();
+  const reload = () => listQuickReplies().then((r) => { setRows(r); onChanged(); });
+
+  const add = () => {
+    setErr(null);
+    start(async () => { const r = await saveQuickReply({ label, text }); if (!r.ok) { setErr(r.error ?? "Failed."); return; } setLabel(""); setText(""); reload(); });
+  };
+  const remove = async (qr: QuickReplyVM) => {
+    if (!(await confirm({ title: "Delete quick reply?", message: qr.label, confirmLabel: "Delete" }))) return;
+    start(async () => { await deleteQuickReply(qr.id); reload(); });
+  };
+  const INP = "rounded-[10px] border border-[#E0E0E0] px-3 py-2 text-[13px] outline-none focus:border-[#2E7D32]";
+
+  return (
+    <Modal open onClose={onClose} className="max-w-[520px]">
+      {dialog}
+      <ModalHeader eyebrow="WhatsApp" eyebrowColor="#6A1B9A" title="Quick replies" subtitle="Canned messages for one-click reply" onClose={onClose} />
+      <div className="max-h-[76vh] overflow-y-auto px-5 py-4">
+        <div className="flex flex-col gap-2 rounded-[12px] border border-[#EEE] p-3">
+          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Label (e.g. Price list)" className={INP} />
+          <textarea value={text} onChange={(e) => setText(e.target.value)} rows={2} placeholder="Message text…" className={`${INP} resize-y`} />
+          {err && <div className="text-[11px] font-semibold text-[#C62828]">{err}</div>}
+          <button type="button" onClick={add} className="self-start rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[12.5px] font-semibold text-white">+ Add quick reply</button>
+        </div>
+        <div className="mt-3 flex flex-col gap-1.5">
+          {rows.length === 0 ? <div className="text-[12px] text-[#BDBDBD]">No quick replies yet.</div> : rows.map((qr) => (
+            <div key={qr.id} className="flex items-start gap-2 rounded-[10px] border border-[#F0F0F0] px-3 py-2">
+              <div className="min-w-0 flex-1"><div className="text-[12.5px] font-semibold text-[#1A1C1A]">{qr.label}</div><div className="truncate text-[11.5px] text-[#757575]">{qr.text}</div></div>
+              <button type="button" onClick={() => remove(qr)} className="rounded-md bg-[#FDECEA] px-2 py-1 text-[11px] font-semibold text-[#C62828] hover:bg-[#FADBD8]">Delete</button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Modal>
   );
 }

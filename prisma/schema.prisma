@@ -647,6 +647,15 @@ model WhatsAppOptIn {
   @@index([lastMessageAt])
 }
 
+/// A canned "quick reply" for the WhatsApp Inbox (Phase 2). Sysadmin-managed; one-click insert.
+model WhatsAppQuickReply {
+  id        Int      @id @default(autoincrement())
+  label     String // short button label
+  text      String   @db.Text // the message body inserted into the reply box
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
 /// One WhatsApp message (inbound or outbound) — the full per-message conversation record behind the
 /// Sysadmin Inbox. Keyed by `mobile` (the thread). Inbound rows are written by the webhook.
 model WhatsAppMessage {
