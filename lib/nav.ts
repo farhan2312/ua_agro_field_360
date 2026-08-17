@@ -4,7 +4,7 @@ export type NavId =
   | "dashboard" | "newVisit" | "visitRepo" | "actionRegistry" | "farmers" | "mapView"
   | "farmerCluster" | "analytics" | "actions" | "projects" | "campaigns" | "ghoshti"
   | "products" | "movement"
-  | "users" | "salesImport" | "settings" | "audit" | "bugs";
+  | "users" | "salesImport" | "settings" | "audit" | "bugs" | "whatsappInbox";
 
 /** A "view" can also be a detail variant of a nav id (for header titles). */
 export type ViewId = NavId | "farmerDetail" | "visitDetail" | "projectDetail" | "ghoshtiDetail" | "training";
@@ -34,6 +34,7 @@ export const SALES_NAV: NavItem[] = [
 ];
 
 export const ADMIN_NAV: NavItem[] = [
+  { id: "whatsappInbox", label: "WhatsApp Inbox", href: "/whatsapp" },
   { id: "users", label: "Users", href: "/users" },
   { id: "salesImport", label: "Sales Import", href: "/imports" },
   { id: "settings", label: "Settings", href: "/settings" },
@@ -92,6 +93,7 @@ export function routeToView(pathname: string): ViewId {
   if (pathname.startsWith("/settings")) return "settings";
   if (pathname.startsWith("/audit")) return "audit";
   if (pathname.startsWith("/bugs")) return "bugs";
+  if (pathname.startsWith("/whatsapp")) return "whatsappInbox";
   if (pathname.startsWith("/training")) return "training";
   return "analytics"; // Analytics is the home page (Dashboard was merged into it)
 }

@@ -111,6 +111,7 @@ export const NAV_VISIBILITY: Record<string, (r: RoleKey) => boolean> = {
   products: (r) => r === "regional" || r === "central" || r === "sysadmin",
   movement: (r) => r === "regional" || r === "central" || r === "sysadmin",
   users: (r) => r === "central" || r === "sysadmin",
+  whatsappInbox: (r) => r === "sysadmin", // WhatsApp inbox — system admins only
   salesImport: (r) => r === "sysadmin",
   settings: (r) => r === "sysadmin",
   bugs: (r) => r === "sysadmin",
@@ -183,6 +184,8 @@ export function viewTitle(
       return ["System Settings", "Configuration & master data"];
     case "audit":
       return ["Audit Log", "System activity & data changes"];
+    case "whatsappInbox":
+      return ["WhatsApp Inbox", "Everyone who has messaged the official number"];
     case "bugs":
       return ["Bug Tracker", "Reports filed through the portal · triage & resolve"];
     case "training":

@@ -82,22 +82,39 @@ export async function POST(req: NextRequest) {
           const waId = String(m?.from ?? "");
           const mobile = toMobile10(waId);
           if (!mobile) continue;
-          const text = m?.text?.body ?? m?.button?.text ?? m?.interactive?.list_reply?.title ?? m?.interactive?.button_reply?.title ?? `[${m?.type ?? "message"}]`;
+          const type = String(m?.type ?? "text");
+          const text = m?.text?.body ?? m?.button?.text ?? m?.interactive?.list_reply?.title ?? m?.interactive?.button_reply?.title ?? `[${type}]`;
+          // Media messages carry an id (image/audio/video/document) — store the id + mime; render later.
+          const media = m?.image ?? m?.audio ?? m?.video ?? m?.document ?? m?.sticker ?? null;
           const tsMs = m?.timestamp ? Number(m.timestamp) * 1000 : Date.now();
           const at = Number.isFinite(tsMs) ? new Date(tsMs) : new Date();
           const name = nameByWaId.get(waId) || null;
+          const wamid = m?.id ? String(m.id) : null;
 
           const farmer = await prisma.farmer.findFirst({ where: { mobile }, select: { id: true } });
+
+          // Full per-message record (the Inbox thread). Dedup on wamid (Meta may retry the webhook).
+          if (!wamid || (await prisma.whatsAppMessage.count({ where: { waMessageId: wamid } })) === 0) {
+            await prisma.whatsAppMessage.create({
+              data: {
+                mobile, waId, direction: "IN", type, text,
+                mediaId: media?.id ?? null, mediaMime: media?.mime_type ?? null,
+                waMessageId: wamid, farmerId: farmer?.id ?? null, contactName: name, waTimestamp: at,
+              },
+            });
+          }
 
           await prisma.whatsAppOptIn.upsert({
             where: { mobile },
             create: {
               mobile, waId, name, firstMessage: text, lastMessage: text, messageCount: 1,
               farmerId: farmer?.id ?? null, optInAt: at, lastMessageAt: at,
+              unreadCount: 1, lastInboundAt: at, lastDirection: "IN",
             },
             update: {
               waId, name: name ?? undefined, lastMessage: text, lastMessageAt: at,
               messageCount: { increment: 1 }, farmerId: farmer?.id ?? undefined,
+              unreadCount: { increment: 1 }, lastInboundAt: at, lastDirection: "IN",
             },
           });
 

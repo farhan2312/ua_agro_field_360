@@ -632,14 +632,44 @@ model WhatsAppOptIn {
   waId         String? // full wa_id (country code + number) as Meta reports it
   name         String? // WhatsApp profile name, when provided
   firstMessage String? // the first inbound message text (usually the opt-in line)
-  lastMessage  String? // most recent inbound text
+  lastMessage  String? // most recent message text (either direction)
   messageCount Int      @default(0)
   farmerId     Int? // matched existing farmer, if any
   optInAt      DateTime @default(now())
   lastMessageAt DateTime @default(now())
+  // Inbox thread header (Phase 1 conversation record):
+  unreadCount   Int     @default(0) // inbound messages not yet read in the inbox
+  lastInboundAt DateTime? // last time THEY messaged us — drives the 24h reply window
+  lastDirection String? // IN | OUT — direction of the most recent message
 
   @@index([optInAt])
   @@index([farmerId])
+  @@index([lastMessageAt])
+}
+
+/// One WhatsApp message (inbound or outbound) — the full per-message conversation record behind the
+/// Sysadmin Inbox. Keyed by `mobile` (the thread). Inbound rows are written by the webhook.
+model WhatsAppMessage {
+  id          Int      @id @default(autoincrement())
+  mobile      String // normalized 10-digit — the conversation thread key
+  waId        String? // full wa_id
+  direction   String // IN | OUT
+  type        String   @default("text") // text|image|audio|video|document|button|interactive|template|…
+  text        String?  @db.Text
+  mediaId     String? // Meta media id (fetch/render later)
+  mediaMime   String?
+  waMessageId String? // wamid.* — for status matching + dedup
+  status      String? // OUT: SENT|DELIVERED|READ|FAILED
+  errorText   String?
+  farmerId    Int? // matched farmer, if any
+  contactName String?
+  sentByName  String? // OUT manual reply — actual admin who sent
+  sentByCode  String?
+  waTimestamp DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([mobile, createdAt])
+  @@index([waMessageId])
 }
 
 // A Visit doubles as the per-farmer visit log entry and the Visit Repository record.

@@ -65,6 +65,11 @@ export const NavIcons: Record<NavId, (p: P) => JSX.Element> = {
       <circle cx="14" cy="6" r="2" /><path d="M13 15c0-2.5 1-4.2 2.5-5" />
     </svg>
   ),
+  whatsappInbox: ({ className }) => (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M2 9a7 7 0 1 1 3.5 6.06L2 16l1-3.4A6.97 6.97 0 0 1 2 9z" />
+    </svg>
+  ),
   campaigns: ({ className }) => (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className={className}>
       <path d="M3 7v4l9 4V3L3 7zM3 11H2a1 1 0 01-1-1V8a1 1 0 011-1h1M6 12v2.5a1 1 0 001 1h1a1 1 0 001-1V13" />
