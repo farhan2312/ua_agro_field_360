@@ -122,7 +122,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
   const k = data.kpis;
   const vk = visitData?.kpis;
   const vd = (x: number | undefined) => (visitData ? n(x ?? 0) : "…");
-  const VISIT_KPIS: [string, string][] = [["Visits", vd(vk?.visits)], ["Farmers visited", vd(vk?.farmers)], ["Villages", vd(vk?.villages)], ["Officers", vd(vk?.officers)], ["Field GPS", visitData ? `${vk?.fieldPct ?? 0}%` : "…"], ["Photos", vd(vk?.photos)]];
+  const VISIT_KPIS: [string, string][] = [["Visits", vd(vk?.visits)], ["Farmers visited", vd(vk?.farmers)], ["Leads · no sales yet", vd(vk?.leads)], ["Villages", vd(vk?.villages)], ["Officers", vd(vk?.officers)], ["Field GPS", visitData ? `${vk?.fieldPct ?? 0}%` : "…"], ["Photos", vd(vk?.photos)]];
 
   return (
     <div className="animate-[fadeUp_0.4s_ease-out]">
@@ -215,12 +215,16 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
         </div>
       ) : (
         <div className="mb-3 grid grid-cols-2 gap-[12px] sm:grid-cols-3 lg:grid-cols-6">
-          {VISIT_KPIS.map(([label, val]) => (
-            <div key={label} className={`${CARD} p-3.5`}>
-              <div className="text-[10.5px] font-bold uppercase tracking-[0.3px] text-[#9E9E9E]">{label}</div>
-              <div className="mt-1 text-[19px] font-bold text-[#1A1C1A]">{val}</div>
-            </div>
-          ))}
+          {VISIT_KPIS.map(([label, val]) => {
+            const isLeads = label.startsWith("Leads");
+            return (
+              <div key={label} className={`${CARD} p-3.5`} style={isLeads ? { borderLeft: "4px solid #546E7A", background: "#F7F9FA" } : undefined}
+                title={isLeads ? "Registered farmers with no sales record yet (value tier: No Spend)" : undefined}>
+                <div className="text-[10.5px] font-bold uppercase tracking-[0.3px]" style={{ color: isLeads ? "#546E7A" : "#9E9E9E" }}>{label}</div>
+                <div className="mt-1 text-[19px] font-bold" style={{ color: isLeads ? "#37474F" : "#1A1C1A" }}>{val}</div>
+              </div>
+            );
+          })}
         </div>
       )}
 

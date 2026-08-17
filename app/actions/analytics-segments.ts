@@ -370,6 +370,7 @@ export async function getWorkbench(f: WbFilters): Promise<WbData> {
 export interface VisitKpis {
   visits: number; farmers: number; villages: number; officers: number;
   fieldPct: number; photos: number; voiceNotes: number; whatsappPct: number;
+  leads: number; // registered farmers in scope with NO sales record (value tier = No Spend)
 }
 export interface VisitMonth { ym: string; label: string; year: number; count: number }
 export interface VisitAdoption { label: string; count: number; pct: number }
@@ -394,7 +395,7 @@ export interface VisitAnalytics {
 }
 
 const EMPTY_VISITS: VisitAnalytics = {
-  kpis: { visits: 0, farmers: 0, villages: 0, officers: 0, fieldPct: 0, photos: 0, voiceNotes: 0, whatsappPct: 0 },
+  kpis: { visits: 0, farmers: 0, villages: 0, officers: 0, fieldPct: 0, photos: 0, voiceNotes: 0, whatsappPct: 0, leads: 0 },
   monthly: [], purposes: [], problems: [], crops: [], water: [], landHolding: [], expense: [],
   productsUsed: [], productsNeeded: [], soilTypes: [], purchaseFreq: [], risks: [], adoption: [], officers: [], byStore: [],
 };
@@ -487,6 +488,10 @@ export async function getVisitAnalytics(f: WbFilters): Promise<VisitAnalytics> {
 
   const k = kpiRows[0];
   const visits = num(k?.visits);
+  // Leads = registered farmers in scope with NO sales record (value tier "No Spend"). A farmer-level
+  // count over the scoped set — independent of the visit date window.
+  const leadRows = await prisma.$queryRaw<{ n: number }[]>(Prisma.sql`SELECT COUNT(*)::int n FROM "Farmer" f ${whereF} AND f."valueSegment" = 'NO_SPEND'`);
+  const leads = num(leadRows[0]?.n);
   const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const monthly: VisitMonth[] = monthlyRows.map((r) => {
     const [y, m] = r.ym.split("-").map(Number);
@@ -513,6 +518,7 @@ export async function getVisitAnalytics(f: WbFilters): Promise<VisitAnalytics> {
       photos: num(k?.photos),
       voiceNotes: num(k?.voices),
       whatsappPct: pct(num(k?.wa)),
+      leads,
     },
     monthly,
     purposes: bars(purposeRows),
