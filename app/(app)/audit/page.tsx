@@ -1,7 +1,8 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getRole } from "@/lib/session";
-import { AuditTable, type AuditRowData } from "@/components/audit/AuditTable";
+import { type AuditRowData } from "@/components/audit/AuditTable";
+import { AuditScreen } from "@/components/audit/AuditScreen";
 
 export const dynamic = "force-dynamic";
 
@@ -31,5 +32,5 @@ export default async function AuditPage() {
   if ((await getRole()) !== "sysadmin") notFound();
 
   const rows = await getAuditRows();
-  return <AuditTable rows={rows} />;
+  return <AuditScreen auditRows={rows} />;
 }
