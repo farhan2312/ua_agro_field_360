@@ -35,7 +35,7 @@ export default async function OutreachMatrixPage({ params }: { params: { id: str
     });
     scripts = rows.map((t) => ({
       id: t.id, name: t.name, language: t.language, promoType: t.promoType,
-      segment: t.segment, priority: t.priority, medium: t.medium,
+      segment: t.segment, segments: t.segments.length ? t.segments : [t.segment], priority: t.priority, medium: t.medium,
       offer: t.offer, timingLabel: t.timingLabel, template: t.template, dltTemplateId: t.dltTemplateId,
     }));
   }

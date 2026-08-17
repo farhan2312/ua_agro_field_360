@@ -240,7 +240,8 @@ export async function deleteProject(id: number): Promise<{ ok: boolean; error?: 
 /* ─────────────────────────── WF3 · Communication plan ─────────────────────────── */
 
 export interface CommTemplatePatch {
-  name?: string; language?: string; promoType?: string; segment?: string;
+  name?: string; language?: string; promoType?: string;
+  segments?: string[]; // target segments (value + lifecycle); EMPTY = All
   medium?: string; offer?: string; timingLabel?: string; template?: string;
   dltTemplateId?: string | null;
   waTemplateName?: string | null;
@@ -248,11 +249,16 @@ export interface CommTemplatePatch {
   waVariables?: string[];
 }
 
+/** Keep the legacy single `segment` column in sync with segments[0] (or a sensible default). */
+const legacySeg = (segments?: string[]) => (segments && segments.length ? segments[0] : "REGULAR");
+
 export async function saveCommTemplate(id: number, patch: CommTemplatePatch): Promise<{ ok: boolean; error?: string }> {
   const perm = await requireManager(); if (!perm.ok) return perm; // central-only config (read-only for officers/RMs)
   if (patch.name !== undefined && !patch.name.trim()) return { ok: false, error: "Give the comm plan a name." };
   try {
-    await prisma.commTemplate.update({ where: { id }, data: patch });
+    const data: Prisma.CommTemplateUpdateInput = { ...patch };
+    if (patch.segments !== undefined) data.segment = legacySeg(patch.segments);
+    await prisma.commTemplate.update({ where: { id }, data });
     revalidatePath("/campaigns");
     return { ok: true };
   } catch (e) {
@@ -266,7 +272,7 @@ export async function createCommTemplate(data: Required<CommTemplatePatch>): Pro
   const dup = await prisma.commTemplate.findFirst({ where: { name: data.name.trim() }, select: { id: true } });
   if (dup) return { ok: false, error: "A comm plan with that name already exists." };
   try {
-    const row = await prisma.commTemplate.create({ data: { ...data, name: data.name.trim(), priority: 5 } });
+    const row = await prisma.commTemplate.create({ data: { ...data, segment: legacySeg(data.segments), name: data.name.trim(), priority: 5 } });
     revalidatePath("/campaigns");
     return { ok: true, id: row.id };
   } catch (e) {

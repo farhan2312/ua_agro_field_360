@@ -4,7 +4,7 @@ import { useEffect, useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Modal, ModalHeader } from "@/components/interactive";
-import { segMeta, fillTemplate, SEGMENT_COLUMNS, VALUE_TITLE, LIFECYCLE_TITLE } from "@/lib/campaign-segments";
+import { segMeta, fillTemplate, VALUE_SEGMENTS, LIFECYCLE_SEGMENTS, VALUE_TITLE, LIFECYCLE_TITLE } from "@/lib/campaign-segments";
 import { SmsSender } from "./SmsSender";
 import { WaSender } from "./WaSender";
 import { BroadcastPanel } from "./BroadcastPanel";
@@ -28,7 +28,7 @@ export interface PestOption { pest: string; count: number }
 
 export interface CommTemplateVM {
   id: number; name: string; language: string; promoType: string;
-  segment: string; priority: number; medium: string; offer: string; timingLabel: string; template: string;
+  segment: string; segments: string[]; priority: number; medium: string; offer: string; timingLabel: string; template: string;
   dltTemplateId?: string | null;
   waTemplateName?: string | null;
   waLanguage?: string | null;
@@ -65,11 +65,26 @@ function CommPlanForm({ draft, setDraft }: { draft: CommTemplateVM; setDraft: (t
             </select></div>
         </div>
       </div>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-        <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Segment</label>
-          <select className={`${input} w-full bg-white`} value={draft.segment} onChange={(e) => setDraft({ ...draft, segment: e.target.value })}>
-            {SEGMENT_COLUMNS.map((s) => <option key={s} value={s}>{segMeta(s).label}</option>)}
-          </select></div>
+      {/* Target segments — multi-select. Empty = All. Value tiers + lifecycle (incl. Leads). */}
+      <div>
+        <label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Target segments <span className="normal-case text-[#BDBDBD]">(none selected = All)</span></label>
+        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+          <button type="button" onClick={() => setDraft({ ...draft, segments: [] })}
+            className="rounded-full border px-3 py-1 text-[11.5px] font-semibold"
+            style={{ background: draft.segments.length === 0 ? "#E8F5E9" : "#fff", color: draft.segments.length === 0 ? "#2E7D32" : "#616161", borderColor: draft.segments.length === 0 ? "#2E7D32" : "#E0E0E0" }}>All</button>
+          <span className="mx-0.5 h-4 w-px bg-[#EEE]" />
+          {[...VALUE_SEGMENTS, ...LIFECYCLE_SEGMENTS].map((s) => {
+            const on = draft.segments.includes(s); const m = segMeta(s);
+            return (
+              <button key={s} type="button"
+                onClick={() => setDraft({ ...draft, segments: on ? draft.segments.filter((x) => x !== s) : [...draft.segments, s] })}
+                className="rounded-full border px-3 py-1 text-[11.5px] font-semibold"
+                style={{ background: on ? m.bg : "#fff", color: on ? m.color : "#9E9E9E", borderColor: on ? m.color : "#E0E0E0" }}>{m.label}</button>
+            );
+          })}
+        </div>
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Medium</label>
           <input className={`${input} w-full`} value={draft.medium} onChange={(e) => setDraft({ ...draft, medium: e.target.value })} placeholder="WhatsApp / Call / SMS" /></div>
         <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Timing</label>
@@ -110,7 +125,7 @@ function CommPlanForm({ draft, setDraft }: { draft: CommTemplateVM; setDraft: (t
   );
 }
 
-const EMPTY_PLAN: CommTemplateVM = { id: 0, name: "", language: "hi", promoType: "General", segment: "REGULAR", priority: 5, medium: "WhatsApp", offer: "", timingLabel: "", template: "", dltTemplateId: "", waTemplateName: "", waLanguage: "", waVariables: [] };
+const EMPTY_PLAN: CommTemplateVM = { id: 0, name: "", language: "hi", promoType: "General", segment: "REGULAR", segments: [], priority: 5, medium: "WhatsApp", offer: "", timingLabel: "", template: "", dltTemplateId: "", waTemplateName: "", waLanguage: "", waVariables: [] };
 
 function CommPlanTab({ templates }: { templates: CommTemplateVM[] }) {
   const [rows, setRows] = useState(templates);
@@ -134,7 +149,7 @@ function CommPlanTab({ templates }: { templates: CommTemplateVM[] }) {
     if (!draft) return;
     setErr(null);
     start(async () => {
-      const patch = { name: draft.name, language: draft.language, promoType: draft.promoType, segment: draft.segment, medium: draft.medium, offer: draft.offer, timingLabel: draft.timingLabel, template: draft.template, dltTemplateId: (draft.dltTemplateId ?? "").trim() || null, waTemplateName: (draft.waTemplateName ?? "").trim() || null, waLanguage: (draft.waLanguage ?? "").trim() || null, waVariables: draft.waVariables ?? [] };
+      const patch = { name: draft.name, language: draft.language, promoType: draft.promoType, segments: draft.segments, medium: draft.medium, offer: draft.offer, timingLabel: draft.timingLabel, template: draft.template, dltTemplateId: (draft.dltTemplateId ?? "").trim() || null, waTemplateName: (draft.waTemplateName ?? "").trim() || null, waLanguage: (draft.waLanguage ?? "").trim() || null, waVariables: draft.waVariables ?? [] };
       if (adding) {
         const res = await createCommTemplate(patch);
         if (res.ok && res.id != null) { setRows((r) => [...r, { ...draft, id: res.id! }]); setAdding(false); setDraft(null); }
@@ -196,14 +211,17 @@ function CommPlanTab({ templates }: { templates: CommTemplateVM[] }) {
 
       {shown.length === 0 && !adding && <div className={`${CARD} px-4 py-10 text-center text-[13px] text-[#9E9E9E]`}>No comm plans match these filters.</div>}
       {shown.map((t) => {
-        const m = segMeta(t.segment);
         const isEditing = editing === t.id;
         const cur = isEditing && draft ? draft : t;
+        const segs = cur.segments;
+        const m = segMeta(segs[0] ?? "OTHER"); // left-border tint from the first target (neutral when All)
         return (
-          <div key={t.id} className={`${CARD} p-[18px]`} style={{ borderLeft: `4px solid ${m.color}` }}>
+          <div key={t.id} className={`${CARD} p-[18px]`} style={{ borderLeft: `4px solid ${segs.length ? m.color : "#B0BEC5"}` }}>
             <div className="mb-2 flex flex-wrap items-center gap-2">
               <span className="text-[13.5px] font-bold text-[#1A1C1A]">{cur.name || "(unnamed)"}</span>
-              <span className="rounded-full px-2.5 py-0.5 text-[10px] font-bold" style={{ background: m.bg, color: m.color }}>{m.label}</span>
+              {segs.length === 0
+                ? <span className="rounded-full bg-[#ECEFF1] px-2.5 py-0.5 text-[10px] font-bold text-[#546E7A]">All segments</span>
+                : segs.map((s) => { const sm = segMeta(s); return <span key={s} className="rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: sm.bg, color: sm.color }}>{sm.label}</span>; })}
               <span className="rounded-full bg-[#E3F2FD] px-2 py-0.5 text-[10px] font-semibold text-[#1565C0]">{LANG_LABEL[cur.language] ?? cur.language}</span>
               <span className="rounded-full bg-[#F3E5F5] px-2 py-0.5 text-[10px] font-semibold text-[#6A1B9A]">{cur.promoType}</span>
               <span className="text-[11.5px] text-[#616161]">{cur.medium}</span>
@@ -759,9 +777,11 @@ function CopyScript({ text }: { text: string }) {
  */
 export function ScriptPanel({ scripts, member, className = "" }: { scripts: CommTemplateVM[]; member?: CampaignMemberVM | null; className?: string }) {
   if (scripts.length === 0) return null;
+  // A script matches a farmer when it targets All (no segments) or lists the farmer's segment.
+  const matches = (s: CommTemplateVM) => member != null && (s.segments.length === 0 || s.segments.includes(member.segment));
   // Farmer's-segment script(s) first when a farmer is in focus; otherwise keep priority order.
   const ordered = member
-    ? [...scripts].sort((a, b) => Number(b.segment === member.segment) - Number(a.segment === member.segment))
+    ? [...scripts].sort((a, b) => Number(matches(b)) - Number(matches(a)))
     : scripts;
   return (
     <div className={className}>
@@ -772,8 +792,8 @@ export function ScriptPanel({ scripts, member, className = "" }: { scripts: Comm
       {member && <div className="mb-2 text-[11px] text-[#757575]">Reading to <b className="text-[#1A1C1A]">{member.name.split(/\s+/)[0]}</b> · {segMeta(member.segment).label}</div>}
       <div className="flex flex-col gap-2.5">
         {ordered.map((s) => {
-          const m = segMeta(s.segment);
-          const mine = member != null && s.segment === member.segment;
+          const m = segMeta(s.segments[0] ?? "OTHER");
+          const mine = matches(s);
           return (
             <div key={s.id} className="rounded-[12px] border bg-white p-3"
               style={{ borderColor: mine ? m.color : "#ECECEC", borderLeftWidth: 4, borderLeftColor: m.color }}>

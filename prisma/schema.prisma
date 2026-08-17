@@ -465,7 +465,8 @@ model CommTemplate {
   name        String   @default("") // display name — campaigns tag comm plans by this
   language    String   @default("hi") // "hi" | "en"
   promoType   String   @default("General") // Discount | Festival | New launch | Scheme/Credit | Reminder | General
-  segment     String // target segment: HNI | POTENTIAL_HNI | REGULAR | AT_RISK | NEW | LAPSED
+  segment     String // legacy single segment (kept in sync = segments[0]); superseded by `segments`
+  segments    String[] @default([]) // target segments (value + lifecycle); EMPTY = All segments
   priority    Int
   medium      String // WhatsApp | Call | SMS (or combos)
   offer       String
