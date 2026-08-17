@@ -138,7 +138,9 @@ export async function sendReply(mobile: string, text: string): Promise<{ ok: boo
   const body = text.trim();
   if (!body) return { ok: false, error: "Message is empty." };
 
-  const res = await sendWhatsApp({ mobile: m, message: body });
+  // Send to the FULL international number Meta gave us (header.waId), never the truncated 10-digit key.
+  // Reconstructing from 10 digits would wrongly prepend India's 91 to non-Indian numbers → 131026.
+  const res = await sendWhatsApp({ mobile: header.waId || m, message: body });
   await logOutbound(m, "text", body, header.farmerId, res);
   return { ok: res.ok, error: res.error };
 }
@@ -151,7 +153,7 @@ export async function sendTemplateReply(input: { mobile: string; templateName: s
   if (!header) return { ok: false, error: "Unknown contact." };
   if (!input.templateName) return { ok: false, error: "Pick a template." };
 
-  const res = await sendWhatsApp({ mobile: m, templateName: input.templateName, languageCode: input.language ?? "en", bodyParams: input.bodyParams ?? [] });
+  const res = await sendWhatsApp({ mobile: header.waId || m, templateName: input.templateName, languageCode: input.language ?? "en", bodyParams: input.bodyParams ?? [] });
   const summary = `[template ${input.templateName}${input.bodyParams?.length ? ` · ${input.bodyParams.join(" | ")}` : ""}]`;
   await logOutbound(m, "template", summary, header.farmerId, res);
   return { ok: res.ok, error: res.error };

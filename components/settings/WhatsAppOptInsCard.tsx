@@ -113,14 +113,19 @@ export function WhatsAppOptInsCard({ initial, qrConfig }: { initial: { total: nu
           <table className="w-full text-left text-[12px]">
             <thead className="sticky top-0 bg-[#FAFAFA]">
               <tr className="border-b border-[#EEE] text-[10px] font-bold uppercase text-[#9E9E9E]">
-                <th className="px-3 py-2">Number</th><th className="py-2">Name</th><th className="py-2">Last message</th><th className="py-2 text-right pr-3">Opted in</th>
+                <th className="px-3 py-2">Number</th><th className="py-2">Name</th><th className="py-2">Type</th><th className="py-2">Last message</th><th className="py-2 text-right pr-3">Opted in</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id} className="border-b border-[#F6F6F6]">
                   <td className="px-3 py-2 font-mono font-semibold text-[#1A1C1A]">{r.mobile}</td>
-                  <td className="py-2 text-[#424242]">{r.farmerName || r.name || "—"}{r.farmerId ? <span className="ml-1 text-[10px] text-[#0B8A3D]">✓ farmer</span> : ""}</td>
+                  <td className="py-2 text-[#424242]">{r.farmerName || r.name || "—"}</td>
+                  <td className="py-2">
+                    {r.farmerId
+                      ? <span className="rounded-full bg-[#E8F5E9] px-2 py-0.5 text-[10px] font-bold text-[#2E7D32]">✓ Registered farmer</span>
+                      : <span className="rounded-full bg-[#F5F5F5] px-2 py-0.5 text-[10px] font-bold text-[#9E9E9E]">Not a farmer</span>}
+                  </td>
                   <td className="py-2 text-[#9E9E9E]"><span className="line-clamp-1">{r.lastMessage || "—"}</span></td>
                   <td className="py-2 pr-3 text-right text-[#616161]">{fmt(r.optInAt)}</td>
                 </tr>
