@@ -35,6 +35,8 @@ export interface CommTemplateVM {
   waVariables?: string[];
 }
 export interface StoreLite { id: number; name: string }
+/** An approved Meta template + the friendly names of its {{1}},{{2}}… slots (for comm-plan var mapping). */
+export interface TemplateVarHint { name: string; language: string; labels: string[] }
 
 const CARD = "rounded-[14px] border border-black/[0.04] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]";
 const n = (x: number) => x.toLocaleString("en-IN");
@@ -47,8 +49,13 @@ const MEDIUM_CHIPS = ["All", "WhatsApp", "Call", "SMS"];
 const PROMO_TYPES = ["General", "Discount", "Festival", "New launch", "Scheme/Credit", "Reminder"];
 
 /** Full editable form for one comm plan (used by both edit + create). */
-function CommPlanForm({ draft, setDraft }: { draft: CommTemplateVM; setDraft: (t: CommTemplateVM) => void }) {
+function CommPlanForm({ draft, setDraft, templateVars = [] }: { draft: CommTemplateVM; setDraft: (t: CommTemplateVM) => void; templateVars?: TemplateVarHint[] }) {
   const input = "rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]";
+  // The Meta template this plan sends as (matched by name), so we can label each {{n}} slot.
+  const matchedTpl = (draft.waTemplateName ?? "").trim()
+    ? templateVars.find((t) => t.name === (draft.waTemplateName ?? "").trim()) ?? null
+    : null;
+  const tplLabels = matchedTpl?.labels ?? [];
   return (
     <div className="flex flex-col gap-2">
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -98,17 +105,31 @@ function CommPlanForm({ draft, setDraft }: { draft: CommTemplateVM; setDraft: (t
         <input className={`${input} w-full`} value={draft.dltTemplateId ?? ""} onChange={(e) => setDraft({ ...draft, dltTemplateId: e.target.value })} placeholder="e.g. 1207xxxxxxxxxxxxx" /></div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">WhatsApp Template Name <span className="normal-case text-[#BDBDBD]">(Meta-approved; for cold sends)</span></label>
-          <input className={`${input} w-full`} value={draft.waTemplateName ?? ""} onChange={(e) => setDraft({ ...draft, waTemplateName: e.target.value })} placeholder="e.g. hni_reminder_v1" /></div>
+          <input list="wa-approved-templates" className={`${input} w-full`} value={draft.waTemplateName ?? ""} onChange={(e) => setDraft({ ...draft, waTemplateName: e.target.value })} placeholder="e.g. hni_reminder_v1" />
+          <datalist id="wa-approved-templates">{templateVars.map((t) => <option key={`${t.name}-${t.language}`} value={t.name} />)}</datalist></div>
         <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">WhatsApp Template Language</label>
           <input className={`${input} w-full`} value={draft.waLanguage ?? ""} onChange={(e) => setDraft({ ...draft, waLanguage: e.target.value })} placeholder="e.g. en / en_US / hi" /></div>
       </div>
-      {/* WhatsApp template variables — map each {{n}} to a farmer field (order matters). */}
+      {/* WhatsApp template variables — map each {{n}} to a farmer field (order matters). The label to the
+          right of {{n}} is the template's own variable name (from Settings), so you know what to map. */}
       <div>
-        <label className="text-[10px] font-bold uppercase text-[#9E9E9E]">WhatsApp template variables <span className="normal-case text-[#BDBDBD]">— fills {"{{1}}"}, {"{{2}}"}… in order</span></label>
+        <label className="text-[10px] font-bold uppercase text-[#9E9E9E]">WhatsApp template variables <span className="normal-case text-[#BDBDBD]">— map each {"{{n}}"} to a farmer field</span></label>
+        {matchedTpl && (
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[#616161]">
+            <span>Template <b className="font-mono">{matchedTpl.name}</b> has {tplLabels.length} variable{tplLabels.length === 1 ? "" : "s"}.</span>
+            {(draft.waVariables ?? []).length !== tplLabels.length && (
+              <button type="button"
+                onClick={() => setDraft({ ...draft, waVariables: Array.from({ length: tplLabels.length }, (_, i) => (draft.waVariables ?? [])[i] ?? WA_VAR_TOKENS[0].key) })}
+                className="rounded-[8px] border border-[#0B8A3D] px-2 py-0.5 text-[11px] font-semibold text-[#0B8A3D] hover:bg-[#E8F5E9]">Match to template ({tplLabels.length})</button>
+            )}
+          </div>
+        )}
         <div className="mt-1 flex flex-col gap-1.5">
           {(draft.waVariables ?? []).map((tok, i) => (
             <div key={i} className="flex items-center gap-2">
               <span className="w-9 shrink-0 text-[11px] font-mono font-bold text-[#616161]">{`{{${i + 1}}}`}</span>
+              {tplLabels[i] && <span className="shrink-0 rounded-full bg-[#F1F8F1] px-2 py-0.5 text-[10.5px] font-semibold text-[#2E7D32]" title="This template slot's name (from Settings)">{tplLabels[i]}</span>}
+              <span className="shrink-0 text-[11px] text-[#BDBDBD]">→</span>
               <select className={`${input} flex-1`} value={tok}
                 onChange={(e) => setDraft({ ...draft, waVariables: (draft.waVariables ?? []).map((x, j) => (j === i ? e.target.value : x)) })}>
                 {WA_VAR_TOKENS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
@@ -127,7 +148,7 @@ function CommPlanForm({ draft, setDraft }: { draft: CommTemplateVM; setDraft: (t
 
 const EMPTY_PLAN: CommTemplateVM = { id: 0, name: "", language: "hi", promoType: "General", segment: "REGULAR", segments: [], priority: 5, medium: "WhatsApp", offer: "", timingLabel: "", template: "", dltTemplateId: "", waTemplateName: "", waLanguage: "", waVariables: [] };
 
-function CommPlanTab({ templates }: { templates: CommTemplateVM[] }) {
+function CommPlanTab({ templates, templateVars }: { templates: CommTemplateVM[]; templateVars: TemplateVarHint[] }) {
   const [rows, setRows] = useState(templates);
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState<CommTemplateVM | null>(null);
@@ -200,7 +221,7 @@ function CommPlanTab({ templates }: { templates: CommTemplateVM[] }) {
       {adding && draft && (
         <div className={`${CARD} border-l-4 border-l-[#2E7D32] p-[18px]`}>
           <div className="mb-2 text-[13px] font-bold text-[#1A1C1A]">New comm plan</div>
-          <CommPlanForm draft={draft} setDraft={setDraft} />
+          <CommPlanForm draft={draft} setDraft={setDraft} templateVars={templateVars} />
           {err && <div className="mt-2 text-[12px] text-[#C62828]">{err}</div>}
           <div className="mt-3 flex gap-2">
             <button type="button" onClick={save} disabled={saving || !draft.name.trim()} className="rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Create plan"}</button>
@@ -234,7 +255,7 @@ function CommPlanTab({ templates }: { templates: CommTemplateVM[] }) {
             </div>
             {isEditing && draft ? (
               <>
-                <CommPlanForm draft={draft} setDraft={setDraft} />
+                <CommPlanForm draft={draft} setDraft={setDraft} templateVars={templateVars} />
                 {err && <div className="mt-2 text-[12px] text-[#C62828]">{err}</div>}
                 <button type="button" onClick={save} disabled={saving || !draft.name.trim()} className="mt-3 self-start rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>
               </>
@@ -1322,8 +1343,8 @@ function TrackerBody({ t }: { t: CampaignTracker }) {
 }
 
 /* ══════════════════ Shell ══════════════════ */
-export function CampaignsScreen({ templates, campaigns, stores: _stores, projects, canManage, initialProjectId, crops = [] }: {
-  templates: CommTemplateVM[]; campaigns: CampaignListItem[]; stores: StoreLite[]; projects: ProjectVM[]; canManage: boolean; initialProjectId?: number; crops?: CropOption[];
+export function CampaignsScreen({ templates, campaigns, stores: _stores, projects, canManage, initialProjectId, crops = [], templateVars = [] }: {
+  templates: CommTemplateVM[]; campaigns: CampaignListItem[]; stores: StoreLite[]; projects: ProjectVM[]; canManage: boolean; initialProjectId?: number; crops?: CropOption[]; templateVars?: TemplateVarHint[];
 }) {
   const [tab, setTab] = useState<"comms" | "campaigns">("campaigns");
   // Officers/RMs get the scoped campaign view only; the comm-plan config is central.
@@ -1343,7 +1364,7 @@ export function CampaignsScreen({ templates, campaigns, stores: _stores, project
           ))}
         </div>
       )}
-      {tab === "comms" && canManage && <CommPlanTab templates={templates} />}
+      {tab === "comms" && canManage && <CommPlanTab templates={templates} templateVars={templateVars} />}
       {tab === "campaigns" && <CampaignsTab campaigns={campaigns} projects={projects} canManage={canManage} initialProjectId={initialProjectId} commPlanNames={[...new Set(templates.map((t) => t.name).filter(Boolean))]} templates={templates} crops={crops} />}
     </div>
   );

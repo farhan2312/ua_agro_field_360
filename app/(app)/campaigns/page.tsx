@@ -4,9 +4,10 @@ import { canAccess } from "@/lib/roles";
 import { canManage } from "@/lib/scope";
 import { prisma } from "@/lib/prisma";
 import { listCampaigns, listProjects, getCropOptions, type CampaignListItem, type ProjectVM } from "@/app/actions/campaigns";
+import { listTemplates } from "@/app/actions/whatsapp-templates";
 import type { CropOption } from "@/components/campaigns/CampaignsScreen";
 import { DEFAULT_COMM_TEMPLATES } from "@/lib/campaign-segments";
-import { CampaignsScreen, type CommTemplateVM, type StoreLite } from "@/components/campaigns/CampaignsScreen";
+import { CampaignsScreen, type CommTemplateVM, type StoreLite, type TemplateVarHint } from "@/components/campaigns/CampaignsScreen";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +25,7 @@ export default async function CampaignsPage({ searchParams }: { searchParams?: {
   let stores: StoreLite[] = [];
   let projects: ProjectVM[] = [];
   let crops: CropOption[] = [];
+  let templateVars: TemplateVarHint[] = [];
   try {
     if ((await prisma.commTemplate.count()) === 0) {
       await prisma.commTemplate.createMany({ data: DEFAULT_COMM_TEMPLATES, skipDuplicates: true });
@@ -49,6 +51,19 @@ export default async function CampaignsPage({ searchParams }: { searchParams?: {
     // DB unavailable — render an empty shell.
   }
 
+  // Approved-template variable names → let the comm-plan editor label each {{n}} slot. Admin-only and
+  // best-effort: a slow/failed Meta API call must never block the campaigns page.
+  if (manage) {
+    try {
+      const t = await listTemplates();
+      if (t.ok && t.templates) {
+        templateVars = t.templates
+          .filter((x) => x.status === "APPROVED")
+          .map((x) => ({ name: x.name, language: x.language, labels: x.varLabels ?? [] }));
+      }
+    } catch { /* ignore — no hints */ }
+  }
+
   return (
     <CampaignsScreen
       templates={templates}
@@ -58,6 +73,7 @@ export default async function CampaignsPage({ searchParams }: { searchParams?: {
       canManage={manage}
       initialProjectId={initialProjectId}
       crops={crops}
+      templateVars={templateVars}
     />
   );
 }

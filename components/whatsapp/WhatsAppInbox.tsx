@@ -274,10 +274,18 @@ function Composer({ thread, quickReplies, templates, onSent, onManageQuickReplie
               </select>
               {selTpl && selTpl.varCount > 0 && (
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {Array.from({ length: selTpl.varCount }).map((_, i) => (
-                    <input key={i} value={params[i] ?? ""} onChange={(e) => setParams((p) => { const n = [...p]; n[i] = e.target.value; return n; })}
-                      placeholder={`{{${i + 1}}}`} className={INP} />
-                  ))}
+                  {Array.from({ length: selTpl.varCount }).map((_, i) => {
+                    const label = selTpl.labels?.[i]?.trim() || `Variable ${i + 1}`;
+                    return (
+                      <div key={i}>
+                        <label className="mb-0.5 block text-[10px] font-bold uppercase tracking-[0.3px] text-[#9E9E9E]">
+                          <span className="mr-1 font-mono text-[#BDBDBD]">{`{{${i + 1}}}`}</span>{label}
+                        </label>
+                        <input value={params[i] ?? ""} onChange={(e) => setParams((p) => { const n = [...p]; n[i] = e.target.value; return n; })}
+                          placeholder={label} className={`${INP} w-full`} />
+                      </div>
+                    );
+                  })}
                 </div>
               )}
               {selTpl && (

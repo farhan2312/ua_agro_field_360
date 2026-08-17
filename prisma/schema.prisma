@@ -681,6 +681,19 @@ model WhatsAppMessage {
   @@index([waMessageId])
 }
 
+/// Friendly names for a Meta template's positional variables. Meta only stores {{1}},{{2}}… — this
+/// local table remembers what each slot means ("Farmer name", "Coupon code") so the send UIs can label
+/// the inputs instead of showing {{1}}. Keyed by (name, language). Absent rows fall back to preset guesses.
+model WaTemplateVar {
+  id        Int      @id @default(autoincrement())
+  name      String // Meta template name
+  language  String   @default("en")
+  labels    String[] @default([]) // ordered friendly labels for {{1}},{{2}}…
+  updatedAt DateTime @updatedAt
+
+  @@unique([name, language])
+}
+
 // A Visit doubles as the per-farmer visit log entry and the Visit Repository record.
 model Visit {
   id          Int         @id @default(autoincrement())

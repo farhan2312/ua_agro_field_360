@@ -177,6 +177,7 @@ export interface WaTemplate {
   status: string;   // APPROVED | PENDING | REJECTED | ...
   body: string;     // BODY component text
   rejectedReason?: string;
+  varLabels?: string[]; // friendly names for {{1}},{{2}}… (portal-side; not stored by Meta)
 }
 
 /** Pull one field out of a raw Graph error body into a readable message. */

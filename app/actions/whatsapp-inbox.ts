@@ -7,6 +7,7 @@ import { getRole } from "@/lib/session";
 import { getActor } from "@/lib/scope";
 import { sendWhatsApp, waListTemplates } from "@/lib/whatsapp";
 import { countVars } from "@/lib/wa-template-presets";
+import { resolveVarLabels } from "@/lib/wa-template-vars";
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
@@ -183,11 +184,16 @@ export async function deleteQuickReply(id: number): Promise<{ ok: boolean }> {
   return { ok: true };
 }
 
-export interface ReplyTemplate { name: string; language: string; body: string; varCount: number }
+export interface ReplyTemplate { name: string; language: string; body: string; varCount: number; labels: string[] }
 /** Approved WhatsApp templates available for out-of-window replies. */
 export async function getApprovedTemplates(): Promise<ReplyTemplate[]> {
   if (!(await admin())) return [];
   const r = await waListTemplates();
   if (!r.ok || !r.templates) return [];
-  return r.templates.filter((t) => t.status === "APPROVED").map((t) => ({ name: t.name, language: t.language, body: t.body, varCount: countVars(t.body) }));
+  const approved = r.templates.filter((t) => t.status === "APPROVED");
+  const labels = await resolveVarLabels(approved.map((t) => ({ name: t.name, language: t.language, body: t.body })));
+  return approved.map((t) => ({
+    name: t.name, language: t.language, body: t.body, varCount: countVars(t.body),
+    labels: labels.get(`${t.name}||${t.language}`) ?? [],
+  }));
 }

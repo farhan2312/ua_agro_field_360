@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { listTemplates, createTemplate, deleteTemplate, type WaTemplate } from "@/app/actions/whatsapp-templates";
+import { listTemplates, createTemplate, deleteTemplate, saveTemplateVarLabels, type WaTemplate } from "@/app/actions/whatsapp-templates";
 import { useConfirm } from "@/components/ConfirmDialog";
-import { WA_PRESETS, fillPreview, countVars, type PresetLang } from "@/lib/wa-template-presets";
+import { WA_PRESETS, fillPreview, countVars, guessVarLabels, type PresetLang } from "@/lib/wa-template-presets";
 
 const CATEGORIES = ["MARKETING", "UTILITY", "AUTHENTICATION"];
 const LANGS = ["en", "en_US", "hi", "en_GB"];
@@ -32,6 +32,7 @@ export function WhatsAppTemplatesCard({ initial }: {
   const [category, setCategory] = useState("MARKETING");
   const [body, setBody] = useState("");
   const [examples, setExamples] = useState("");
+  const [varNames, setVarNames] = useState<string[]>([]); // friendly names for {{1}},{{2}}… (portal-only)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, start] = useTransition();
   const { confirm, dialog } = useConfirm();
@@ -50,6 +51,7 @@ export function WhatsAppTemplatesCard({ initial }: {
     setCategory(preset.category);
     setLanguage(lang === "hi" ? "hi" : "en");
     setName(`${preset.key}_${lang}`);
+    setVarNames(preset.vars); // prefill the friendly variable names from the preset
     setMsg(null);
   };
 
@@ -61,10 +63,14 @@ export function WhatsAppTemplatesCard({ initial }: {
   const submit = () => {
     setMsg(null);
     start(async () => {
-      const r = await createTemplate({ name, language, category, body, examples: examples.split(",").map((s) => s.trim()).filter(Boolean) });
+      const r = await createTemplate({
+        name, language, category, body,
+        examples: examples.split(",").map((s) => s.trim()).filter(Boolean),
+        varLabels: Array.from({ length: varCount }, (_, i) => (varNames[i] ?? "").trim()),
+      });
       if (!r.ok) { setMsg({ ok: false, text: r.error ?? "Failed." }); return; }
       setMsg({ ok: true, text: `Submitted “${name.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_")}” — status ${r.status ?? "PENDING"}. Meta reviews it (usually minutes–hours).` });
-      setName(""); setBody(""); setExamples("");
+      setName(""); setBody(""); setExamples(""); setVarNames([]);
       const l = await listTemplates(); if (l.ok && l.templates) setRows(l.templates);
     });
   };
@@ -139,6 +145,16 @@ export function WhatsAppTemplatesCard({ initial }: {
               <>
                 <label className="mt-2 block text-[10px] font-bold uppercase text-[#9E9E9E]">Example values for {"{{1}}"}…{`{{${varCount}}}`} (comma-separated) — Meta needs these to review</label>
                 <input className={`${inputCls} mt-1`} placeholder="Ramesh, Wheat" value={examples} onChange={(e) => setExamples(e.target.value)} />
+                <label className="mt-3 block text-[10px] font-bold uppercase text-[#9E9E9E]">Variable names <span className="normal-case text-[#BDBDBD]">— what each slot means; shown in the send screens, not sent to Meta</span></label>
+                <div className="mt-1 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                  {Array.from({ length: varCount }).map((_, i) => (
+                    <div key={i} className="flex items-center gap-1.5">
+                      <span className="w-9 shrink-0 font-mono text-[11px] font-bold text-[#616161]">{`{{${i + 1}}}`}</span>
+                      <input className={inputCls} placeholder={`e.g. Farmer name`} value={varNames[i] ?? ""}
+                        onChange={(e) => setVarNames((v) => { const n = [...v]; n[i] = e.target.value; return n; })} />
+                    </div>
+                  ))}
+                </div>
               </>
             )}
             {/* Live preview with the example values filled in */}
@@ -171,25 +187,73 @@ export function WhatsAppTemplatesCard({ initial }: {
             <div className="mt-2 rounded-[10px] bg-[#FAFBFA] px-3 py-6 text-center text-[12.5px] text-[#9E9E9E]">No templates yet — submit one above.</div>
           ) : (
             <div className="mt-2 flex flex-col gap-2">
-              {rows.map((t) => {
-                const st = STATUS_STYLE[t.status] ?? { bg: "#F5F5F5", c: "#616161" };
-                return (
-                  <div key={`${t.name}-${t.language}`} className="rounded-[10px] border border-[#F0F0F0] px-3.5 py-2.5">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-mono text-[12.5px] font-bold text-[#1A1C1A]">{t.name}</span>
-                      <span className="rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: st.bg, color: st.c }}>{t.status}</span>
-                      <span className="rounded-full bg-[#F5F7F5] px-2 py-0.5 text-[10px] font-semibold text-[#616161]">{t.category}</span>
-                      <span className="text-[10.5px] text-[#9E9E9E]">{t.language}</span>
-                      <button type="button" onClick={() => remove(t)} className="ml-auto text-[11.5px] font-semibold text-[#C62828] hover:underline">Delete</button>
-                    </div>
-                    {t.body && <div className="mt-1 text-[11.5px] text-[#757575]">{t.body}</div>}
-                    {t.rejectedReason && <div className="mt-1 text-[11px] font-semibold text-[#C62828]">Rejected: {t.rejectedReason}</div>}
-                  </div>
-                );
-              })}
+              {rows.map((t) => <TemplateRow key={`${t.name}-${t.language}`} t={t} onRemove={remove} />)}
             </div>
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+/** One template row — shows status/body plus the friendly variable names, with an inline rename editor. */
+function TemplateRow({ t, onRemove }: { t: WaTemplate; onRemove: (t: WaTemplate) => void }) {
+  const st = STATUS_STYLE[t.status] ?? { bg: "#F5F5F5", c: "#616161" };
+  const varCount = countVars(t.body);
+  const seed = () => Array.from({ length: varCount }, (_, i) => (t.varLabels?.[i]?.trim() || guessVarLabels(t.name, t.body)[i] || ""));
+  const [editing, setEditing] = useState(false);
+  const [labels, setLabels] = useState<string[]>(seed);
+  const [saved, setSaved] = useState(false);
+  const [busy, start] = useTransition();
+
+  const save = () => start(async () => {
+    const r = await saveTemplateVarLabels({ name: t.name, language: t.language, labels });
+    if (r.ok) { setSaved(true); setEditing(false); }
+  });
+
+  return (
+    <div className="rounded-[10px] border border-[#F0F0F0] px-3.5 py-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-mono text-[12.5px] font-bold text-[#1A1C1A]">{t.name}</span>
+        <span className="rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: st.bg, color: st.c }}>{t.status}</span>
+        <span className="rounded-full bg-[#F5F7F5] px-2 py-0.5 text-[10px] font-semibold text-[#616161]">{t.category}</span>
+        <span className="text-[10.5px] text-[#9E9E9E]">{t.language}</span>
+        <button type="button" onClick={() => onRemove(t)} className="ml-auto text-[11.5px] font-semibold text-[#C62828] hover:underline">Delete</button>
+      </div>
+      {t.body && <div className="mt-1 text-[11.5px] text-[#757575]">{t.body}</div>}
+      {t.rejectedReason && <div className="mt-1 text-[11px] font-semibold text-[#C62828]">Rejected: {t.rejectedReason}</div>}
+
+      {varCount > 0 && (
+        <div className="mt-1.5">
+          {!editing ? (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {Array.from({ length: varCount }).map((_, i) => (
+                <span key={i} className="rounded-full bg-[#F1F8F1] px-2 py-0.5 text-[10px] font-semibold text-[#2E7D32]">
+                  <span className="font-mono text-[#9E9E9E]">{`{{${i + 1}}}`}</span> {labels[i]?.trim() || `Variable ${i + 1}`}
+                </span>
+              ))}
+              <button type="button" onClick={() => { setSaved(false); setEditing(true); }} className="text-[11px] font-semibold text-[#0B8A3D] hover:underline">✎ Rename variables</button>
+              {saved && <span className="text-[10.5px] font-semibold text-[#2E7D32]">Saved ✓</span>}
+            </div>
+          ) : (
+            <div className="rounded-[8px] border border-[#ECEFEC] bg-[#FAFBFA] p-2">
+              <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                {Array.from({ length: varCount }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-1.5">
+                    <span className="w-9 shrink-0 font-mono text-[11px] font-bold text-[#616161]">{`{{${i + 1}}}`}</span>
+                    <input className="w-full rounded-[8px] border border-[#E0E0E0] px-2.5 py-1.5 text-[12px] outline-none focus:border-[#0B8A3D]"
+                      placeholder={`Variable ${i + 1}`} value={labels[i] ?? ""}
+                      onChange={(e) => setLabels((v) => { const n = [...v]; n[i] = e.target.value; return n; })} />
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 flex gap-2">
+                <button type="button" onClick={save} disabled={busy} className="rounded-[8px] bg-[#0B8A3D] px-3 py-1.5 text-[12px] font-bold text-white disabled:opacity-50">{busy ? "Saving…" : "Save names"}</button>
+                <button type="button" onClick={() => { setLabels(seed()); setEditing(false); }} className="rounded-[8px] border border-[#E0E0E0] px-3 py-1.5 text-[12px] font-semibold text-[#616161]">Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

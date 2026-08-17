@@ -145,3 +145,18 @@ export function fillPreview(body: string, examples: string[]): string {
 export function countVars(body: string): number {
   return new Set((body.match(/\{\{\s*(\d+)\s*\}\}/g) ?? []).map((m) => m.replace(/\D/g, ""))).size;
 }
+
+/**
+ * Best-guess friendly names for a template's {{1}},{{2}}… slots, using our preset library as prior
+ * knowledge. Matches the template by name (ignoring a trailing _en/_hi language suffix) or by exact
+ * body text; falls back to generic "Variable N". Returns exactly `countVars(body)` labels. This is what
+ * lets existing (already-approved) templates show meaningful names without anyone re-entering them.
+ */
+export function guessVarLabels(name: string, body: string): string[] {
+  const n = countVars(body);
+  const key = (name || "").toLowerCase().replace(/_(en(_us|_gb)?|hi)$/i, "");
+  const byName = WA_PRESETS.find((p) => p.key === key);
+  const byBody = WA_PRESETS.find((p) => p.en.body === body || p.hi.body === body);
+  const vars = (byName ?? byBody)?.vars ?? [];
+  return Array.from({ length: n }, (_, i) => vars[i] || `Variable ${i + 1}`);
+}
