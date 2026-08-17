@@ -132,6 +132,13 @@ export async function submitVisitAction(
   const scope = await getScope(); // the filling user's store (officers/RMs are store/region scoped)
   let newVisitId: number | undefined;
 
+  // An Agri Officer with no store assigned may not log visits — every visit must belong to a store, and
+  // an officer can only file for their own. (RMs/admins pick a store on the form, so they're exempt.)
+  const resolvedStoreId = form.storeId ?? scope.storeId ?? null;
+  if (scope.role === "officer" && resolvedStoreId == null) {
+    redirect("/visits/new?error=nostore");
+  }
+
   try {
     // The store this visit is recorded against. It now comes from the mandatory Store picker on the
     // form (auto-set for single-store officers, chosen by RMs/admins). Fall back to the filler's own

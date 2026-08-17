@@ -19,6 +19,21 @@ export default async function NewVisitPage() {
   const role = await getRole();
   if (role === "central") redirect("/analytics");
 
+  // An Agri Officer with no store assigned cannot log visits — every visit must belong to a store and
+  // an officer files only for their own. Block here (the submit action guards server-side too).
+  const gate = await getScope();
+  if (gate.role === "officer" && gate.storeId == null) {
+    return (
+      <div className="mx-auto max-w-md animate-fadeUp rounded-[14px] border border-[#FFE0B2] bg-[#FFF8E1] px-6 py-10 text-center">
+        <div className="text-[34px]">🏪</div>
+        <div className="mt-2 text-[16px] font-bold text-[#8D6E00]">No store assigned</div>
+        <div className="mt-1.5 text-[13px] leading-relaxed text-[#8D6E00]">
+          You&apos;re not mapped to a store yet, so you can&apos;t log visits. Please ask an admin to assign your store, then try again.
+        </div>
+      </div>
+    );
+  }
+
   let options: WizardOptions = resolveOptions([]);
   // Geo master: distinct districts/villages actually present in the farmer book,
   // so the dropdowns reflect real operating areas (fall back to the spec lists).
@@ -30,7 +45,7 @@ export default async function NewVisitPage() {
   // get every store — a mandatory pick, so a multi-store filler can never leave the store blank.
   let stores: { id: number; name: string }[] = [];
   try {
-    const scope = await getScope();
+    const scope = gate;
     const where =
       scope.role === "officer" && scope.storeId != null
         ? { id: scope.storeId }
