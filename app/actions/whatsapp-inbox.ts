@@ -15,6 +15,7 @@ async function admin(): Promise<boolean> { return (await getRole()) === "sysadmi
 
 export interface ConversationVM {
   mobile: string;
+  waId: string | null; // full international number (country code + number)
   name: string | null;
   farmerId: number | null;
   farmerName: string | null;
@@ -41,7 +42,7 @@ export async function listConversations(filter: "all" | "unread" | "unmatched" =
     where.OR = [
       { name: { contains: term, mode: "insensitive" } },
       { lastMessage: { contains: term, mode: "insensitive" } },
-      ...(digits ? [{ mobile: { contains: digits } }] as Prisma.WhatsAppOptInWhereInput[] : []),
+      ...(digits ? [{ mobile: { contains: digits } }, { waId: { contains: digits } }] as Prisma.WhatsAppOptInWhereInput[] : []),
     ];
   }
 
@@ -51,7 +52,7 @@ export async function listConversations(filter: "all" | "unread" | "unmatched" =
   const now = Date.now();
 
   const conversations: ConversationVM[] = rows.map((r) => ({
-    mobile: r.mobile, name: r.name, farmerId: r.farmerId, farmerName: r.farmerId ? (farmers.get(r.farmerId) ?? null) : null,
+    mobile: r.mobile, waId: r.waId ?? null, name: r.name, farmerId: r.farmerId, farmerName: r.farmerId ? (farmers.get(r.farmerId) ?? null) : null,
     lastMessage: r.lastMessage, lastMessageAt: iso(r.lastMessageAt), lastDirection: r.lastDirection,
     unreadCount: r.unreadCount, messageCount: r.messageCount, optInAt: iso(r.optInAt),
     within24h: !!r.lastInboundAt && now - r.lastInboundAt.getTime() < WINDOW_MS,
@@ -70,7 +71,7 @@ export interface ThreadMessage {
   sentByName: string | null; at: string;
 }
 export interface ThreadVM {
-  mobile: string; name: string | null; farmerId: number | null; farmerName: string | null;
+  mobile: string; waId: string | null; name: string | null; farmerId: number | null; farmerName: string | null;
   optInAt: string | null; within24h: boolean; firstMessage: string | null;
   messages: ThreadMessage[];
 }
@@ -90,7 +91,7 @@ export async function getThread(mobile: string): Promise<ThreadVM | null> {
   revalidatePath("/whatsapp");
 
   return {
-    mobile: m, name: header.name, farmerId: header.farmerId, farmerName,
+    mobile: m, waId: header.waId ?? null, name: header.name, farmerId: header.farmerId, farmerName,
     optInAt: iso(header.optInAt),
     within24h: !!header.lastInboundAt && Date.now() - header.lastInboundAt.getTime() < WINDOW_MS,
     firstMessage: header.firstMessage,

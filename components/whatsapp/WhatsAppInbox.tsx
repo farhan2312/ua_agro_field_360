@@ -15,6 +15,12 @@ import {
 type Filter = "all" | "unread" | "unmatched";
 const DAY = 86_400_000;
 
+/** Full international number (waId) as +<code><number>; falls back to the 10-digit key. */
+const phoneOf = (c: { waId?: string | null; mobile: string }) => {
+  const full = (c.waId ?? "").replace(/\D/g, "");
+  return full ? `+${full}` : c.mobile;
+};
+
 const relTime = (iso: string | null): string => {
   if (!iso) return "";
   const d = Date.now() - new Date(iso).getTime();
@@ -113,7 +119,8 @@ export function WhatsAppInbox({ initial }: { initial: InboxData | null }) {
 }
 
 function ConvRow({ c, active, onClick }: { c: ConversationVM; active: boolean; onClick: () => void }) {
-  const title = c.name || c.mobile;
+  const phone = phoneOf(c);
+  const title = c.name || phone;
   return (
     <button type="button" onClick={onClick}
       className="flex w-full items-center gap-2.5 border-b border-[#F7F7F7] px-3 py-2.5 text-left hover:bg-[#FAFBFA]"
@@ -129,7 +136,7 @@ function ConvRow({ c, active, onClick }: { c: ConversationVM; active: boolean; o
           <span className="min-w-0 flex-1 truncate text-[11.5px] text-[#757575]">{c.lastDirection === "OUT" ? "You: " : ""}{c.lastMessage || "—"}</span>
           {c.unreadCount > 0 && <span className="shrink-0 rounded-full bg-[#25D366] px-1.5 py-0.5 text-[9px] font-bold text-white">{c.unreadCount}</span>}
         </div>
-        <div className="mt-0.5 text-[10px] text-[#BDBDBD]">{c.mobile}{c.farmerId ? " · farmer" : " · not a farmer"}</div>
+        <div className="mt-0.5 text-[10px] text-[#BDBDBD]">{phone}{c.farmerId ? " · farmer" : " · not a farmer"}</div>
       </div>
     </button>
   );
@@ -145,11 +152,11 @@ function ThreadView({ thread, quickReplies, templates, onBack, onSent, onManageQ
     <>
       <div className="flex items-center gap-2.5 border-b border-[#E7E7E7] bg-white px-3.5 py-2.5">
         <button type="button" onClick={onBack} className="sm:hidden text-[16px] text-[#616161]">←</button>
-        <div className="grid h-9 w-9 place-items-center rounded-full bg-[#25D366]/15 text-[12px] font-bold text-[#0B8A3D]">{initials(thread.name || thread.mobile)}</div>
+        <div className="grid h-9 w-9 place-items-center rounded-full bg-[#25D366]/15 text-[12px] font-bold text-[#0B8A3D]">{initials(thread.name || phoneOf(thread))}</div>
         <div className="min-w-0">
-          <div className="text-[13.5px] font-bold text-[#1A1C1A]">{thread.name || thread.mobile}</div>
+          <div className="text-[13.5px] font-bold text-[#1A1C1A]">{thread.name || phoneOf(thread)}</div>
           <div className="text-[11px] text-[#9E9E9E]">
-            {thread.mobile}
+            {phoneOf(thread)}
             {thread.farmerId ? <> · <Link href={`/farmers/${thread.farmerId}`} className="font-semibold text-[#1565C0] hover:underline">{thread.farmerName || "View farmer"}</Link></> : " · not a farmer"}
           </div>
         </div>
