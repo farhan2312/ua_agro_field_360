@@ -5,6 +5,11 @@ import { listOptIns, generateOptInQr, saveOptInQrConfig, type OptInRow } from "@
 
 const DEFAULT_MSG = "Hi UA Agro, I'd like to receive product updates & offers on WhatsApp.";
 const fmt = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-GB", { day: "numeric", month: "short" }); };
+/** Show the full international number (waId) with a leading +; fall back to the 10-digit key. */
+const fmtPhone = (r: { waId: string | null; mobile: string }) => {
+  const full = (r.waId ?? "").replace(/\D/g, "");
+  return full ? `+${full}` : r.mobile;
+};
 
 /**
  * Settings → WhatsApp opt-ins. Two halves:
@@ -119,7 +124,7 @@ export function WhatsAppOptInsCard({ initial, qrConfig }: { initial: { total: nu
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id} className="border-b border-[#F6F6F6]">
-                  <td className="px-3 py-2 font-mono font-semibold text-[#1A1C1A]">{r.mobile}</td>
+                  <td className="px-3 py-2 font-mono font-semibold text-[#1A1C1A]">{fmtPhone(r)}</td>
                   <td className="py-2 text-[#424242]">{r.farmerName || r.name || "—"}</td>
                   <td className="py-2">
                     {r.farmerId

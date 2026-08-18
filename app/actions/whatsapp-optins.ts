@@ -12,6 +12,7 @@ async function adminOnly(): Promise<boolean> {
 export interface OptInRow {
   id: number;
   mobile: string;
+  waId: string | null; // full international number (country code + number) as Meta reports it
   name: string;
   farmerId: number | null;
   farmerName: string;
@@ -25,8 +26,13 @@ export interface OptInRow {
 export async function listOptIns(q?: string): Promise<{ total: number; rows: OptInRow[] }> {
   if (!(await adminOnly())) return { total: 0, rows: [] };
   const term = (q ?? "").trim();
+  const digits = term.replace(/\D/g, "");
   const where = term
-    ? { OR: [{ mobile: { contains: term.replace(/\D/g, "") || term } }, { name: { contains: term, mode: "insensitive" as const } }] }
+    ? { OR: [
+        { mobile: { contains: digits || term } },
+        ...(digits ? [{ waId: { contains: digits } }] : []),
+        { name: { contains: term, mode: "insensitive" as const } },
+      ] }
     : {};
   const [total, rows] = await Promise.all([
     prisma.whatsAppOptIn.count(),
@@ -39,7 +45,7 @@ export async function listOptIns(q?: string): Promise<{ total: number; rows: Opt
   return {
     total,
     rows: rows.map((r) => ({
-      id: r.id, mobile: r.mobile, name: r.name ?? "", farmerId: r.farmerId,
+      id: r.id, mobile: r.mobile, waId: r.waId ?? null, name: r.name ?? "", farmerId: r.farmerId,
       farmerName: r.farmerId ? farmers.get(r.farmerId) ?? "" : "",
       lastMessage: r.lastMessage ?? "", messageCount: r.messageCount,
       optInAt: r.optInAt.toISOString(), lastMessageAt: r.lastMessageAt.toISOString(),
