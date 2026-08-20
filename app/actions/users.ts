@@ -99,7 +99,7 @@ export interface UserFormInput {
 /** Create a login-ready account (approved, forced password change on first login). */
 export async function createUserAction(
   input: UserFormInput,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; id?: number; error?: string }> {
   await requireAdmin();
   const code = input.employeeCode.trim().toUpperCase();
   const name = input.name.trim();
@@ -113,7 +113,7 @@ export async function createUserAction(
     if (clash) return { ok: false, error: `Employee code ${code} already exists.` };
     const [gradA, gradB] = ROLE_GRAD[key];
     const passwordHash = await bcrypt.hash(input.password.trim() || mobile || "uaagro@123", 10);
-    await prisma.user.create({
+    const created = await prisma.user.create({
       data: {
         employeeCode: code,
         name,
@@ -132,9 +132,10 @@ export async function createUserAction(
         source: "REAL",
         lastActive: "Just added",
       },
+      select: { id: true },
     });
     revalidatePath("/users");
-    return { ok: true };
+    return { ok: true, id: created.id };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Create failed" };
   }

@@ -409,16 +409,32 @@ async function memberScopeWhere(): Promise<Prisma.CampaignMemberWhereInput | nul
   const { role, storeId, zone } = await getScope();
   if (role === "officer") return storeId == null ? "none" : { storeId };
   if (role === "regional") return zone == null ? "none" : { zone };
-  return null; // central / sysadmin
+  return null; // central / sysadmin / campaigner (campaigner is gated at the campaign level, see below)
+}
+
+/**
+ * Campaign ids a Campaigner is assigned to call. Returns `null` when the current user is NOT a
+ * campaigner (i.e. don't apply campaign-level gating); an array (possibly empty) when they are.
+ */
+async function campaignerAssignedIds(): Promise<number[] | null> {
+  const { role, userId } = await getScope();
+  if (role !== "campaigner") return null;
+  if (userId == null) return [];
+  const rows = await prisma.campaignCaller.findMany({ where: { userId }, select: { campaignId: true } });
+  return rows.map((r) => r.campaignId);
 }
 
 export async function listCampaigns(): Promise<CampaignListItem[]> {
+  const assigned = await campaignerAssignedIds();
+  if (assigned && assigned.length === 0) return []; // campaigner with no campaigns assigned yet
   const scope = await memberScopeWhere();
   if (scope === "none") return []; // officer/RM with no store/zone → nothing to show
   const camps = await prisma.campaign.findMany({
     orderBy: { createdAt: "desc" },
     take: 100,
-    where: scope ? { members: { some: scope } } : undefined, // only campaigns that reach my store/zone
+    where: assigned
+      ? { id: { in: assigned } } // campaigner: only the campaigns assigned to them
+      : scope ? { members: { some: scope } } : undefined, // officer/RM: campaigns that reach my store/zone
     include: { _count: { select: { members: scope ? { where: scope } : true } } }, // scoped member count
   });
   // Batch-resolve target names (loose ids — campaigns don't relation-load project/cluster).
@@ -452,6 +468,8 @@ export interface CampaignMemberVM {
   response: string | null; responseCrop: string | null; // interest outcome + the crop when OTHER_CROP
 }
 export async function getCampaignMembers(campaignId: number, limit = 1000): Promise<CampaignMemberVM[]> {
+  const assigned = await campaignerAssignedIds();
+  if (assigned && !assigned.includes(campaignId)) return []; // campaigner may only open assigned campaigns
   const scope = await memberScopeWhere();
   if (scope === "none") return [];
   const members = await prisma.campaignMember.findMany({
@@ -616,12 +634,17 @@ export async function markCampaignMember(
   memberId: number,
   patch: { mediums?: string[] | null; comment?: string | null; response?: string | null; responseCrop?: string | null },
 ): Promise<{ ok: boolean; error?: string }> {
-  const { role, storeId, zone } = await getScope();
-  const member = await prisma.campaignMember.findUnique({ where: { id: memberId }, select: { storeId: true, zone: true, group: true, mediums: true, response: true } });
+  const { role, storeId, zone, userId } = await getScope();
+  const member = await prisma.campaignMember.findUnique({ where: { id: memberId }, select: { storeId: true, zone: true, group: true, mediums: true, response: true, campaignId: true } });
   if (!member) return { ok: false, error: "Member not found." };
-  // Officers/RMs may only touch their own store's / region's members; central/sysadmin may touch any.
+  // Officers/RMs may only touch their own store's / region's members; campaigners only their assigned
+  // campaigns; central/sysadmin may touch any.
   if (role === "officer") { if (storeId == null || member.storeId !== storeId) return { ok: false, error: "This farmer isn't in your store." }; }
   else if (role === "regional") { if (zone == null || member.zone !== zone) return { ok: false, error: "This farmer isn't in your region." }; }
+  else if (role === "campaigner") {
+    const assigned = userId != null ? await prisma.campaignCaller.count({ where: { userId, campaignId: member.campaignId } }) : 0;
+    if (!assigned) return { ok: false, error: "This campaign isn't assigned to you." };
+  }
   else if (!canManage(role)) return { ok: false, error: "Not authorised." };
   if (member.group !== "TEST") return { ok: false, error: "This farmer is a control holdout — not contacted." };
 

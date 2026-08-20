@@ -19,7 +19,8 @@ export function ChangePasswordForm() {
       const res = await changePasswordAction(fd);
       if (res.error) setError(res.error);
       else {
-        router.replace("/analytics");
+        // Land on "/" and let middleware route each role home (campaigners → Campaigns, others → Analytics).
+        router.replace("/");
         router.refresh();
       }
     });

@@ -8,6 +8,12 @@ const CHANGE_PW = "/change-password";
 // Public API endpoints that external services (e.g. the Meta WhatsApp webhook) call without a session.
 const PUBLIC_PREFIXES = ["/api/whatsapp/webhook"];
 
+// Campaigners (part-time call team) are locked to the Campaigns page + the Training help + the forced
+// password change. Every other route redirects them to Campaigns.
+const CAMPAIGNER_ALLOWED = ["/campaigns", "/training", CHANGE_PW];
+const landingFor = (roleKey: string) => (roleKey === "campaigner" ? "/campaigns" : "/analytics");
+const isUnder = (pathname: string, base: string) => pathname === base || pathname.startsWith(base + "/");
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) return NextResponse.next();
@@ -23,10 +29,10 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Signed in but on an auth page → send to the app.
+  // Signed in but on an auth page → send to the app (role-aware landing).
   if (session && isPublic) {
     const url = req.nextUrl.clone();
-    url.pathname = session.mustChangePassword ? CHANGE_PW : "/analytics";
+    url.pathname = session.mustChangePassword ? CHANGE_PW : landingFor(session.roleKey);
     url.search = "";
     return NextResponse.redirect(url);
   }
@@ -35,6 +41,15 @@ export async function middleware(req: NextRequest) {
   if (session && session.mustChangePassword && pathname !== CHANGE_PW) {
     const url = req.nextUrl.clone();
     url.pathname = CHANGE_PW;
+    url.search = "";
+    return NextResponse.redirect(url);
+  }
+
+  // Campaigner lockdown — only the Campaigns page, Training help, and change-password are reachable;
+  // anything else (including "/" and /analytics) redirects to Campaigns.
+  if (session && session.roleKey === "campaigner" && !CAMPAIGNER_ALLOWED.some((p) => isUnder(pathname, p))) {
+    const url = req.nextUrl.clone();
+    url.pathname = "/campaigns";
     url.search = "";
     return NextResponse.redirect(url);
   }

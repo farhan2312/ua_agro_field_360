@@ -3,7 +3,7 @@
  * The app uses a 4-persona switcher; each persona gates which nav items & screens are visible.
  */
 
-export type RoleKey = "regional" | "officer" | "central" | "sysadmin";
+export type RoleKey = "regional" | "officer" | "central" | "sysadmin" | "campaigner";
 
 export interface Persona {
   key: RoleKey;
@@ -43,9 +43,16 @@ export const PERSONAS: Record<RoleKey, Persona> = {
     init: "VM",
     color: "linear-gradient(135deg,#E65100,#FF8F00)",
   },
+  campaigner: {
+    key: "campaigner",
+    name: "Call Team",
+    role: "Campaigner",
+    init: "CT",
+    color: "linear-gradient(135deg,#00838F,#4DD0E1)",
+  },
 };
 
-export const ROLE_ORDER: RoleKey[] = ["regional", "officer", "central", "sysadmin"];
+export const ROLE_ORDER: RoleKey[] = ["regional", "officer", "central", "sysadmin", "campaigner"];
 
 /** Display label + avatar gradient for a role (reused from the persona map). */
 export function roleLabel(key: RoleKey): string {
@@ -62,12 +69,14 @@ export const PRISMA_TO_KEY: Record<string, RoleKey> = {
   CENTRAL: "central",
   ASR: "officer",
   STORE_MANAGER: "officer",
+  CAMPAIGNER: "campaigner",
 };
 export const KEY_TO_PRISMA: Record<RoleKey, string> = {
   sysadmin: "SYSADMIN",
   regional: "REGIONAL",
   central: "CENTRAL",
   officer: "ASR",
+  campaigner: "CAMPAIGNER",
 };
 
 /** Avatar gradient stops per role (used in the Users table + new accounts). */
@@ -76,6 +85,7 @@ export const ROLE_GRAD: Record<RoleKey, [string, string]> = {
   officer: ["#1565C0", "#42A5F5"],
   central: ["#7B1FA2", "#CE93D8"],
   sysadmin: ["#E65100", "#FF8F00"],
+  campaigner: ["#00838F", "#4DD0E1"],
 };
 
 /** Roles a user may request at registration (admin is granted, not requested). */
@@ -83,14 +93,16 @@ export const REQUESTABLE_ROLES: { key: RoleKey; label: string }[] = [
   { key: "officer", label: "Agri Officer" },
   { key: "regional", label: "Regional Manager" },
   { key: "central", label: "Central Team" },
+  { key: "campaigner", label: "Campaigner (call team)" },
 ];
 
-/** Roles a System Admin may assign when creating/editing a user (all four). */
+/** Roles a System Admin may assign when creating/editing a user. */
 export const ADMIN_ROLE_CHOICES: { key: RoleKey; label: string }[] = [
   { key: "officer", label: "Agri Officer" },
   { key: "regional", label: "Regional Manager" },
   { key: "central", label: "Central Admin" },
   { key: "sysadmin", label: "System Admin" },
+  { key: "campaigner", label: "Campaigner (call team)" },
 ];
 
 /** Which views each role may access (from the showX flags in renderVals). */
@@ -119,6 +131,9 @@ export const NAV_VISIBILITY: Record<string, (r: RoleKey) => boolean> = {
 };
 
 export function canAccess(view: string, role: RoleKey): boolean {
+  // Campaigners are a locked-down call team: the Campaigns page is the ONLY app view they may reach.
+  // (The global Training/Help link is not gated through here.)
+  if (role === "campaigner") return view === "campaigns";
   const fn = NAV_VISIBILITY[view];
   return fn ? fn(role) : true;
 }
@@ -129,6 +144,7 @@ export const DASHBOARD_SUBTITLES: Record<RoleKey, string> = {
   officer: "My Territory · Sunday, June 22, 2026",
   central: "All Regions · Organization Overview",
   sysadmin: "System Administration",
+  campaigner: "Call Team",
 };
 
 /** View title + subtitle (from the titles map). Subtitles that depend on role/data

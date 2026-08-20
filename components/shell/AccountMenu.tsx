@@ -53,7 +53,7 @@ export function AccountMenu({
               <div className="px-2 pt-1.5 pb-2 text-[9.5px] font-semibold uppercase tracking-[1px] text-white/30">
                 View as role
               </div>
-              {ROLE_ORDER.map((key) => {
+              {ROLE_ORDER.filter((key) => key !== "campaigner").map((key) => {
                 const p = PERSONAS[key];
                 const active = impersonating ? key === impersonating : key === "sysadmin";
                 return (

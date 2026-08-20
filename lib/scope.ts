@@ -40,12 +40,14 @@ export function canManage(role: RoleKey): boolean {
 export type Scoped<W> = W | "none" | null;
 
 export function farmerScopeWhere(scope: Scope): Scoped<Prisma.FarmerWhereInput> {
+  if (scope.role === "campaigner") return "none"; // call team has no farmer-directory access — fail closed
   if (scope.role === "officer") return scope.storeId != null ? { storeId: scope.storeId } : "none";
   if (scope.role === "regional") return scope.zone ? { store: { zone: scope.zone } } : "none";
   return null;
 }
 
 export function storeScopeWhere(scope: Scope): Scoped<Prisma.StoreWhereInput> {
+  if (scope.role === "campaigner") return "none";
   if (scope.role === "officer") return scope.storeId != null ? { id: scope.storeId } : "none";
   if (scope.role === "regional") return scope.zone ? { zone: scope.zone } : "none";
   return null;
@@ -57,6 +59,7 @@ export function storeScopeWhere(scope: Scope): Scoped<Prisma.StoreWhereInput> {
  * still belong to the farmer's store for access purposes.
  */
 export function visitScopeWhere(scope: Scope): Scoped<Prisma.VisitWhereInput> {
+  if (scope.role === "campaigner") return "none";
   if (scope.role === "officer") {
     if (scope.storeId == null) return "none";
     return { OR: [{ storeId: scope.storeId }, { storeId: null, farmer: { storeId: scope.storeId } }] };
@@ -73,6 +76,7 @@ export function visitScopeWhere(scope: Scope): Scoped<Prisma.VisitWhereInput> {
  * so scoping keys off those columns directly. Officer → own store; RM → own zone; central/sysadmin → all.
  */
 export function ghoshtiScopeWhere(scope: Scope): Scoped<Prisma.GhoshtiWhereInput> {
+  if (scope.role === "campaigner") return "none";
   if (scope.role === "officer") return scope.storeId != null ? { storeId: scope.storeId } : "none";
   if (scope.role === "regional") return scope.zone ? { zone: scope.zone } : "none";
   return null;

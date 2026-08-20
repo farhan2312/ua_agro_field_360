@@ -20,6 +20,7 @@ enum Role {
   REGIONAL
   CENTRAL
   SYSADMIN
+  CAMPAIGNER // temp/part-time call team — campaigns page only, call-only, scoped to assigned campaigns
 }
 
 enum ProjectStatus {
@@ -378,6 +379,23 @@ model Campaign {
   members        CampaignMember[]
   phases         CampaignPhase[]
   phaseAdvances  CampaignPhaseAdvance[]
+  callers        CampaignCaller[]
+}
+
+/// Assigns a Campaigner (part-time call-team user) to a campaign. A campaigner only sees + calls the
+/// campaigns assigned to them here. Managed by the System Admin from the Users screen.
+model CampaignCaller {
+  id             Int      @id @default(autoincrement())
+  campaignId     Int
+  userId         Int // the Campaigner user
+  assignedByName String?
+  assignedByCode String?
+  createdAt      DateTime @default(now())
+  campaign       Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, userId])
+  @@index([userId])
+  @@index([campaignId])
 }
 
 /// A farmer enrolled in a campaign (test/control split + outreach log).

@@ -149,6 +149,7 @@ const whereOf = (f: WbFilters, alias = "") => Prisma.sql`WHERE ${Prisma.join(far
  */
 async function scopeFilters(f: WbFilters): Promise<WbFilters | "none"> {
   const { role, storeId, zone } = await getScope();
+  if (role === "campaigner") return "none"; // call team has no analytics access — fail closed
   if (role === "officer") return storeId == null ? "none" : { ...f, storeIds: [storeId], zones: undefined };
   // RM: force their zone; a client store outside that zone simply yields no rows (zone AND store).
   if (role === "regional") return zone == null ? "none" : { ...f, zones: [zone] };
@@ -170,6 +171,8 @@ export interface WbFacets {
 }
 export async function getWorkbenchFacets(): Promise<WbFacets> {
   const { role, storeId, zone } = await getScope();
+  if (role === "campaigner") // call team has no analytics access — fail closed
+    return { stores: [], zones: [], salesCrops: [], visitCrops: [], pests: [], problems: [], spendTiers: [], years: [], visitMinDate: null, villages: [] };
   const isOfficer = role === "officer", isRM = role === "regional";
 
   // Store dropdown: officer → only their store; RM → only their region's stores; else all.
@@ -728,6 +731,7 @@ export interface CropTrendPoint {
 export async function getCropTrend(crops: string[]): Promise<CropTrendPoint[]> {
   const safe = (crops ?? []).map((c) => (c || "").toLowerCase().replace(/[^a-z_]/g, "")).filter(Boolean);
   const { role, storeId, zone } = await getScope();
+  if (role === "campaigner") return []; // call team has no sales-trend access — fail closed
   const scopeSql: Prisma.Sql =
     role === "officer"
       ? storeId != null ? Prisma.sql`AND sl."storeId" = ${storeId}` : Prisma.sql`AND false`

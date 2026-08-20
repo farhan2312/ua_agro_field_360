@@ -20,7 +20,8 @@ export function LoginForm() {
       const res = await loginAction(fd);
       if (res.error) setError(res.error);
       else {
-        router.replace("/analytics");
+        // Land on "/" so middleware routes each role home (campaigners → Campaigns; forced resets → change-password).
+        router.replace("/");
         router.refresh();
       }
     });

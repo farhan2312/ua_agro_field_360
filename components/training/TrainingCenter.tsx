@@ -8,7 +8,7 @@ import {
 import { DeckViewer } from "./DeckViewer";
 
 const ROLE_COLORS: Record<TrainingRole, string> = {
-  officer: "#1565C0", regional: "#2E7D32", central: "#7B1FA2", sysadmin: "#E65100",
+  officer: "#1565C0", regional: "#2E7D32", central: "#7B1FA2", sysadmin: "#E65100", campaigner: "#00838F",
 };
 
 /** Screenshot with a graceful placeholder until the real image is added under /public/training. */

@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
 import { ADMIN_ROLE_CHOICES } from "@/lib/roles";
 import { createUserAction, saveUser } from "@/app/actions/users";
+import { listAssignableCampaigns, getCampaignerCampaignIds, setCampaignerCampaigns, type AssignableCampaign } from "@/app/actions/campaigners";
 import type { UserRow } from "./types";
 
 const labelCls =
@@ -34,13 +35,37 @@ export function UserFormModal({
   const [err, setErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
+  // Campaigner-only: which campaigns this call-team user is assigned to.
+  const isCampaigner = roleKey === "campaigner";
+  const [campaigns, setCampaigns] = useState<AssignableCampaign[] | null>(null);
+  const [assigned, setAssigned] = useState<Set<number>>(new Set());
+
+  // Load the assignable-campaign list (once we first need it) + this user's existing assignments.
+  useEffect(() => {
+    if (!isCampaigner) return;
+    if (campaigns === null) listAssignableCampaigns().then(setCampaigns).catch(() => setCampaigns([]));
+    if (isEdit && user) getCampaignerCampaignIds(user.id).then((ids) => setAssigned(new Set(ids))).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCampaigner]);
+
+  const toggleCampaign = (id: number) =>
+    setAssigned((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
   function submit() {
     setErr(null);
     start(async () => {
       const payload = { employeeCode, name, roleKey, mobile, workEmail, territory, active, password };
       const res = isEdit ? await saveUser({ id: user!.id, ...payload }) : await createUserAction(payload);
-      if (res.ok) onClose();
-      else setErr(res.error ?? "Something went wrong.");
+      if (!res.ok) { setErr(res.error ?? "Something went wrong."); return; }
+      // Persist campaign assignments for campaigners (create returns the new id; edit uses the row id).
+      if (isCampaigner) {
+        const uid = isEdit ? user!.id : (res as { id?: number }).id;
+        if (uid) {
+          const a = await setCampaignerCampaigns(uid, [...assigned]);
+          if (!a.ok) { setErr(a.error ?? "Saved the user, but assigning campaigns failed."); return; }
+        }
+      }
+      onClose();
     });
   }
 
@@ -119,6 +144,33 @@ export function UserFormModal({
                 : "The user is prompted to change it on first login."}
             </div>
           </div>
+
+          {isCampaigner && (
+            <div className="col-span-2">
+              <label className={labelCls}>Assigned campaigns</label>
+              <div className="rounded-[10px] border border-line bg-surface-50">
+                {campaigns === null ? (
+                  <div className="px-3 py-3 text-[12px] text-ink-muted">Loading campaigns…</div>
+                ) : campaigns.length === 0 ? (
+                  <div className="px-3 py-3 text-[12px] text-ink-muted">No campaigns yet. Create one first, then assign it here.</div>
+                ) : (
+                  <div className="max-h-[190px] overflow-y-auto p-1.5">
+                    {campaigns.map((c) => (
+                      <label key={c.id} className="flex cursor-pointer items-center gap-2.5 rounded-[8px] px-2.5 py-2 hover:bg-surface-150">
+                        <input type="checkbox" className="h-4 w-4 accent-[#00838F]" checked={assigned.has(c.id)} onChange={() => toggleCampaign(c.id)} />
+                        <span className="min-w-0 flex-1 truncate text-[13px] text-ink">{c.name}</span>
+                        <span className="shrink-0 rounded-full bg-surface-150 px-2 py-0.5 text-[10px] font-semibold uppercase text-ink-muted">{c.status}</span>
+                        <span className="shrink-0 text-[10.5px] text-ink-muted">{c.startDate} → {c.endDate}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="mt-1 text-[10.5px] text-ink-muted">
+                Campaigners can only see and call the campaigns you tick here — nothing else in the portal.
+              </div>
+            </div>
+          )}
         </div>
 
         {err && <div className="mt-3 text-[12px] text-danger">{err}</div>}

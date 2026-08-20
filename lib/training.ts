@@ -4,13 +4,14 @@
  * Each step can carry a screenshot (public/training/<file>), a tip, or a warning callout.
  */
 
-export type TrainingRole = "officer" | "regional" | "central" | "sysadmin";
+export type TrainingRole = "officer" | "regional" | "central" | "sysadmin" | "campaigner";
 
 export const ROLE_LABEL: Record<TrainingRole, string> = {
   officer: "Agri Officer",
   regional: "Regional Manager",
   central: "Central Admin",
   sysadmin: "System Admin",
+  campaigner: "Campaigner",
 };
 
 /** The role a signed-in user is, mapped from the app's RoleKey. */
@@ -61,7 +62,7 @@ export const TRAINING: TrainingTopic[] = [
     title: "Introduction to the tool",
     summary: "A short visual tour of what Kisan Sewa Kendra is, the key terms, and how it all fits together. Flip through the slides in the window, or download the deck.",
     section: "Getting Started",
-    roles: ["officer", "regional", "central", "sysadmin"],
+    roles: ["officer", "regional", "central", "sysadmin", "campaigner"],
     minutes: 5,
     steps: [],
     deck: {
@@ -92,7 +93,7 @@ export const TRAINING: TrainingTopic[] = [
     title: "Getting around the portal",
     summary: "Where the menu, page title, and the help buttons live.",
     section: "Getting Started",
-    roles: ["officer", "regional", "central", "sysadmin"],
+    roles: ["officer", "regional", "central", "sysadmin", "campaigner"],
     minutes: 3,
     steps: [
       { text: "On a computer, the menu is the sidebar on the left. On a phone, use the bar at the bottom of the screen (and the “More” button for the rest).", image: "nav.png" },
@@ -260,10 +261,10 @@ export const TRAINING: TrainingTopic[] = [
   // ─────────────────────────── Campaigns ───────────────────────────
   {
     id: "execute-campaign",
-    title: "Executing a campaign (officers & RMs)",
+    title: "Executing a campaign (calls & outreach)",
     summary: "Contact your assigned farmers and log the outcome.",
     section: "Campaigns",
-    roles: ["officer", "regional", "sysadmin"],
+    roles: ["officer", "regional", "sysadmin", "campaigner"],
     minutes: 4,
     steps: [
       { text: "Open “Campaigns”. You’ll see the campaigns assigned to your store/district and the farmers you need to reach.", image: "campaigns.png" },
