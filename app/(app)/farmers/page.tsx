@@ -128,22 +128,20 @@ export default async function FarmersPage({
         ? prisma.$queryRaw<{ crop: string; n: number }[]>(Prisma.sql`
             SELECT unnest("cropTags") crop, COUNT(*)::int n FROM "Farmer"
             WHERE "storeId" = ${scope.storeId} GROUP BY 1 ORDER BY 2 DESC LIMIT 40`).then((r) => r.map((x) => ({ crop: x.crop, count: Number(x.n) })))
-        : scope.role === "regional" && scope.zone
+        : scope.role === "regional" && scope.managedStoreIds?.length
           ? prisma.$queryRaw<{ crop: string; n: number }[]>(Prisma.sql`
-              SELECT unnest(f."cropTags") crop, COUNT(*)::int n FROM "Farmer" f
-              JOIN "Store" s ON s.id = f."storeId"
-              WHERE s."zone" = ${scope.zone} GROUP BY 1 ORDER BY 2 DESC LIMIT 40`).then((r) => r.map((x) => ({ crop: x.crop, count: Number(x.n) })))
+              SELECT unnest("cropTags") crop, COUNT(*)::int n FROM "Farmer"
+              WHERE "storeId" = ANY(${scope.managedStoreIds}) GROUP BY 1 ORDER BY 2 DESC LIMIT 40`).then((r) => r.map((x) => ({ crop: x.crop, count: Number(x.n) })))
           : getGlobalCropFacet(),
       // Target pests — same pattern.
       scope.role === "officer" && scope.storeId != null
         ? prisma.$queryRaw<{ pest: string; n: number }[]>(Prisma.sql`
             SELECT unnest("pestTags") pest, COUNT(*)::int n FROM "Farmer"
             WHERE "storeId" = ${scope.storeId} GROUP BY 1 ORDER BY 2 DESC LIMIT 60`).then((r) => r.map((x) => ({ pest: x.pest, count: Number(x.n) })))
-        : scope.role === "regional" && scope.zone
+        : scope.role === "regional" && scope.managedStoreIds?.length
           ? prisma.$queryRaw<{ pest: string; n: number }[]>(Prisma.sql`
-              SELECT unnest(f."pestTags") pest, COUNT(*)::int n FROM "Farmer" f
-              JOIN "Store" s ON s.id = f."storeId"
-              WHERE s."zone" = ${scope.zone} GROUP BY 1 ORDER BY 2 DESC LIMIT 60`).then((r) => r.map((x) => ({ pest: x.pest, count: Number(x.n) })))
+              SELECT unnest("pestTags") pest, COUNT(*)::int n FROM "Farmer"
+              WHERE "storeId" = ANY(${scope.managedStoreIds}) GROUP BY 1 ORDER BY 2 DESC LIMIT 60`).then((r) => r.map((x) => ({ pest: x.pest, count: Number(x.n) })))
           : getGlobalPestFacet(),
       // Count + first page run in the SAME round-trip as the facets (they don't depend on each other).
       prisma.farmer.count({ where: scopedWhere }),

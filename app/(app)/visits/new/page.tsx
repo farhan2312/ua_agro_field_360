@@ -49,8 +49,8 @@ export default async function NewVisitPage() {
     const where =
       scope.role === "officer" && scope.storeId != null
         ? { id: scope.storeId }
-        : scope.role !== "central" && scope.role !== "sysadmin" && scope.zone
-          ? { zone: scope.zone, status: "Active" }
+        : scope.role === "regional" && scope.managedStoreIds?.length
+          ? { id: { in: scope.managedStoreIds }, status: "Active" }
           : { status: "Active" };
     let rows = await prisma.store.findMany({ where, select: { id: true, name: true }, orderBy: { name: "asc" } });
     // Never leave a filler with an empty mandatory picker (e.g. a region with no active stores).

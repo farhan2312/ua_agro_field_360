@@ -147,23 +147,16 @@ const whereOf = (f: WbFilters, alias = "") => Prisma.sql`WHERE ${Prisma.join(far
  * whatever the client sends. Central/Sysadmin are unrestricted. "none" = a scoped user with no
  * store/region assigned (show nothing).
  */
-/** Store ids that belong to a region (RM zone). The STORE's zone is authoritative — never Farmer.zone. */
-async function storeIdsInZone(zone: string): Promise<number[]> {
-  const rows = await prisma.store.findMany({ where: { zone }, select: { id: true } });
-  return rows.map((s) => s.id);
-}
-
 async function scopeFilters(f: WbFilters): Promise<WbFilters | "none"> {
-  const { role, storeId, zone } = await getScope();
+  const { role, storeId, managedStoreIds } = await getScope();
   if (role === "campaigner") return "none"; // call team has no analytics access — fail closed
   if (role === "officer") return storeId == null ? "none" : { ...f, storeIds: [storeId], zones: undefined };
-  // RM: scope to the STORES in their region (store.zone is authoritative; Farmer.zone is unreliable —
-  // ~19% null and some disagree). A client store selection may narrow within the region, never widen.
+  // RM: scope to the STORES they manage (Store.regionalManager — authoritative; can span districts).
+  // A client store selection may narrow within that set, never widen.
   if (role === "regional") {
-    if (zone == null) return "none";
-    const regionIds = await storeIdsInZone(zone);
-    if (!regionIds.length) return "none";
-    const chosen = f.storeIds?.length ? f.storeIds.filter((id) => regionIds.includes(id)) : regionIds;
+    const own = managedStoreIds ?? [];
+    if (!own.length) return "none";
+    const chosen = f.storeIds?.length ? f.storeIds.filter((id) => own.includes(id)) : own;
     return { ...f, storeIds: chosen.length ? chosen : [-1], zones: undefined };
   }
   return f; // central / sysadmin
@@ -183,18 +176,17 @@ export interface WbFacets {
   villages: { village: string; count: number }[]; // top villages by farmer count (UPPER-TRIMMED), both lenses
 }
 export async function getWorkbenchFacets(): Promise<WbFacets> {
-  const { role, storeId, zone } = await getScope();
+  const { role, storeId, managedStoreIds } = await getScope();
   if (role === "campaigner") // call team has no analytics access — fail closed
     return { stores: [], zones: [], salesCrops: [], visitCrops: [], pests: [], problems: [], spendTiers: [], years: [], visitMinDate: null, villages: [] };
   const isOfficer = role === "officer", isRM = role === "regional";
-  // RM scope is the set of STORES in their region (store.zone authoritative). Empty region → -1 (no rows).
-  const rmStoreIds = isRM ? (zone != null ? await storeIdsInZone(zone) : []) : null;
-  const rmIds = rmStoreIds && rmStoreIds.length ? rmStoreIds : [-1];
+  // RM scope is the set of STORES they manage (Store.regionalManager). Empty → -1 (no rows).
+  const rmIds = isRM && managedStoreIds && managedStoreIds.length ? managedStoreIds : [-1];
 
-  // Store dropdown: officer → only their store; RM → only their region's stores; else all.
+  // Store dropdown: officer → only their store; RM → only the stores they manage; else all.
   const storeWhere: Prisma.StoreWhereInput = isOfficer
     ? { id: storeId ?? -1 }
-    : isRM ? (zone != null ? { zone } : { id: -1 }) : {};
+    : isRM ? { id: { in: rmIds } } : {};
   // Farmer-level scope predicate for the crop-facet COUNTS (so a scoped user doesn't see global totals).
   // Everyone is scoped by the farmer's STORE — officer→their store, RM→their region's stores.
   const fScope: Prisma.Sql = isOfficer
@@ -213,7 +205,7 @@ export async function getWorkbenchFacets(): Promise<WbFacets> {
     : Prisma.empty;
 
   const [stores, zoneRows, sc, vc, pt, pr, yr, vmin, vil] = await Promise.all([
-    prisma.store.findMany({ where: storeWhere, orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    prisma.store.findMany({ where: storeWhere, orderBy: { name: "asc" }, select: { id: true, name: true, zone: true } }),
     isOfficer || isRM
       ? Promise.resolve([] as { zone: string | null }[])
       : prisma.farmer.findMany({ where: { zone: { not: null }, source: "REAL" }, distinct: ["zone"], select: { zone: true }, orderBy: { zone: "asc" } }),
@@ -226,7 +218,10 @@ export async function getWorkbenchFacets(): Promise<WbFacets> {
     prisma.$queryRaw<{ d: string | null }[]>(Prisma.sql`SELECT to_char(MIN(v."visitedAt"), 'YYYY-MM-DD') d FROM "Visit" v JOIN "Farmer" f ON f.id = v."farmerId" WHERE v."visitedAt" IS NOT NULL AND ${vScope}`),
     prisma.$queryRaw<{ village: string; n: number }[]>(Prisma.sql`SELECT upper(btrim(village)) village, COUNT(*)::int n FROM "Farmer" WHERE source='REAL' AND village IS NOT NULL AND btrim(village) <> '' AND ${fScope} GROUP BY 1 ORDER BY 2 DESC LIMIT 2000`),
   ]);
-  const zones = isRM ? (zone != null ? [zone] : []) : isOfficer ? [] : zoneRows.map((z) => z.zone!).filter(Boolean);
+  // Zone facet: RM → the distinct districts their managed stores span (can be >1); central/sysadmin → all.
+  const zones = isRM
+    ? [...new Set(stores.map((s) => s.zone).filter((z): z is string => !!z))]
+    : isOfficer ? [] : zoneRows.map((z) => z.zone!).filter(Boolean);
   const abc = (a: string, b: string) => a.localeCompare(b); // filter option lists sorted A→Z for scan-ability
   return {
     stores: stores.map((s) => ({ id: s.id, name: shortStore(s.name) })).sort((a, b) => abc(a.name, b.name)),
@@ -747,14 +742,14 @@ export interface CropTrendPoint {
 /** Monthly purchase trend (SaleLine), role-scoped. No crop → every crop's sale lines combined. */
 export async function getCropTrend(crops: string[]): Promise<CropTrendPoint[]> {
   const safe = (crops ?? []).map((c) => (c || "").toLowerCase().replace(/[^a-z_]/g, "")).filter(Boolean);
-  const { role, storeId, zone } = await getScope();
+  const { role, storeId, managedStoreIds } = await getScope();
   if (role === "campaigner") return []; // call team has no sales-trend access — fail closed
   const scopeSql: Prisma.Sql =
     role === "officer"
       ? storeId != null ? Prisma.sql`AND sl."storeId" = ${storeId}` : Prisma.sql`AND false`
       : role === "regional"
-        ? zone != null
-          ? Prisma.sql`AND EXISTS (SELECT 1 FROM "Store" st WHERE st.id = sl."storeId" AND st."zone" = ${zone})`
+        ? managedStoreIds && managedStoreIds.length
+          ? Prisma.sql`AND sl."storeId" = ANY(${managedStoreIds})`
           : Prisma.sql`AND false`
         : Prisma.empty;
   const cropCond = safe.length ? Prisma.sql`sl."cropTag" = ANY(${safe}) AND ` : Prisma.empty;

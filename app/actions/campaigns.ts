@@ -404,11 +404,11 @@ export interface CampaignListItem {
   commPlans: string[]; // comm-plan names the campaign is tagged with
 }
 
-/** Member `where` for the current user's scope (officer→their store, RM→their zone). null = see all. */
+/** Member `where` for the current user's scope (officer→their store, RM→their managed stores). null = see all. */
 async function memberScopeWhere(): Promise<Prisma.CampaignMemberWhereInput | null | "none"> {
-  const { role, storeId, zone } = await getScope();
+  const { role, storeId, managedStoreIds } = await getScope();
   if (role === "officer") return storeId == null ? "none" : { storeId };
-  if (role === "regional") return zone == null ? "none" : { zone };
+  if (role === "regional") return managedStoreIds && managedStoreIds.length ? { storeId: { in: managedStoreIds } } : "none";
   return null; // central / sysadmin / campaigner (campaigner is gated at the campaign level, see below)
 }
 
@@ -634,13 +634,13 @@ export async function markCampaignMember(
   memberId: number,
   patch: { mediums?: string[] | null; comment?: string | null; response?: string | null; responseCrop?: string | null },
 ): Promise<{ ok: boolean; error?: string }> {
-  const { role, storeId, zone, userId } = await getScope();
+  const { role, storeId, managedStoreIds, userId } = await getScope();
   const member = await prisma.campaignMember.findUnique({ where: { id: memberId }, select: { storeId: true, zone: true, group: true, mediums: true, response: true, campaignId: true } });
   if (!member) return { ok: false, error: "Member not found." };
-  // Officers/RMs may only touch their own store's / region's members; campaigners only their assigned
-  // campaigns; central/sysadmin may touch any.
+  // Officers/RMs may only touch members in their own store / managed stores; campaigners only their
+  // assigned campaigns; central/sysadmin may touch any.
   if (role === "officer") { if (storeId == null || member.storeId !== storeId) return { ok: false, error: "This farmer isn't in your store." }; }
-  else if (role === "regional") { if (zone == null || member.zone !== zone) return { ok: false, error: "This farmer isn't in your region." }; }
+  else if (role === "regional") { if (member.storeId == null || !(managedStoreIds ?? []).includes(member.storeId)) return { ok: false, error: "This farmer isn't in a store you manage." }; }
   else if (role === "campaigner") {
     const assigned = userId != null ? await prisma.campaignCaller.count({ where: { userId, campaignId: member.campaignId } }) : 0;
     if (!assigned) return { ok: false, error: "This campaign isn't assigned to you." };

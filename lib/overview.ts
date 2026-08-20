@@ -13,20 +13,21 @@ export async function loadOverview(scope: Scope): Promise<ScopedDashboardData | 
   const isStore = scope.role === "officer";
   const isZone = scope.role === "regional";
   const { storeId, zone } = scope;
+  const rmIds = scope.managedStoreIds ?? [];
   if (isStore && storeId == null) return null;
-  if (isZone && zone == null) return null;
+  if (isZone && !rmIds.length) return null; // RM who manages no stores → Unassigned, never global data
 
-  // Scope by the STORE (authoritative), never Farmer.zone: officer → their store; RM → the stores in
-  // their region (store.zone). Farmer.zone is unreliable (~19% null and some disagree with the store).
+  // Scope by the STORE (authoritative), never Farmer.zone: officer → their store; RM → the stores they
+  // manage (Store.regionalManager — can span districts). Farmer.zone is unreliable (~19% null / disagreeing).
   const farmerWhere: Prisma.FarmerWhereInput = isStore
     ? { source: "REAL", storeId: storeId! }
     : isZone
-      ? { source: "REAL", store: { zone: zone! } }
+      ? { source: "REAL", storeId: { in: rmIds } }
       : { source: "REAL" };
   const visitWhere: Prisma.VisitWhereInput = isStore
     ? { OR: [{ storeId: storeId! }, { storeId: null, farmer: { storeId: storeId! } }] }
     : isZone
-      ? { OR: [{ store: { zone: zone! } }, { storeId: null, farmer: { store: { zone: zone! } } }] }
+      ? { OR: [{ storeId: { in: rmIds } }, { storeId: null, farmer: { storeId: { in: rmIds } } }] }
       : {};
 
   try {
@@ -42,7 +43,7 @@ export async function loadOverview(scope: Scope): Promise<ScopedDashboardData | 
         take: 5,
         include: { farmer: { select: { name: true, village: true, status: true } } },
       }),
-      isStore ? Promise.resolve(0) : prisma.store.count({ where: { source: "REAL", ...(isZone ? { zone: zone! } : {}) } }),
+      isStore ? Promise.resolve(0) : isZone ? Promise.resolve(rmIds.length) : prisma.store.count({ where: { source: "REAL" } }),
       isStore || isZone
         ? Promise.resolve(0)
         : prisma.store.findMany({ where: { source: "REAL", zone: { not: null } }, distinct: ["zone"], select: { zone: true } }).then((r) => r.length),
@@ -67,11 +68,11 @@ export async function loadOverview(scope: Scope): Promise<ScopedDashboardData | 
     const kind = isStore ? "store" : isZone ? "zone" : "global";
     return {
       kind,
-      label: isStore ? store?.name ?? `Store #${storeId}` : isZone ? zone! : "All regions",
+      label: isStore ? store?.name ?? `Store #${storeId}` : isZone ? (zone ?? "My region") : "All regions",
       sub: isStore
         ? store?.zone ?? ""
         : isZone
-          ? `${storeCount} store${storeCount === 1 ? "" : "s"} in region`
+          ? `${storeCount} store${storeCount === 1 ? "" : "s"} managed`
           : `${storeCount} stores · ${zoneCount} regions`,
       kpi: {
         farmers,

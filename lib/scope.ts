@@ -13,14 +13,31 @@ export interface Scope {
   role: RoleKey;
   userId: number | null;
   storeId: number | null; // officer's store
-  zone: string | null; // regional manager's region
+  zone: string | null; // regional manager's region label (display only — NOT the scope axis)
+  managedStoreIds: number[] | null; // RM's assigned stores (Store.regionalManager == their name); null for non-RM
+}
+
+/**
+ * The stores a Regional Manager actually manages — the STORES whose `regionalManager` is this RM (by
+ * name). This is the authoritative RM↔store link (an RM's stores can span multiple districts, and a
+ * district contains stores managed by OTHER RMs), so it — not `User.zone` — is the real scope axis.
+ */
+async function managedStoreIdsFor(name: string): Promise<number[]> {
+  const n = name.trim();
+  if (!n) return [];
+  const rows = await prisma.store.findMany({
+    where: { regionalManager: { equals: n, mode: "insensitive" } },
+    select: { id: true },
+  });
+  return rows.map((s) => s.id);
 }
 
 export async function getScope(): Promise<Scope> {
   const [role, session] = await Promise.all([getRole(), getSession()]);
-  if (!session) return { role, userId: null, storeId: null, zone: null };
-  const u = await prisma.user.findUnique({ where: { id: session.userId }, select: { storeId: true, zone: true } });
-  return { role, userId: session.userId, storeId: u?.storeId ?? null, zone: u?.zone ?? null };
+  if (!session) return { role, userId: null, storeId: null, zone: null, managedStoreIds: null };
+  const u = await prisma.user.findUnique({ where: { id: session.userId }, select: { name: true, storeId: true, zone: true } });
+  const managedStoreIds = role === "regional" ? await managedStoreIdsFor(u?.name ?? "") : null;
+  return { role, userId: session.userId, storeId: u?.storeId ?? null, zone: u?.zone ?? null, managedStoreIds };
 }
 
 /** Central team + Sysadmin may create / extend / delete projects & campaigns. */
@@ -30,26 +47,31 @@ export function canManage(role: RoleKey): boolean {
 
 /**
  * Row-level scope fragments. `null` = unrestricted (central/sysadmin); `"none"` = show
- * nothing (a scoped user with no store/region assigned — fail CLOSED, never open).
+ * nothing (a scoped user with no store assigned — fail CLOSED, never open).
  *
- * Region is taken from the STORE, never `Farmer.zone`: 23k+ farmers carry a zone that
- * disagrees with their store's, and 24k have none at all, so the store is authoritative.
- * Callers must AND these on LAST, after any user-supplied filters, so a crafted query
- * string can never widen them.
+ * Everyone is scoped by the STORE, never `Farmer.zone` (unreliable — ~19% null, some disagree). An
+ * Agri Officer → their one store; a Regional Manager → the SET of stores they manage
+ * (`scope.managedStoreIds`, from `Store.regionalManager`), which can span districts. Callers must AND
+ * these on LAST, after any user-supplied filters, so a crafted query string can never widen them.
  */
 export type Scoped<W> = W | "none" | null;
+
+/** The RM's managed-store id list, or "none" when they manage no stores (fail closed). */
+function rmStoreIds(scope: Scope): number[] | "none" {
+  return scope.managedStoreIds && scope.managedStoreIds.length ? scope.managedStoreIds : "none";
+}
 
 export function farmerScopeWhere(scope: Scope): Scoped<Prisma.FarmerWhereInput> {
   if (scope.role === "campaigner") return "none"; // call team has no farmer-directory access — fail closed
   if (scope.role === "officer") return scope.storeId != null ? { storeId: scope.storeId } : "none";
-  if (scope.role === "regional") return scope.zone ? { store: { zone: scope.zone } } : "none";
+  if (scope.role === "regional") { const ids = rmStoreIds(scope); return ids === "none" ? "none" : { storeId: { in: ids } }; }
   return null;
 }
 
 export function storeScopeWhere(scope: Scope): Scoped<Prisma.StoreWhereInput> {
   if (scope.role === "campaigner") return "none";
   if (scope.role === "officer") return scope.storeId != null ? { id: scope.storeId } : "none";
-  if (scope.role === "regional") return scope.zone ? { zone: scope.zone } : "none";
+  if (scope.role === "regional") { const ids = rmStoreIds(scope); return ids === "none" ? "none" : { id: { in: ids } }; }
   return null;
 }
 
@@ -65,20 +87,21 @@ export function visitScopeWhere(scope: Scope): Scoped<Prisma.VisitWhereInput> {
     return { OR: [{ storeId: scope.storeId }, { storeId: null, farmer: { storeId: scope.storeId } }] };
   }
   if (scope.role === "regional") {
-    if (!scope.zone) return "none";
-    return { OR: [{ store: { zone: scope.zone } }, { storeId: null, farmer: { store: { zone: scope.zone } } }] };
+    const ids = rmStoreIds(scope);
+    if (ids === "none") return "none";
+    return { OR: [{ storeId: { in: ids } }, { storeId: null, farmer: { storeId: { in: ids } } }] };
   }
   return null;
 }
 
 /**
- * Ghoshti (farmer meetup) row-level scope. Ghoshtis carry a snapshot `storeId` + `zone` (no relation),
- * so scoping keys off those columns directly. Officer → own store; RM → own zone; central/sysadmin → all.
+ * Ghoshti (farmer meetup) row-level scope. Ghoshtis carry a snapshot `storeId` (no relation), so scoping
+ * keys off that. Officer → own store; RM → their managed stores; central/sysadmin → all.
  */
 export function ghoshtiScopeWhere(scope: Scope): Scoped<Prisma.GhoshtiWhereInput> {
   if (scope.role === "campaigner") return "none";
   if (scope.role === "officer") return scope.storeId != null ? { storeId: scope.storeId } : "none";
-  if (scope.role === "regional") return scope.zone ? { zone: scope.zone } : "none";
+  if (scope.role === "regional") { const ids = rmStoreIds(scope); return ids === "none" ? "none" : { storeId: { in: ids } }; }
   return null;
 }
 

@@ -30,7 +30,7 @@ export default async function FarmerClustersPage() {
     const [cls, zoneRows, cropOpts, pestOpts, storeRows] = await Promise.all([
       listClustersWithCounts(),
       scope.role === "regional"
-        ? Promise.resolve(scope.zone ? [{ zone: scope.zone }] : [])
+        ? prisma.store.findMany({ where: scope.managedStoreIds?.length ? { id: { in: scope.managedStoreIds } } : { id: -1 }, distinct: ["zone"], select: { zone: true }, orderBy: { zone: "asc" } })
         : prisma.farmer.findMany({ where: { zone: { not: null }, source: "REAL" }, distinct: ["zone"], select: { zone: true }, orderBy: { zone: "asc" } }),
       getGlobalCropFacet(),
       getGlobalPestFacet(),

@@ -10,10 +10,11 @@ const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 const shortStore = (s?: string | null) => (s ? s.replace(/\s*\(.*?\)\s*/g, "").trim() || s : "");
 const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
 
-/** Row-level scope for actions (officer → own store, RM → district, central/admin → all). */
+/** Row-level scope for actions (officer → own store, RM → their managed stores, central/admin → all). */
 function actionScope(scope: Awaited<ReturnType<typeof getScope>>): Prisma.ActionWhereInput | "none" | null {
+  if (scope.role === "campaigner") return "none";
   if (scope.role === "officer") return scope.storeId != null ? { storeId: scope.storeId } : "none";
-  if (scope.role === "regional") return scope.zone ? { store: { zone: scope.zone } } : "none";
+  if (scope.role === "regional") return scope.managedStoreIds && scope.managedStoreIds.length ? { storeId: { in: scope.managedStoreIds } } : "none";
   return null; // central + sysadmin: all
 }
 

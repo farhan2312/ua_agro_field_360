@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getScope, getActor, canManage, ghoshtiScopeWhere, canApproveGhoshti } from "@/lib/scope";
 import { toMobile10 } from "@/lib/whatsapp";
@@ -66,13 +67,13 @@ export interface GhoshtiStoreOption {
 /** Stores this user may host a Ghoshti at (officer → own store; RM → own zone; admin → all). */
 export async function getGhoshtiStoreOptions(): Promise<{ locked: boolean; stores: GhoshtiStoreOption[] }> {
   const scope = await getScope();
-  let where: { id?: number; zone?: string } | undefined;
+  let where: Prisma.StoreWhereInput | undefined;
   if (scope.role === "officer") {
     if (scope.storeId == null) return { locked: true, stores: [] };
     where = { id: scope.storeId };
   } else if (scope.role === "regional") {
-    if (!scope.zone) return { locked: false, stores: [] };
-    where = { zone: scope.zone };
+    if (!scope.managedStoreIds?.length) return { locked: false, stores: [] };
+    where = { id: { in: scope.managedStoreIds } };
   }
   const rows = await prisma.store.findMany({
     where,
@@ -105,9 +106,9 @@ export async function createGhoshti(input: {
   const store = await prisma.store.findUnique({ where: { id: input.storeId }, select: { id: true, name: true, zone: true } });
   if (!store) return { ok: false, error: "Store not found." };
 
-  // Scope guard — a crafted storeId cannot escape the user's store/zone.
+  // Scope guard — a crafted storeId cannot escape the user's store(s).
   if (scope.role === "officer" && store.id !== scope.storeId) return { ok: false, error: "You can only host a Ghoshti at your own store." };
-  if (scope.role === "regional" && (!scope.zone || store.zone !== scope.zone)) return { ok: false, error: "You can only host a Ghoshti within your region." };
+  if (scope.role === "regional" && !(scope.managedStoreIds ?? []).includes(store.id)) return { ok: false, error: "You can only host a Ghoshti at a store you manage." };
 
   const actor = await getActor();
   // Central/Sysadmin creations are the approvers themselves → auto-approved. Officer/RM → PENDING.
