@@ -16,15 +16,17 @@ export async function loadOverview(scope: Scope): Promise<ScopedDashboardData | 
   if (isStore && storeId == null) return null;
   if (isZone && zone == null) return null;
 
+  // Scope by the STORE (authoritative), never Farmer.zone: officer → their store; RM → the stores in
+  // their region (store.zone). Farmer.zone is unreliable (~19% null and some disagree with the store).
   const farmerWhere: Prisma.FarmerWhereInput = isStore
     ? { source: "REAL", storeId: storeId! }
     : isZone
-      ? { source: "REAL", zone: zone! }
+      ? { source: "REAL", store: { zone: zone! } }
       : { source: "REAL" };
   const visitWhere: Prisma.VisitWhereInput = isStore
-    ? { storeId: storeId! }
+    ? { OR: [{ storeId: storeId! }, { storeId: null, farmer: { storeId: storeId! } }] }
     : isZone
-      ? { farmer: { zone: zone! } }
+      ? { OR: [{ store: { zone: zone! } }, { storeId: null, farmer: { store: { zone: zone! } } }] }
       : {};
 
   try {
