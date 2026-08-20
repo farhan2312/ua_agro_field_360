@@ -90,7 +90,7 @@ export function TrainingCenter({ role, topics }: { role: ViewerRole; topics: Tra
       {isAdmin && (
         <div className="mb-3 flex flex-wrap items-center gap-1.5">
           <span className="mr-1 text-[11px] font-semibold uppercase tracking-[0.4px] text-[#9E9E9E]">View as</span>
-          {(["all", "officer", "regional", "central", "sysadmin"] as const).map((r) => {
+          {(["all", "officer", "regional", "central", "sysadmin", "campaigner"] as const).map((r) => {
             const on = preview === r;
             const label = r === "all" ? "All roles" : ROLE_LABEL[r];
             const color = r === "all" ? "#424242" : ROLE_COLORS[r];
