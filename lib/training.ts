@@ -31,6 +31,13 @@ export interface TrainingDeck {
   fileLabel: string;   // download button label, e.g. "Download PowerPoint"
 }
 
+/** A how-to video with English + Hindi audio tracks (same footage, different voiceover). Paths under /public. */
+export interface TrainingVideo {
+  en: string;          // /training/video/<name>-en.mp4
+  hi: string;          // /training/video/<name>-hi.mp4
+  poster?: string;     // thumbnail shown before play (path under /public)
+}
+
 export interface TrainingTopic {
   id: string;               // url slug
   title: string;
@@ -42,6 +49,7 @@ export interface TrainingTopic {
   outcome?: string;         // "What happens next"
   related?: string[];       // topic ids
   deck?: TrainingDeck;      // when set, the topic opens a windowed slide deck instead of steps
+  video?: TrainingVideo;    // when set, a bilingual how-to video plays above the steps
 }
 
 /** Ordered sections (topics render grouped in this order). */
@@ -160,10 +168,15 @@ export const TRAINING: TrainingTopic[] = [
   {
     id: "new-visit",
     title: "Recording a new visit",
-    summary: "Log a field visit end to end in five steps.",
+    summary: "Watch the walkthrough, then follow the five steps. Log a field visit end to end.",
     section: "Field Visits",
     roles: ["officer", "regional", "sysadmin"],
     minutes: 5,
+    video: {
+      en: "/training/video/visit-form-en.mp4",
+      hi: "/training/video/visit-form-hi.mp4",
+      poster: "/training/video/visit-form-poster.png",
+    },
     steps: [
       { text: "From your home screen, press the “New Visit” button. The form opens as five short steps.", image: "new-visit-start.png" },
       { text: "Step 1 – Farmer: search for an existing farmer by mobile/name, or add a new one (name, 10-digit mobile starting 6–9, village, district).", warn: "The mobile number must be 10 digits and start with 6, 7, 8, or 9." },

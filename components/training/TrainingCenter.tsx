@@ -6,6 +6,7 @@ import {
   type TrainingTopic, type TrainingRole, type ViewerRole, type TrainingStep,
 } from "@/lib/training";
 import { DeckViewer } from "./DeckViewer";
+import { VideoPlayer } from "./VideoPlayer";
 
 const ROLE_COLORS: Record<TrainingRole, string> = {
   officer: "#1565C0", regional: "#2E7D32", central: "#7B1FA2", sysadmin: "#E65100", campaigner: "#00838F",
@@ -144,6 +145,7 @@ export function TrainingCenter({ role, topics }: { role: ViewerRole; topics: Tra
               <p className="mt-1 text-[13.5px] text-[#616161]">{open.summary}</p>
 
               <div className="mt-5 border-t border-[#F0F0F0] pt-5">
+                {open.video && <VideoPlayer video={open.video} title={open.title} />}
                 {open.deck
                   ? <DeckViewer deck={open.deck} title={open.title} />
                   : open.steps.map((s, i) => <Step key={i} n={i + 1} step={s} />)}
