@@ -15,7 +15,8 @@ import { getSession } from "@/lib/auth";
 import { cropLabel } from "@/lib/crops";
 import { buildWorkbookB64 } from "@/lib/xlsx-export";
 import { sendSms, zapConfig } from "@/lib/zapsms";
-import { sendWhatsApp, waConfig } from "@/lib/whatsapp";
+import { sendWhatsApp, waConfig, waCreateTemplate } from "@/lib/whatsapp";
+import { SAMPLE_VARS } from "@/lib/campaign-vars";
 
 const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
 async function requireManager(): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -396,6 +397,29 @@ export async function extendCampaign(campaignId: number, newEndDate: string): Pr
     revalidatePath("/campaigns");
     return { ok: true };
   } catch (e) { return { ok: false, error: e instanceof Error ? e.message : "Extend failed" }; }
+}
+
+/**
+ * Submit a WhatsApp comm plan's message to Meta as a template for approval (manager-only). The plan's
+ * message body IS the template; {{n}} example values come from the variable mapping's samples. On success
+ * the derived Meta template name + language are stored back on the plan.
+ */
+export async function submitCommPlanForApproval(id: number): Promise<{ ok: boolean; status?: string; name?: string; error?: string }> {
+  const perm = await requireManager(); if (!perm.ok) return perm;
+  const t = await prisma.commTemplate.findUnique({ where: { id } });
+  if (!t) return { ok: false, error: "Comm plan not found." };
+  const body = (t.template ?? "").trim();
+  if (!body) return { ok: false, error: "Add a message before submitting for approval." };
+  const metaName = (t.name || `plan_${id}`).toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
+  const language = (t.waLanguage || (t.language === "hi" ? "hi" : "en")).trim();
+  const category = t.promoType === "Reminder" ? "UTILITY" : "MARKETING";
+  // Example values for each {{n}}, from the mapped farmer field's sample (Meta requires an example per variable).
+  const examples = (t.waVariables ?? []).map((tok) => SAMPLE_VARS[tok] ?? "Sample");
+  const res = await waCreateTemplate({ name: metaName, language, category, body, examples });
+  if (!res.ok) return { ok: false, error: res.error ?? "Meta rejected the submission." };
+  await prisma.commTemplate.update({ where: { id }, data: { waTemplateName: metaName, waLanguage: language } });
+  revalidatePath("/campaigns");
+  return { ok: true, status: res.status, name: metaName };
 }
 
 /** Add/remove the comm plans a campaign is tagged with (manager-only). Must keep at least one. */

@@ -11,12 +11,12 @@ import { BroadcastPanel } from "./BroadcastPanel";
 import { BroadcastHistory } from "./BroadcastHistory";
 import { PhasesPanel } from "./phases/PhasesPanel";
 import { PhaseOutreachPanel } from "./phases/PhaseOutreachPanel";
-import { WA_VAR_TOKENS } from "@/lib/campaign-vars";
+import { WA_VAR_TOKENS, SAMPLE_VARS } from "@/lib/campaign-vars";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { cropLabel } from "@/lib/crops";
 import { inr } from "@/lib/format";
 import {
-  saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, getCampaignTracker, extendCampaign, updateCampaignCommPlans, getCampaignMembers, markCampaignMember, getCampaignAnalytics, exportCampaignAudienceXlsx,
+  saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, getCampaignTracker, extendCampaign, updateCampaignCommPlans, submitCommPlanForApproval, getCampaignMembers, markCampaignMember, getCampaignAnalytics, exportCampaignAudienceXlsx,
   type CampaignListItem, type CampaignTracker, type ProjectVM, type CampaignMemberVM, type CampaignAnalytics,
 } from "@/app/actions/campaigns";
 import { downloadB64 } from "@/lib/download";
@@ -48,14 +48,20 @@ const LANG_LABEL: Record<string, string> = { en: "English", hi: "हिंदी
 const MEDIUM_CHIPS = ["All", "WhatsApp", "Call", "SMS"];
 const PROMO_TYPES = ["General", "Discount", "Festival", "New launch", "Scheme/Credit", "Reminder"];
 
-/** Full editable form for one comm plan (used by both edit + create). */
-function CommPlanForm({ draft, setDraft, templateVars = [] }: { draft: CommTemplateVM; setDraft: (t: CommTemplateVM) => void; templateVars?: TemplateVarHint[] }) {
+const MEDIA = ["WhatsApp", "SMS", "Call"];
+const SMS_SLOTS = ["[Naam]", "[gap]", "[last item]", "[Store name]", "[number]", "[date]"];
+
+/** Full editable form for one comm plan (used by both edit + create). Fields adapt to the chosen medium. */
+function CommPlanForm({ draft, setDraft }: { draft: CommTemplateVM; setDraft: (t: CommTemplateVM) => void }) {
   const input = "rounded-lg border border-[#E0E0E0] px-3 py-2 text-[13px]";
-  // The Meta template this plan sends as (matched by name), so we can label each {{n}} slot.
-  const matchedTpl = (draft.waTemplateName ?? "").trim()
-    ? templateVars.find((t) => t.name === (draft.waTemplateName ?? "").trim()) ?? null
-    : null;
-  const tplLabels = matchedTpl?.labels ?? [];
+  const med = draft.medium || "WhatsApp";
+  const isWa = med === "WhatsApp", isSms = med === "SMS", isCall = med === "Call";
+  const body = draft.template ?? "";
+  const insertAtEnd = (s: string) => setDraft({ ...draft, template: body + (body && !body.endsWith(" ") ? " " : "") + s });
+  const nextN = new Set((body.match(/\{\{\s*(\d+)\s*\}\}/g) ?? []).map((x) => x.replace(/\D/g, ""))).size + 1;
+  const preview = isWa
+    ? body.replace(/\{\{\s*(\d+)\s*\}\}/g, (_, n) => SAMPLE_VARS[(draft.waVariables ?? [])[Number(n) - 1] ?? ""] ?? `{{${n}}}`)
+    : fillTemplate(body, SAMPLE);
   return (
     <div className="flex flex-col gap-2">
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -93,55 +99,64 @@ function CommPlanForm({ draft, setDraft, templateVars = [] }: { draft: CommTempl
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Medium</label>
-          <input className={`${input} w-full`} value={draft.medium} onChange={(e) => setDraft({ ...draft, medium: e.target.value })} placeholder="WhatsApp / Call / SMS" /></div>
+          <select className={`${input} w-full bg-white`} value={med} onChange={(e) => setDraft({ ...draft, medium: e.target.value })}>
+            {MEDIA.map((x) => <option key={x} value={x}>{x}</option>)}
+          </select></div>
         <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Timing</label>
           <input className={`${input} w-full`} value={draft.timingLabel} onChange={(e) => setDraft({ ...draft, timingLabel: e.target.value })} placeholder="e.g. Festival week" /></div>
       </div>
       <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Offer</label>
         <input className={`${input} w-full`} value={draft.offer} onChange={(e) => setDraft({ ...draft, offer: e.target.value })} placeholder="Offer" /></div>
-      <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Message ([Naam] [gap] [last item] [Store] [number] [date])</label>
-        <textarea className={`${input} min-h-[90px] w-full`} value={draft.template} onChange={(e) => setDraft({ ...draft, template: e.target.value })} /></div>
-      <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">DLT Template ID <span className="normal-case text-[#BDBDBD]">(required for SMS delivery in India)</span></label>
-        <input className={`${input} w-full`} value={draft.dltTemplateId ?? ""} onChange={(e) => setDraft({ ...draft, dltTemplateId: e.target.value })} placeholder="e.g. 1207xxxxxxxxxxxxx" /></div>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">WhatsApp Template Name <span className="normal-case text-[#BDBDBD]">(Meta-approved; for cold sends)</span></label>
-          <input list="wa-approved-templates" className={`${input} w-full`} value={draft.waTemplateName ?? ""} onChange={(e) => setDraft({ ...draft, waTemplateName: e.target.value })} placeholder="e.g. hni_reminder_v1" />
-          <datalist id="wa-approved-templates">{templateVars.map((t) => <option key={`${t.name}-${t.language}`} value={t.name} />)}</datalist></div>
-        <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">WhatsApp Template Language</label>
-          <input className={`${input} w-full`} value={draft.waLanguage ?? ""} onChange={(e) => setDraft({ ...draft, waLanguage: e.target.value })} placeholder="e.g. en / en_US / hi" /></div>
-      </div>
-      {/* WhatsApp template variables — map each {{n}} to a farmer field (order matters). The label to the
-          right of {{n}} is the template's own variable name (from Settings), so you know what to map. */}
+
+      {/* Message — insert-slot buttons + live preview. WhatsApp uses {{n}}; SMS/Call use named [slots]. */}
       <div>
-        <label className="text-[10px] font-bold uppercase text-[#9E9E9E]">WhatsApp template variables <span className="normal-case text-[#BDBDBD]">— map each {"{{n}}"} to a farmer field</span></label>
-        {matchedTpl && (
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[#616161]">
-            <span>Template <b className="font-mono">{matchedTpl.name}</b> has {tplLabels.length} variable{tplLabels.length === 1 ? "" : "s"}.</span>
-            {(draft.waVariables ?? []).length !== tplLabels.length && (
-              <button type="button"
-                onClick={() => setDraft({ ...draft, waVariables: Array.from({ length: tplLabels.length }, (_, i) => (draft.waVariables ?? [])[i] ?? WA_VAR_TOKENS[0].key) })}
-                className="rounded-[8px] border border-[#0B8A3D] px-2 py-0.5 text-[11px] font-semibold text-[#0B8A3D] hover:bg-[#E8F5E9]">Match to template ({tplLabels.length})</button>
-            )}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <label className="text-[10px] font-bold uppercase text-[#9E9E9E]">{isWa ? "Message — becomes the WhatsApp template" : isCall ? "Call script" : "Message"}</label>
+          <div className="flex flex-wrap gap-1">
+            {isWa
+              ? <button type="button" onClick={() => insertAtEnd(`{{${nextN}}}`)} className="rounded-md border border-[#E0E0E0] bg-white px-2 py-0.5 text-[10.5px] font-semibold text-[#0B8A3D] hover:bg-[#E8F5E9]">+ Insert {`{{${nextN}}}`}</button>
+              : SMS_SLOTS.map((s) => <button key={s} type="button" onClick={() => insertAtEnd(s)} className="rounded-md border border-[#E0E0E0] bg-white px-2 py-0.5 text-[10.5px] font-semibold text-[#616161] hover:bg-[#F5F5F5]">{s}</button>)}
           </div>
-        )}
-        <div className="mt-1 flex flex-col gap-1.5">
-          {(draft.waVariables ?? []).map((tok, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <span className="w-9 shrink-0 text-[11px] font-mono font-bold text-[#616161]">{`{{${i + 1}}}`}</span>
-              {tplLabels[i] && <span className="shrink-0 rounded-full bg-[#F1F8F1] px-2 py-0.5 text-[10.5px] font-semibold text-[#2E7D32]" title="This template slot's name (from Settings)">{tplLabels[i]}</span>}
-              <span className="shrink-0 text-[11px] text-[#BDBDBD]">→</span>
-              <select className={`${input} flex-1`} value={tok}
-                onChange={(e) => setDraft({ ...draft, waVariables: (draft.waVariables ?? []).map((x, j) => (j === i ? e.target.value : x)) })}>
-                {WA_VAR_TOKENS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
-              </select>
-              <button type="button" onClick={() => setDraft({ ...draft, waVariables: (draft.waVariables ?? []).filter((_, j) => j !== i) })}
-                className="text-[12px] font-semibold text-[#C62828] hover:underline">Remove</button>
-            </div>
-          ))}
-          <button type="button" onClick={() => setDraft({ ...draft, waVariables: [...(draft.waVariables ?? []), WA_VAR_TOKENS[0].key] })}
-            className="self-start rounded-[8px] border border-[#E0E0E0] px-2.5 py-1 text-[11.5px] font-semibold text-[#616161] hover:bg-[#F5F5F5]">+ Add variable</button>
         </div>
+        <textarea className={`${input} mt-1 min-h-[90px] w-full`} value={body} dir="auto"
+          onChange={(e) => setDraft({ ...draft, template: e.target.value })}
+          placeholder={isWa ? "Namaste {{1}}! Book your {{2}} at UA Agro before {{3}}." : "Namaste [Naam]! ..."} />
+        {body.trim() && (
+          <>
+            <div className="mt-1.5 text-[10px] font-bold uppercase text-[#9E9E9E]">Preview (sample customer)</div>
+            <div className="mt-1 rounded-[10px] bg-[#F5F7F5] px-3 py-2 text-[12.5px] italic leading-[1.6] text-[#424242]" dir="auto" style={{ whiteSpace: "pre-wrap" }}>{preview}</div>
+          </>
+        )}
       </div>
+
+      {isSms && (
+        <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">DLT Template ID <span className="normal-case text-[#BDBDBD]">(required for SMS delivery in India)</span></label>
+          <input className={`${input} w-full`} value={draft.dltTemplateId ?? ""} onChange={(e) => setDraft({ ...draft, dltTemplateId: e.target.value })} placeholder="e.g. 1207xxxxxxxxxxxxx" /></div>
+      )}
+
+      {isWa && (
+        <>
+          <div>
+            <label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Template variables <span className="normal-case text-[#BDBDBD]">— map each {"{{n}}"} to a farmer field (fills at send + example for approval)</span></label>
+            <div className="mt-1 flex flex-col gap-1.5">
+              {(draft.waVariables ?? []).map((tok, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="w-9 shrink-0 text-[11px] font-mono font-bold text-[#616161]">{`{{${i + 1}}}`}</span>
+                  <select className={`${input} flex-1`} value={tok}
+                    onChange={(e) => setDraft({ ...draft, waVariables: (draft.waVariables ?? []).map((x, j) => (j === i ? e.target.value : x)) })}>
+                    {WA_VAR_TOKENS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+                  </select>
+                  <button type="button" onClick={() => setDraft({ ...draft, waVariables: (draft.waVariables ?? []).filter((_, j) => j !== i) })}
+                    className="text-[12px] font-semibold text-[#C62828] hover:underline">Remove</button>
+                </div>
+              ))}
+              <button type="button" onClick={() => setDraft({ ...draft, waVariables: [...(draft.waVariables ?? []), WA_VAR_TOKENS[0].key] })}
+                className="self-start rounded-[8px] border border-[#E0E0E0] px-2.5 py-1 text-[11.5px] font-semibold text-[#616161] hover:bg-[#F5F5F5]">+ Add variable</button>
+            </div>
+          </div>
+          <div className="rounded-[8px] bg-[#F1F8F1] px-3 py-2 text-[11.5px] text-[#33691E]">Save the plan, then hit <b>Submit for approval</b> on its row to send this to Meta. The approval status shows there.</div>
+        </>
+      )}
     </div>
   );
 }
@@ -187,6 +202,15 @@ function CommPlanTab({ templates, templateVars }: { templates: CommTemplateVM[];
   const askRemove = async (t: CommTemplateVM) => {
     if (await confirm({ title: "Delete this comm plan?", confirmLabel: "Delete comm plan", message: <><b>{t.name || "This comm plan"}</b> will be permanently removed. Campaigns tagged with it lose that template. This can’t be undone.</> })) remove(t.id);
   };
+  // Approved Meta template names (templateVars are already filtered to APPROVED on the server).
+  const approvedNames = new Set(templateVars.map((v) => v.name));
+  const submitApproval = (t: CommTemplateVM) =>
+    start(async () => {
+      setErr(null);
+      const res = await submitCommPlanForApproval(t.id);
+      if (res.ok) setRows((r) => r.map((x) => (x.id === t.id ? { ...x, waTemplateName: res.name ?? x.waTemplateName } : x)));
+      else setErr(res.error ?? "Submit failed");
+    });
 
   return (
     <div className="flex flex-col gap-3.5">
@@ -221,7 +245,7 @@ function CommPlanTab({ templates, templateVars }: { templates: CommTemplateVM[];
       {adding && draft && (
         <div className={`${CARD} border-l-4 border-l-[#2E7D32] p-[18px]`}>
           <div className="mb-2 text-[13px] font-bold text-[#1A1C1A]">New comm plan</div>
-          <CommPlanForm draft={draft} setDraft={setDraft} templateVars={templateVars} />
+          <CommPlanForm draft={draft} setDraft={setDraft} />
           {err && <div className="mt-2 text-[12px] text-[#C62828]">{err}</div>}
           <div className="mt-3 flex gap-2">
             <button type="button" onClick={save} disabled={saving || !draft.name.trim()} className="rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Create plan"}</button>
@@ -247,6 +271,16 @@ function CommPlanTab({ templates, templateVars }: { templates: CommTemplateVM[];
               <span className="rounded-full bg-[#F3E5F5] px-2 py-0.5 text-[10px] font-semibold text-[#6A1B9A]">{cur.promoType}</span>
               <span className="text-[11.5px] text-[#616161]">{cur.medium}</span>
               <span className="text-[11.5px] text-[#9E9E9E]">· {cur.timingLabel}</span>
+              {/* WhatsApp plans: Meta approval status / submit button (message = the template). */}
+              {t.medium === "WhatsApp" && (
+                t.waTemplateName && approvedNames.has(t.waTemplateName)
+                  ? <span className="rounded-full bg-[#E8F5E9] px-2 py-0.5 text-[10px] font-bold text-[#2E7D32]">✓ WA approved</span>
+                  : t.waTemplateName
+                    ? <span className="rounded-full bg-[#FFF8E1] px-2 py-0.5 text-[10px] font-bold text-[#8D6E00]">⏳ WA pending</span>
+                    : <button type="button" onClick={() => submitApproval(t)} disabled={saving}
+                        className="rounded-[8px] border border-[#0B8A3D] px-2 py-0.5 text-[11px] font-semibold text-[#0B8A3D] hover:bg-[#E8F5E9] disabled:opacity-50">
+                        {saving ? "Submitting…" : "Submit for approval"}</button>
+              )}
               <div className="ml-auto flex items-center gap-3">
                 <button type="button" onClick={() => { setEditing(isEditing ? null : t.id); setAdding(false); setDraft({ ...t }); setErr(null); }}
                   className="text-[12px] font-semibold text-[#2E7D32] hover:underline">{isEditing ? "Cancel" : "Edit"}</button>
@@ -255,7 +289,7 @@ function CommPlanTab({ templates, templateVars }: { templates: CommTemplateVM[];
             </div>
             {isEditing && draft ? (
               <>
-                <CommPlanForm draft={draft} setDraft={setDraft} templateVars={templateVars} />
+                <CommPlanForm draft={draft} setDraft={setDraft} />
                 {err && <div className="mt-2 text-[12px] text-[#C62828]">{err}</div>}
                 <button type="button" onClick={save} disabled={saving || !draft.name.trim()} className="mt-3 self-start rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>
               </>

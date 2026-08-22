@@ -22,6 +22,12 @@ export const WA_VAR_TOKENS: { key: string; label: string; slot: string }[] = [
 ];
 export const VAR_LABEL: Record<string, string> = Object.fromEntries(WA_VAR_TOKENS.map((t) => [t.key, t.label]));
 
+/** Sample value per token — for live previews and the example values Meta needs to approve a template. */
+export const SAMPLE_VARS: Record<string, string> = {
+  name: "Ramesh", fullname: "Ramesh Kumar", crop: "Potato", store: "Ram Nagar",
+  village: "Rampur", gap: "2,500", mobile: "98xxxxxxxx", date: "15 Sep", coupon: "POT300",
+};
+
 export interface FarmerVarSource {
   name: string | null;
   mobile: string | null;
