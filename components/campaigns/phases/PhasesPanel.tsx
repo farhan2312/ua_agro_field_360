@@ -7,8 +7,8 @@ import {
   type CampaignPhaseConfig, type PhaseVM, type PhaseInput, type RoundStatus,
 } from "@/app/actions/campaign-phases";
 import {
-  CHANNELS, PURCHASED_LABEL, NOT_PURCHASED_LABEL, newTarget,
-  type Coupon, type MessageTarget, type RoundMessaging, type Channel,
+  PURCHASED_LABEL, NOT_PURCHASED_LABEL, newTarget, channelLabel, mediumToChannel,
+  type Coupon, type MessageTarget, type RoundMessaging,
 } from "@/lib/campaign-phases";
 import { VALUE_SEGMENTS, LIFECYCLE_SEGMENTS, segMeta } from "@/lib/campaign-segments";
 
@@ -18,10 +18,10 @@ const INPUT = "rounded-[10px] border border-[#E0E0E0] px-3 py-2 text-[13px] outl
 const BTN = "rounded-[10px] px-4 py-2 text-[12.5px] font-semibold";
 
 export function PhasesPanel({
-  campaignId, campaignName, campaignStart, campaignEnd, commPlanNames, onClose,
+  campaignId, campaignName, campaignStart, campaignEnd, commPlanNames, commPlanMediums = {}, onClose,
 }: {
   campaignId: number; campaignName: string; campaignStart: string; campaignEnd: string;
-  commPlanNames: string[]; onClose: () => void;
+  commPlanNames: string[]; commPlanMediums?: Record<string, string>; onClose: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("define");
   const [cfg, setCfg] = useState<CampaignPhaseConfig | null>(null);
@@ -45,7 +45,7 @@ export function PhasesPanel({
 
         {cfg == null ? <div className="py-10 text-center text-[13px] text-[#9E9E9E]">Loading…</div> : (
           <>
-            {tab === "define" && <DefineTab cfg={cfg} commPlanNames={commPlanNames} onSaved={load} />}
+            {tab === "define" && <DefineTab cfg={cfg} commPlanNames={commPlanNames} commPlanMediums={commPlanMediums} onSaved={load} />}
             {tab === "status" && <RoundStatusTab campaignId={campaignId} />}
           </>
         )}
@@ -56,7 +56,7 @@ export function PhasesPanel({
 
 /* ─────────────────── Define tab ─────────────────── */
 
-function DefineTab({ cfg, commPlanNames, onSaved }: { cfg: CampaignPhaseConfig; commPlanNames: string[]; onSaved: () => void }) {
+function DefineTab({ cfg, commPlanNames, commPlanMediums, onSaved }: { cfg: CampaignPhaseConfig; commPlanNames: string[]; commPlanMediums: Record<string, string>; onSaved: () => void }) {
   const [phases, setPhases] = useState<PhaseVM[]>(cfg.phases);
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -97,7 +97,7 @@ function DefineTab({ cfg, commPlanNames, onSaved }: { cfg: CampaignPhaseConfig; 
     <div className="flex flex-col gap-3">
       <div className="text-[11.5px] text-[#9E9E9E]">Each round is a stage of the campaign with its own dates, coupons &amp; messaging. Round 2 onward splits messaging by whether the farmer has purchased.</div>
       {phases.map((p, i) => (
-        <PhaseCard key={p.id} phase={p} commPlanNames={commPlanNames}
+        <PhaseCard key={p.id} phase={p} commPlanNames={commPlanNames} commPlanMediums={commPlanMediums}
           onPatch={(x) => patch(i, x)} onRemove={() => removePhase(i)} canRemove={phases.length > 1} />
       ))}
       <div className="flex flex-wrap items-center gap-2">
@@ -112,8 +112,8 @@ function DefineTab({ cfg, commPlanNames, onSaved }: { cfg: CampaignPhaseConfig; 
   );
 }
 
-function PhaseCard({ phase, commPlanNames, onPatch, onRemove, canRemove }: {
-  phase: PhaseVM; commPlanNames: string[];
+function PhaseCard({ phase, commPlanNames, commPlanMediums, onPatch, onRemove, canRemove }: {
+  phase: PhaseVM; commPlanNames: string[]; commPlanMediums: Record<string, string>;
   onPatch: (p: Partial<PhaseVM>) => void; onRemove: () => void; canRemove: boolean;
 }) {
   const setCoupon = (ci: number, c: Partial<Coupon>) => onPatch({ coupons: phase.coupons.map((x, j) => j === ci ? { ...x, ...c } : x) });
@@ -163,16 +163,16 @@ function PhaseCard({ phase, commPlanNames, onPatch, onRemove, canRemove }: {
       <div className="mt-3 border-t border-[#F5F5F5] pt-3">
         <div className={`${LBL} mb-2`}>Messaging — who to contact &amp; how</div>
         {!split ? (
-          <MessageTargets targets={phase.messaging.targets} commPlanNames={commPlanNames} onChange={(targets) => setMessaging({ targets })} />
+          <MessageTargets targets={phase.messaging.targets} commPlanNames={commPlanNames} commPlanMediums={commPlanMediums} onChange={(targets) => setMessaging({ targets })} />
         ) : (
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             <div className="rounded-[10px] border border-[#C8E6C9] bg-[#F1F8F1] p-2.5">
               <div className="mb-1.5 text-[12px] font-bold text-[#2E7D32]">✓ {PURCHASED_LABEL}</div>
-              <MessageTargets targets={phase.messaging.purchased} commPlanNames={commPlanNames} onChange={(purchased) => setMessaging({ purchased })} />
+              <MessageTargets targets={phase.messaging.purchased} commPlanNames={commPlanNames} commPlanMediums={commPlanMediums} onChange={(purchased) => setMessaging({ purchased })} />
             </div>
             <div className="rounded-[10px] border border-[#FFE0B2] bg-[#FFF8F0] p-2.5">
               <div className="mb-1.5 text-[12px] font-bold text-[#E65100]">○ {NOT_PURCHASED_LABEL}</div>
-              <MessageTargets targets={phase.messaging.notPurchased} commPlanNames={commPlanNames} onChange={(notPurchased) => setMessaging({ notPurchased })} />
+              <MessageTargets targets={phase.messaging.notPurchased} commPlanNames={commPlanNames} commPlanMediums={commPlanMediums} onChange={(notPurchased) => setMessaging({ notPurchased })} />
             </div>
           </div>
         )}
@@ -183,15 +183,15 @@ function PhaseCard({ phase, commPlanNames, onPatch, onRemove, canRemove }: {
 
 /* ─────────────────── Message targets editor ─────────────────── */
 
-function MessageTargets({ targets, commPlanNames, onChange }: {
-  targets: MessageTarget[]; commPlanNames: string[]; onChange: (t: MessageTarget[]) => void;
+function MessageTargets({ targets, commPlanNames, commPlanMediums, onChange }: {
+  targets: MessageTarget[]; commPlanNames: string[]; commPlanMediums: Record<string, string>; onChange: (t: MessageTarget[]) => void;
 }) {
   const setT = (i: number, patch: Partial<MessageTarget>) => onChange(targets.map((t, j) => j === i ? { ...t, ...patch } : t));
   return (
     <div className="flex flex-col gap-2">
       {targets.length === 0 && <div className="text-[11.5px] text-[#BDBDBD]">No targets — add one to say who gets which comm plan.</div>}
       {targets.map((t, i) => (
-        <TargetRow key={i} t={t} commPlanNames={commPlanNames} onChange={(p) => setT(i, p)} onRemove={() => onChange(targets.filter((_, j) => j !== i))} />
+        <TargetRow key={i} t={t} commPlanNames={commPlanNames} commPlanMediums={commPlanMediums} onChange={(p) => setT(i, p)} onRemove={() => onChange(targets.filter((_, j) => j !== i))} />
       ))}
       <button type="button" onClick={() => onChange([...targets, newTarget()])}
         className="self-start rounded-[8px] border border-dashed border-[#C8E6C9] bg-[#F1F8F1] px-3 py-1 text-[11.5px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9]">+ Add target</button>
@@ -199,9 +199,13 @@ function MessageTargets({ targets, commPlanNames, onChange }: {
   );
 }
 
-function TargetRow({ t, commPlanNames, onChange, onRemove }: {
-  t: MessageTarget; commPlanNames: string[]; onChange: (p: Partial<MessageTarget>) => void; onRemove: () => void;
+function TargetRow({ t, commPlanNames, commPlanMediums, onChange, onRemove }: {
+  t: MessageTarget; commPlanNames: string[]; commPlanMediums: Record<string, string>; onChange: (p: Partial<MessageTarget>) => void; onRemove: () => void;
 }) {
+  // Channel is derived from the chosen comm plan's medium — no separate picker.
+  const planMedium = t.commPlan ? commPlanMediums[t.commPlan] : undefined;
+  const pickPlan = (name: string) =>
+    onChange({ commPlan: name || undefined, channel: name ? mediumToChannel(commPlanMediums[name]) : undefined });
   const toggle = (dim: "value" | "lifecycle", seg: string) => {
     const arr = t[dim];
     onChange({ [dim]: arr.includes(seg) ? arr.filter((x) => x !== seg) : [...arr, seg] } as Partial<MessageTarget>);
@@ -222,14 +226,14 @@ function TargetRow({ t, commPlanNames, onChange, onRemove }: {
         <label className="flex items-center gap-1.5 text-[11.5px] font-semibold text-[#333]">
           <input type="checkbox" checked={t.all} onChange={(e) => onChange({ all: e.target.checked })} /> All farmers
         </label>
-        <select value={t.commPlan ?? ""} onChange={(e) => onChange({ commPlan: e.target.value || undefined })} className="min-w-0 flex-1 rounded-[8px] border border-[#E0E0E0] bg-white px-2.5 py-1.5 text-[12px] outline-none focus:border-[#2E7D32]">
+        <select value={t.commPlan ?? ""} onChange={(e) => pickPlan(e.target.value)} className="min-w-0 flex-1 rounded-[8px] border border-[#E0E0E0] bg-white px-2.5 py-1.5 text-[12px] outline-none focus:border-[#2E7D32]">
           <option value="">Comm plan…</option>
           {commPlanNames.map((n) => <option key={n} value={n}>{n}</option>)}
         </select>
-        <select value={t.channel ?? ""} onChange={(e) => onChange({ channel: (e.target.value || undefined) as Channel | undefined })} className="rounded-[8px] border border-[#E0E0E0] bg-white px-2.5 py-1.5 text-[12px] outline-none focus:border-[#2E7D32]">
-          <option value="">Channel…</option>
-          {CHANNELS.map((ch) => <option key={ch.key} value={ch.key}>{ch.label}</option>)}
-        </select>
+        {/* Channel comes from the comm plan's medium — shown, not selected. */}
+        {t.commPlan
+          ? <span className="rounded-full bg-[#E3F2FD] px-2.5 py-1 text-[11px] font-semibold text-[#1565C0]" title="Sent via this comm plan's medium">{planMedium ? channelLabel(mediumToChannel(planMedium)) : "—"}</span>
+          : <span className="text-[11px] text-[#BDBDBD]">channel set by comm plan</span>}
         <button type="button" onClick={onRemove} className="rounded-md bg-[#FDECEA] px-2 py-1 text-[11px] font-semibold text-[#C62828] hover:bg-[#FADBD8]">✕</button>
       </div>
       {!t.all && (

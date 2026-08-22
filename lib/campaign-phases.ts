@@ -19,6 +19,15 @@ export const CHANNELS: { key: Channel; label: string }[] = [
   { key: "VOICE_NOTE", label: "Voice note" },
   { key: "IN_PERSON", label: "In person" },
 ];
+/** Map a comm plan's medium ("WhatsApp" | "SMS" | "Call", incl. combos) to a send Channel. */
+export function mediumToChannel(medium: string | null | undefined): Channel | undefined {
+  const m = (medium ?? "").toLowerCase();
+  if (m.includes("whatsapp")) return "WHATSAPP";
+  if (m.includes("sms")) return "SMS";
+  if (m.includes("call")) return "CALL";
+  return undefined;
+}
+
 export function channelLabel(ch: string | null | undefined): string {
   return CHANNELS.find((c) => c.key === ch)?.label ?? (ch ?? "—");
 }

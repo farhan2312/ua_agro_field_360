@@ -592,7 +592,9 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
       {editOf && <EditCommPlansModal campaign={editOf} commPlanNames={commPlanNames} onClose={() => setEditOf(null)} />}
       {phasesOf && (
         <PhasesPanel campaignId={phasesOf.id} campaignName={phasesOf.name} campaignStart={phasesOf.startDate} campaignEnd={phasesOf.endDate}
-          commPlanNames={phasesOf.commPlans ?? []} onClose={() => setPhasesOf(null)} />
+          commPlanNames={phasesOf.commPlans ?? []}
+          commPlanMediums={Object.fromEntries(templates.map((t) => [t.name, t.medium]))}
+          onClose={() => setPhasesOf(null)} />
       )}
       {phaseOutreachOf && (
         <PhaseOutreachPanel campaignId={phaseOutreachOf.id} campaignName={phaseOutreachOf.name} onClose={() => setPhaseOutreachOf(null)} />
