@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { listOptIns, generateOptInQr, saveOptInQrConfig, type OptInRow } from "@/app/actions/whatsapp-optins";
+import { listOptIns, generateOptInQr, saveOptInQrConfig, exportOptInsXlsx, type OptInRow } from "@/app/actions/whatsapp-optins";
+import { downloadB64 } from "@/lib/download";
 
 const DEFAULT_MSG = "Hi UA Agro, I'd like to receive product updates & offers on WhatsApp.";
 const fmt = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-GB", { day: "numeric", month: "short" }); };
@@ -43,6 +44,8 @@ export function WhatsAppOptInsCard({ initial, qrConfig }: { initial: { total: nu
     });
   };
   const refresh = (term = q) => startLoad(async () => { const r = await listOptIns(term); setRows(r.rows); setTotal(r.total); });
+  const [exporting, startExport] = useTransition();
+  const exportXlsx = () => startExport(async () => { const r = await exportOptInsXlsx(q); if (r.ok && r.b64 && r.filename) downloadB64(r.b64, r.filename); });
   const saveForVisitForm = () => {
     setSaved(null); setQrErr(null);
     startSaveCfg(async () => {
@@ -101,20 +104,22 @@ export function WhatsAppOptInsCard({ initial, qrConfig }: { initial: { total: nu
       </div>
 
       {/* Opt-ins list */}
-      <div className="mt-4 flex items-center justify-between gap-2">
-        <div className="text-[12px] font-bold text-[#3A3A3A]">Captured opt-ins</div>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-[12px] font-bold text-[#3A3A3A]">Captured opt-ins <span className="font-normal text-[#9E9E9E]">· {rows.length}{rows.length !== total ? ` of ${total}` : ""}</span></div>
         <div className="flex items-center gap-2">
           <input className="w-[150px] rounded-[8px] border border-[#E0E0E0] px-2.5 py-1.5 text-[12px] outline-none focus:border-[#0B8A3D]"
             placeholder="Search name / number" value={q}
             onChange={(e) => { setQ(e.target.value); }} onKeyDown={(e) => { if (e.key === "Enter") refresh(); }} />
           <button type="button" onClick={() => refresh()} disabled={loading}
             className="rounded-[8px] border border-[#E0E0E0] px-3 py-1.5 text-[12px] font-semibold text-[#616161] hover:bg-[#F5F5F5] disabled:opacity-50">{loading ? "…" : "Refresh"}</button>
+          <button type="button" onClick={exportXlsx} disabled={exporting || rows.length === 0}
+            className="rounded-[8px] border border-[#0B8A3D] px-3 py-1.5 text-[12px] font-semibold text-[#0B8A3D] hover:bg-[#E8F5E9] disabled:opacity-50">{exporting ? "…" : "⬇ Excel"}</button>
         </div>
       </div>
       {rows.length === 0 ? (
         <div className="mt-3 rounded-[10px] bg-[#FAFBFA] px-3 py-6 text-center text-[12.5px] text-[#9E9E9E]">No opt-ins yet. Once the webhook is live and someone scans the QR + sends the message, they appear here.</div>
       ) : (
-        <div className="mt-2 max-h-[280px] overflow-y-auto rounded-[10px] border border-[#F0F0F0]">
+        <div className="mt-2 max-h-[560px] overflow-y-auto rounded-[10px] border border-[#F0F0F0]">
           <table className="w-full text-left text-[12px]">
             <thead className="sticky top-0 bg-[#FAFAFA]">
               <tr className="border-b border-[#EEE] text-[10px] font-bold uppercase text-[#9E9E9E]">

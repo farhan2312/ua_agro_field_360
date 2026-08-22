@@ -3,6 +3,7 @@
 import QRCode from "qrcode";
 import { prisma } from "@/lib/prisma";
 import { getScope, canManage } from "@/lib/scope";
+import { buildWorkbookB64 } from "@/lib/xlsx-export";
 
 async function adminOnly(): Promise<boolean> {
   const { role } = await getScope();
@@ -36,7 +37,7 @@ export async function listOptIns(q?: string): Promise<{ total: number; rows: Opt
     : {};
   const [total, rows] = await Promise.all([
     prisma.whatsAppOptIn.count(),
-    prisma.whatsAppOptIn.findMany({ where, orderBy: { lastMessageAt: "desc" }, take: 200 }),
+    prisma.whatsAppOptIn.findMany({ where, orderBy: { lastMessageAt: "desc" }, take: 5000 }),
   ]);
   const farmerIds = rows.map((r) => r.farmerId).filter((x): x is number => x != null);
   const farmers = farmerIds.length
@@ -51,6 +52,26 @@ export async function listOptIns(q?: string): Promise<{ total: number; rows: Opt
       optInAt: r.optInAt.toISOString(), lastMessageAt: r.lastMessageAt.toISOString(),
     })),
   };
+}
+
+/** Excel export of the opt-in list (respects the same search term). Admin-only. */
+export async function exportOptInsXlsx(q?: string): Promise<{ ok: boolean; filename?: string; b64?: string; error?: string }> {
+  if (!(await adminOnly())) return { ok: false, error: "Admins only." };
+  const { rows } = await listOptIns(q);
+  const header = ["Number", "Name", "Type", "Farmer name", "Messages", "Last message", "Opted in", "Last message at"];
+  const body = rows.map((r) => [
+    r.waId ? `+${r.waId.replace(/\D/g, "")}` : r.mobile,
+    r.name || "",
+    r.farmerId ? "Registered farmer" : "Not a farmer",
+    r.farmerName || "",
+    r.messageCount,
+    r.lastMessage || "",
+    r.optInAt.slice(0, 10),
+    r.lastMessageAt.slice(0, 10),
+  ]);
+  const b64 = buildWorkbookB64([{ name: "WhatsApp opt-ins", rows: [header, ...body] }]);
+  const today = new Date().toISOString().slice(0, 10);
+  return { ok: true, filename: `whatsapp-optins-${today}.xlsx`, b64 };
 }
 
 const OPTIN_NUMBER_KEY = "whatsapp.optInNumber";
