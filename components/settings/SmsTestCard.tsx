@@ -245,7 +245,7 @@ export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMis
           <textarea className={`${inputCls} mt-1 resize-y`} rows={4} value={message} onChange={(e) => setMessage(e.target.value)}
             placeholder="Type your test message…" />
           <div className="mt-1 flex items-center justify-between text-[11px] text-[#9E9E9E]">
-            <span>{planId != null ? "Loaded from a Comm Plan — placeholders like [Naam] are sent as-is in a test." : "Free text."}</span>
+            <span>{planId != null ? "Loaded from a Comm Plan — placeholders like [name] are sent as-is in a test." : "Free text."}</span>
             <span>{message.length} chars</span>
           </div>
         </>

@@ -1,17 +1,17 @@
 "use client";
 
-import { useEffect, useState, useTransition, type ReactNode } from "react";
+import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Modal, ModalHeader } from "@/components/interactive";
-import { segMeta, fillTemplate, VALUE_SEGMENTS, LIFECYCLE_SEGMENTS, VALUE_TITLE, LIFECYCLE_TITLE } from "@/lib/campaign-segments";
+import { segMeta, VALUE_SEGMENTS, LIFECYCLE_SEGMENTS, VALUE_TITLE, LIFECYCLE_TITLE } from "@/lib/campaign-segments";
 import { SmsSender } from "./SmsSender";
 import { WaSender } from "./WaSender";
 import { BroadcastPanel } from "./BroadcastPanel";
 import { BroadcastHistory } from "./BroadcastHistory";
 import { PhasesPanel } from "./phases/PhasesPanel";
 import { PhaseOutreachPanel } from "./phases/PhaseOutreachPanel";
-import { WA_VAR_TOKENS, SAMPLE_VARS } from "@/lib/campaign-vars";
+import { WA_VAR_TOKENS, SAMPLE_VARS, fillNamedTemplate } from "@/lib/campaign-vars";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { cropLabel } from "@/lib/crops";
 import { inr } from "@/lib/format";
@@ -42,14 +42,23 @@ const CARD = "rounded-[14px] border border-black/[0.04] bg-white shadow-[0_1px_3
 const n = (x: number) => x.toLocaleString("en-IN");
 
 /* ══════════════════ Comm plan (WF3) ══════════════════ */
-const SAMPLE = { name: "Ramesh Kumar", hniGap: 2500, lastItem: "Maize Dekalb 9108", store: "Ram Nagar", phone: "98xxxxxxxx", deadline: "15 Aug" };
 
 const LANG_LABEL: Record<string, string> = { en: "English", hi: "हिंदी" };
 const MEDIUM_CHIPS = ["All", "WhatsApp", "Call", "SMS"];
 const PROMO_TYPES = ["General", "Discount", "Festival", "New launch", "Scheme/Credit", "Reminder"];
 
 const MEDIA = ["WhatsApp", "SMS", "Call"];
-const SMS_SLOTS = ["[Naam]", "[gap]", "[last item]", "[Store name]", "[number]", "[date]"];
+// Insertable named slots for SMS/Call — every farmer field we can fill at send time (from WA_VAR_TOKENS,
+// minus the niche "₹ to reach HNI" gap). Each is { slot: "[name]", label: "Farmer first name" }.
+const NAMED_SLOTS = WA_VAR_TOKENS.filter((t) => t.key !== "gap");
+
+/** Fill a template with sample values for a live preview (WhatsApp → {{n}} via mapping; else named slots). */
+function samplePreview(t: { medium: string; template?: string | null; waVariables?: string[] }): string {
+  const body = t.template ?? "";
+  if ((t.medium || "") === "WhatsApp")
+    return body.replace(/\{\{\s*(\d+)\s*\}\}/g, (_, n) => SAMPLE_VARS[(t.waVariables ?? [])[Number(n) - 1] ?? ""] ?? `{{${n}}}`);
+  return fillNamedTemplate(body, SAMPLE_VARS);
+}
 
 /** Full editable form for one comm plan (used by both edit + create). Fields adapt to the chosen medium. */
 function CommPlanForm({ draft, setDraft }: { draft: CommTemplateVM; setDraft: (t: CommTemplateVM) => void }) {
@@ -57,11 +66,18 @@ function CommPlanForm({ draft, setDraft }: { draft: CommTemplateVM; setDraft: (t
   const med = draft.medium || "WhatsApp";
   const isWa = med === "WhatsApp", isSms = med === "SMS", isCall = med === "Call";
   const body = draft.template ?? "";
-  const insertAtEnd = (s: string) => setDraft({ ...draft, template: body + (body && !body.endsWith(" ") ? " " : "") + s });
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  // Insert at the cursor (falls back to the end), then restore the caret after the inserted text.
+  const insertSlot = (s: string) => {
+    const ta = taRef.current;
+    const at = ta ? ta.selectionStart : body.length;
+    const end = ta ? ta.selectionEnd : body.length;
+    const next = body.slice(0, at) + s + body.slice(end);
+    setDraft({ ...draft, template: next });
+    requestAnimationFrame(() => { if (ta) { ta.focus(); const p = at + s.length; ta.setSelectionRange(p, p); } });
+  };
   const nextN = new Set((body.match(/\{\{\s*(\d+)\s*\}\}/g) ?? []).map((x) => x.replace(/\D/g, ""))).size + 1;
-  const preview = isWa
-    ? body.replace(/\{\{\s*(\d+)\s*\}\}/g, (_, n) => SAMPLE_VARS[(draft.waVariables ?? [])[Number(n) - 1] ?? ""] ?? `{{${n}}}`)
-    : fillTemplate(body, SAMPLE);
+  const preview = samplePreview(draft);
   return (
     <div className="flex flex-col gap-2">
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -114,13 +130,13 @@ function CommPlanForm({ draft, setDraft }: { draft: CommTemplateVM; setDraft: (t
           <label className="text-[10px] font-bold uppercase text-[#9E9E9E]">{isWa ? "Message — becomes the WhatsApp template" : isCall ? "Call script" : "Message"}</label>
           <div className="flex flex-wrap gap-1">
             {isWa
-              ? <button type="button" onClick={() => insertAtEnd(`{{${nextN}}}`)} className="rounded-md border border-[#E0E0E0] bg-white px-2 py-0.5 text-[10.5px] font-semibold text-[#0B8A3D] hover:bg-[#E8F5E9]">+ Insert {`{{${nextN}}}`}</button>
-              : SMS_SLOTS.map((s) => <button key={s} type="button" onClick={() => insertAtEnd(s)} className="rounded-md border border-[#E0E0E0] bg-white px-2 py-0.5 text-[10.5px] font-semibold text-[#616161] hover:bg-[#F5F5F5]">{s}</button>)}
+              ? <button type="button" onClick={() => insertSlot(`{{${nextN}}}`)} className="rounded-md border border-[#E0E0E0] bg-white px-2 py-0.5 text-[10.5px] font-semibold text-[#0B8A3D] hover:bg-[#E8F5E9]">+ Insert {`{{${nextN}}}`}</button>
+              : NAMED_SLOTS.map((t) => <button key={t.slot} type="button" title={t.label} onClick={() => insertSlot(t.slot)} className="rounded-md border border-[#E0E0E0] bg-white px-2 py-0.5 text-[10.5px] font-semibold text-[#616161] hover:bg-[#F5F5F5]">{t.slot}</button>)}
           </div>
         </div>
-        <textarea className={`${input} mt-1 min-h-[90px] w-full`} value={body} dir="auto"
+        <textarea ref={taRef} className={`${input} mt-1 min-h-[90px] w-full`} value={body} dir="auto"
           onChange={(e) => setDraft({ ...draft, template: e.target.value })}
-          placeholder={isWa ? "Namaste {{1}}! Book your {{2}} at UA Agro before {{3}}." : "Namaste [Naam]! ..."} />
+          placeholder={isWa ? "Namaste {{1}}! Book your {{2}} at UA Agro before {{3}}." : "Namaste [name]! ..."} />
         {body.trim() && (
           <>
             <div className="mt-1.5 text-[10px] font-bold uppercase text-[#9E9E9E]">Preview (sample customer)</div>
@@ -216,7 +232,7 @@ function CommPlanTab({ templates, templateVars }: { templates: CommTemplateVM[];
     <div className="flex flex-col gap-3.5">
       {dialog}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="text-[12.5px] text-[#757575]">Reusable message templates — campaigns are tagged with one or more of these by name. Slots — <b>[Naam]</b>, <b>[gap]</b>, <b>[last item]</b>, <b>[Store]</b>, <b>[number]</b>, <b>[date]</b> — fill per customer.</div>
+        <div className="text-[12.5px] text-[#757575]">Reusable message templates — campaigns are tagged with one or more of these by name. Slots like <b>[name]</b>, <b>[crop]</b>, <b>[Store]</b>, <b>[village]</b>, <b>[number]</b>, <b>[date]</b>, <b>[coupon]</b> fill per customer.</div>
         <button type="button" onClick={() => { setAdding(true); setEditing(null); setDraft({ ...EMPTY_PLAN }); setErr(null); }}
           className="ml-auto rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white">+ New comm plan</button>
       </div>
@@ -299,7 +315,7 @@ function CommPlanTab({ templates, templateVars }: { templates: CommTemplateVM[];
                 <div className="mb-2 text-[12.5px] text-[#424242]">{cur.offer}</div>
                 <div className="rounded-[10px] bg-[#FAFFF9] border border-[#E8F5E9] p-3 text-[12.5px] leading-[1.6] text-[#33691E]">{cur.template}</div>
                 <div className="mt-2 text-[10px] font-bold uppercase text-[#9E9E9E]">Preview (sample customer)</div>
-                <div className="mt-1 rounded-[10px] bg-[#F5F7F5] p-3 text-[12.5px] italic leading-[1.6] text-[#424242]">{fillTemplate(cur.template, SAMPLE)}</div>
+                <div className="mt-1 rounded-[10px] bg-[#F5F7F5] p-3 text-[12.5px] italic leading-[1.6] text-[#424242]">{samplePreview(cur)}</div>
               </>
             )}
           </div>
@@ -830,13 +846,15 @@ export function OutreachProgress({ members }: { members: CampaignMemberVM[] }) {
 /* ── Call scripts (comm plans tagged to the campaign) — the left-side panel across all outreach views ── */
 
 /** The slots the officer's live context can fill; others stay as amber placeholders to read/fill on the call. */
-const SCRIPT_SLOT = /(\[Naam\]|\[Store name\]|\[Store\]|\[number\]|\[gap\]|\[last item\]|\[date\])/gi;
+const SCRIPT_SLOT = /(\[name\]|\[Naam\]|\[Store name\]|\[Store\]|\[number\]|\[gap\]|\[last item\]|\[date\])/gi;
 
-/** Renders a script with its placeholders highlighted. When a member is given, [Naam]/[Store]/[number]
+/** Renders a script with its placeholders highlighted. When a member is given, [name]/[Store]/[number]
  *  are filled (green); everything else the officer supplies verbally stays amber. */
 export function ScriptText({ template, member }: { template: string; member?: CampaignMemberVM | null }) {
+  const nameFirst = member?.name ? member.name.trim().split(/\s+/)[0] : null;
   const fill: Record<string, string | null | undefined> = {
-    "[naam]": member?.name ? member.name.trim().split(/\s+/)[0] : null,
+    "[name]": nameFirst,
+    "[naam]": nameFirst,
     "[store name]": member?.store,
     "[store]": member?.store,
     "[number]": member?.mobile,
@@ -858,7 +876,7 @@ export function ScriptText({ template, member }: { template: string; member?: Ca
 function filledPlain(template: string, member?: CampaignMemberVM | null): string {
   const first = member?.name ? member.name.trim().split(/\s+/)[0] : null;
   return template
-    .replace(/\[Naam\]/gi, first ?? "[Naam]")
+    .replace(/\[(?:name|Naam)\]/gi, first ?? "[name]")
     .replace(/\[Store name\]/gi, member?.store ?? "[Store name]")
     .replace(/\[Store\]/gi, member?.store ?? "[Store]")
     .replace(/\[number\]/gi, member?.mobile ?? "[number]");

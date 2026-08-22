@@ -122,37 +122,37 @@ export const DEFAULT_COMM_TEMPLATES: {
     segment: "HNI", priority: 1, medium: "1:1 or Call",
     offer: "Advance booking + 5% discount", timingLabel: "Jul 20 – Aug 6",
     template:
-      "[Naam]ji, aapke pichle season ke Maize crop ke liye — is baar Dekalb DKC 9108 ka naya lot aaya hai. Advance booking pe 3% discount available hai. Kya main aapke liye 10 bag reserve kar doon?",
+      "[name]ji, aapke pichle season ke Maize crop ke liye — is baar Dekalb DKC 9108 ka naya lot aaya hai. Advance booking pe 3% discount available hai. Kya main aapke liye 10 bag reserve kar doon?",
   },
   {
     segment: "POTENTIAL_HNI", priority: 2, medium: "1:1 or Call",
     offer: "Advance booking + special 5% discount if they reach \"gold\" tier", timingLabel: "Jul 20 – Aug 6",
     template:
-      "[Naam]ji, aap hamare top customers mein se ek hain. Is maize season mein sirf ₹[gap] aur khareedein aur hamare Gold Tier mein aa jaayein — phir har purchase par 5% extra discount milega hamesha.",
+      "[name]ji, aap hamare top customers mein se ek hain. Is maize season mein sirf ₹[gap] aur khareedein aur hamare Gold Tier mein aa jaayein — phir har purchase par 5% extra discount milega hamesha.",
   },
   {
     segment: "REGULAR", priority: 3, medium: "Whatsapp",
     offer: "Bundle offer", timingLabel: "Week of Aug 1",
     template:
-      "[Naam]ji, maize season shuru ho raha hai. Pichli baar aapne [last item] liya tha. Is baar seed ke saath NPK 16-16-16 bhi ready rakhein — turant delivery available hai. [Store name] pe aayein ya call karein.",
+      "[name]ji, maize season shuru ho raha hai. Pichli baar aapne [last item] liya tha. Is baar seed ke saath NPK 16-16-16 bhi ready rakhein — turant delivery available hai. [Store name] pe aayein ya call karein.",
   },
   {
     segment: "AT_RISK", priority: 4, medium: "Whatsapp + Call",
     offer: "5% re-engagement discount", timingLabel: "Week of Aug 1 (Whatsapp) · Week of Aug 7 (call)",
     template:
-      "[Naam]ji, kaafi time ho gaya! Maize ki buwai shuru hone wali hai — stock limited hai. Aapke liye ek special offer: pehli visit pe 5% off on Maize seeds. Aaj hi aayein ya call karein: [number].",
+      "[name]ji, kaafi time ho gaya! Maize ki buwai shuru hone wali hai — stock limited hai. Aapke liye ek special offer: pehli visit pe 5% off on Maize seeds. Aaj hi aayein ya call karein: [number].",
   },
   {
     segment: "NEW", priority: 5, medium: "Whatsapp",
     offer: "Starter Maize bundle + 5% discount if buying within 6 months of 1st purchase", timingLabel: "Week of Aug 1",
     template:
-      "[Naam]ji, UA Agro mein swagat hai! Maize ki successful buwai ke liye 3 cheezein zaroori hain: achha seed + basal fertilizer + stem borer protection. Hamare paas complete package hai — aur special discount agar aap [date] tak khareedein.",
+      "[name]ji, UA Agro mein swagat hai! Maize ki successful buwai ke liye 3 cheezein zaroori hain: achha seed + basal fertilizer + stem borer protection. Hamare paas complete package hai — aur special discount agar aap [date] tak khareedein.",
   },
   {
     segment: "LAPSED", priority: 6, medium: "Whatsapp + Call",
     offer: "5% discount + consultation offer", timingLabel: "Week of Aug 1 (Whatsapp) · Week of Aug 7 (call)",
     template:
-      "[Naam]ji, mujhe pata chala aapne pichle 12 mahine se humse nahi kharida. Kya koi problem thi? Is season ke liye — Maize Dekalb 9108 fresh stock aaya hai, 5% discount aur consultation ke saath. Ek baar zaroor milein.",
+      "[name]ji, mujhe pata chala aapne pichle 12 mahine se humse nahi kharida. Kya koi problem thi? Is season ke liye — Maize Dekalb 9108 fresh stock aaya hai, 5% discount aur consultation ke saath. Ek baar zaroor milein.",
   },
 ];
 
@@ -165,7 +165,7 @@ export function fillTemplate(
 ): string {
   const first = (f.name ?? "").trim().split(/\s+/)[0] || "Kisan";
   return template
-    .replace(/\[Naam\]/g, first)
+    .replace(/\[(?:name|Naam)\]/gi, first)
     .replace(/\[gap\]/g, f.hniGap != null ? inr(f.hniGap).replace("₹", "") : "—")
     .replace(/\[last item\]/gi, f.lastItem ?? "apne product")
     .replace(/\[Store name\]/gi, f.store ?? "hamare store")

@@ -1,6 +1,6 @@
 /**
  * Shared personalization variables for campaign messaging. One token set fills both:
- *   • SMS  — named [slots] in the comm-plan text (e.g. [Naam], [Store]).
+ *   • SMS  — named [slots] in the comm-plan text (e.g. [name], [Store]).
  *   • WhatsApp — positional {{1}},{{2}}… mapped in the comm plan's `waVariables` order.
  * All tokens resolve off the Farmer row (+ campaign end date) so a bulk broadcast needs no per-farmer
  * extra queries.
@@ -10,7 +10,7 @@ import { shortStoreName } from "@/lib/store-utils";
 
 /** Tokens an admin can map into a WhatsApp template's variables (order = {{1}},{{2}}…). */
 export const WA_VAR_TOKENS: { key: string; label: string; slot: string }[] = [
-  { key: "name", label: "Farmer first name", slot: "[Naam]" },
+  { key: "name", label: "Farmer first name", slot: "[name]" },
   { key: "fullname", label: "Farmer full name", slot: "[fullname]" },
   { key: "crop", label: "Main crop", slot: "[crop]" },
   { key: "store", label: "Store name", slot: "[Store]" },
@@ -61,8 +61,9 @@ export function fillNamedTemplate(template: string, vars: Record<string, string>
   for (const { slot, key } of WA_VAR_TOKENS) {
     t = t.replace(new RegExp(slot.replace(/[[\]]/g, "\\$&"), "gi"), vars[key] ?? "");
   }
-  // Also accept "[Store name]" as an alias for [Store].
+  // Aliases: "[Store name]" for [Store], and legacy "[Naam]" for the English [name] slot.
   t = t.replace(/\[Store name\]/gi, vars.store ?? "");
+  t = t.replace(/\[Naam\]/gi, vars.name ?? "");
   return t;
 }
 

@@ -942,7 +942,7 @@ function fillSmsTemplate(
   const first = (d.name ?? "").trim().split(/\s+/)[0] || "";
   const gapStr = d.gap != null && d.gap > 0 ? Math.round(d.gap).toLocaleString("en-IN") : "";
   const tokens: { re: RegExp; val: string; label: string }[] = [
-    { re: /\[Naam\]/g, val: first, label: "farmer name" },
+    { re: /\[(?:name|Naam)\]/gi, val: first, label: "farmer name" },
     { re: /\[gap\]/g, val: gapStr, label: "amount to reach HNI" },
     { re: /\[last item\]/gi, val: (d.lastItem ?? "").trim(), label: "last purchased item" },
     { re: /\[Store name\]/gi, val: (d.store ?? "").trim(), label: "store name" },
