@@ -16,7 +16,7 @@ import { useConfirm } from "@/components/ConfirmDialog";
 import { cropLabel } from "@/lib/crops";
 import { inr } from "@/lib/format";
 import {
-  saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, getCampaignTracker, extendCampaign, getCampaignMembers, markCampaignMember, getCampaignAnalytics, exportCampaignAudienceXlsx,
+  saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, getCampaignTracker, extendCampaign, updateCampaignCommPlans, getCampaignMembers, markCampaignMember, getCampaignAnalytics, exportCampaignAudienceXlsx,
   type CampaignListItem, type CampaignTracker, type ProjectVM, type CampaignMemberVM, type CampaignAnalytics,
 } from "@/app/actions/campaigns";
 import { downloadB64 } from "@/lib/download";
@@ -305,6 +305,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
   const [historyOf, setHistoryOf] = useState<CampaignListItem | null>(null); // broadcast history modal from a card
   const [focusCurrent, setFocusCurrent] = useState<CampaignMemberVM | null>(null); // Focus view's current farmer → drives the script panel
   const [extendOf, setExtendOf] = useState<CampaignListItem | null>(null);
+  const [editOf, setEditOf] = useState<CampaignListItem | null>(null);
   const [phasesOf, setPhasesOf] = useState<CampaignListItem | null>(null); // manager phase setup/board
   const [phaseOutreachOf, setPhaseOutreachOf] = useState<CampaignListItem | null>(null); // phase-routed outreach (all roles)
 
@@ -438,6 +439,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
             <button type="button" onClick={() => setPhaseOutreachOf(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#1565C0] hover:bg-[#E3F2FD]">⏱ Round</button>
             {canManage && <button type="button" onClick={() => setPhasesOf(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#E65100] hover:bg-[#FFF3E0]">⚙ Round setup</button>}
             {canManage && <button type="button" onClick={() => openTracker(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9]">Campaign Tracker</button>}
+            {canManage && <button type="button" onClick={() => setEditOf(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#455A64] hover:bg-[#ECEFF1]">✎ Edit</button>}
             {canManage && <button type="button" onClick={() => setExtendOf(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#6A1B9A] hover:bg-[#F3E5F5]">Extend</button>}
             {canManage && <button type="button" onClick={() => setHistoryOf(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#0B8A3D] hover:bg-[#E8F5E9]">📣 Broadcasts</button>}
           </div>
@@ -537,6 +539,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
       </Modal>
 
       {extendOf && <ExtendModal campaign={extendOf} project={projects.find((p) => p.id === projectId) ?? null} onClose={() => setExtendOf(null)} />}
+      {editOf && <EditCommPlansModal campaign={editOf} commPlanNames={commPlanNames} onClose={() => setEditOf(null)} />}
       {phasesOf && (
         <PhasesPanel campaignId={phasesOf.id} campaignName={phasesOf.name} campaignStart={phasesOf.startDate} campaignEnd={phasesOf.endDate}
           commPlanNames={phasesOf.commPlans ?? []} onClose={() => setPhasesOf(null)} />
@@ -579,6 +582,53 @@ function ExtendModal({ campaign, project, onClose }: { campaign: CampaignListIte
         <div className="mt-4 flex justify-end gap-2">
           <button type="button" onClick={onClose} className="rounded-[10px] border border-[#E0E0E0] px-4 py-2 text-[13px] font-semibold text-[#616161]">Cancel</button>
           <button type="button" onClick={save} disabled={saving} className="rounded-[10px] bg-[#6A1B9A] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{saving ? "Extending…" : "Extend"}</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/** Edit which comm plans a campaign is tagged with — add/remove by toggling; must keep at least one. */
+function EditCommPlansModal({ campaign, commPlanNames, onClose }: { campaign: CampaignListItem; commPlanNames: string[]; onClose: () => void }) {
+  const [selected, setSelected] = useState<string[]>(campaign.commPlans ?? []);
+  const [saving, start] = useTransition();
+  const [err, setErr] = useState<string | null>(null);
+  const toggle = (p: string) => setSelected((s) => (s.includes(p) ? s.filter((x) => x !== p) : [...s, p]));
+  // Show every known comm plan, plus any the campaign already has that no longer exist in the catalog.
+  const options = [...new Set([...commPlanNames, ...(campaign.commPlans ?? [])])].sort((a, b) => a.localeCompare(b));
+  const save = () => {
+    setErr(null);
+    start(async () => {
+      const res = await updateCampaignCommPlans(campaign.id, selected);
+      if (res.ok) location.reload(); else setErr(res.error ?? "Failed");
+    });
+  };
+  return (
+    <Modal open onClose={onClose} className="max-w-[520px]">
+      <ModalHeader eyebrow="Edit campaign · comm plans" eyebrowColor="#455A64" title={campaign.name} subtitle="Add or remove the comm plans this campaign is tagged with" onClose={onClose} />
+      <div className="px-5 py-4">
+        <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Comm plans <span className="normal-case text-[#C62828]">*</span> — tag one or more</label>
+        {options.length === 0 ? (
+          <div className="mt-1 rounded-[10px] border border-[#FFE0B2] bg-[#FFF8E1] px-3 py-2 text-[12px] text-[#8D6E00]">No comm plans yet — create one on the Comm Plan tab first.</div>
+        ) : (
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {options.map((p) => {
+              const on = selected.includes(p);
+              return (
+                <button key={p} type="button" onClick={() => toggle(p)}
+                  className="rounded-full border-[1.5px] px-3 py-1 text-[11.5px] font-semibold"
+                  style={{ background: on ? "#2E7D32" : "#fff", color: on ? "#fff" : "#616161", borderColor: on ? "#2E7D32" : "#E0E0E0" }}>
+                  {on ? "✓ " : ""}{p}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <div className="mt-1 text-[11px] text-[#2E7D32]">{selected.length} tagged</div>
+        {err && <div className="mt-2 text-[12px] text-[#C62828]">{err}</div>}
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="rounded-[10px] border border-[#E0E0E0] px-4 py-2 text-[13px] font-semibold text-[#616161]">Cancel</button>
+          <button type="button" onClick={save} disabled={saving || selected.length === 0} className="rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Save comm plans"}</button>
         </div>
       </div>
     </Modal>

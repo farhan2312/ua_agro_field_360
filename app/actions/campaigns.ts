@@ -398,6 +398,20 @@ export async function extendCampaign(campaignId: number, newEndDate: string): Pr
   } catch (e) { return { ok: false, error: e instanceof Error ? e.message : "Extend failed" }; }
 }
 
+/** Add/remove the comm plans a campaign is tagged with (manager-only). Must keep at least one. */
+export async function updateCampaignCommPlans(campaignId: number, commPlans: string[]): Promise<{ ok: boolean; error?: string }> {
+  const perm = await requireManager(); if (!perm.ok) return perm;
+  const camp = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { id: true } });
+  if (!camp) return { ok: false, error: "Campaign not found." };
+  const clean = [...new Set((commPlans ?? []).map((s) => s.trim()).filter(Boolean))];
+  if (!clean.length) return { ok: false, error: "Tag at least one comm plan." };
+  try {
+    await prisma.campaign.update({ where: { id: campaignId }, data: { commPlans: clean } });
+    revalidatePath("/campaigns");
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e instanceof Error ? e.message : "Update failed" }; }
+}
+
 export interface CampaignListItem {
   id: number; name: string; status: string; startDate: string; endDate: string;
   target: string; members: number;
