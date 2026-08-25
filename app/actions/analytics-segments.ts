@@ -777,6 +777,41 @@ export async function getCropTrend(crops: string[]): Promise<CropTrendPoint[]> {
   return out;
 }
 
+/* ── Lead → customer conversions (wasLead flag), role-scoped, broken down by month + store ── */
+export interface LeadConversions {
+  total: number;
+  byMonth: { ym: string; label: string; n: number }[];
+  byStore: { store: string; n: number }[];
+}
+export async function getLeadConversions(): Promise<LeadConversions> {
+  const { role, storeId, managedStoreIds } = await getScope();
+  if (role === "campaigner") return { total: 0, byMonth: [], byStore: [] };
+  const scope: Prisma.Sql =
+    role === "officer"
+      ? storeId != null ? Prisma.sql`AND f."storeId" = ${storeId}` : Prisma.sql`AND false`
+      : role === "regional"
+        ? managedStoreIds && managedStoreIds.length ? Prisma.sql`AND f."storeId" = ANY(${managedStoreIds})` : Prisma.sql`AND false`
+        : Prisma.empty;
+  const base = Prisma.sql`FROM "Farmer" f WHERE f."wasLead" = true ${scope}`;
+  const [monthRows, storeRows, totalRows] = await Promise.all([
+    prisma.$queryRaw<{ ym: string; n: number }[]>(Prisma.sql`
+      SELECT to_char(date_trunc('month', f."leadConvertedAt"), 'YYYY-MM') ym, COUNT(*)::int n
+      ${base} AND f."leadConvertedAt" IS NOT NULL GROUP BY 1 ORDER BY 1`),
+    prisma.$queryRaw<{ storeId: number | null; n: number }[]>(Prisma.sql`
+      SELECT f."storeId" "storeId", COUNT(*)::int n ${base} GROUP BY 1 ORDER BY 2 DESC LIMIT 40`),
+    prisma.$queryRaw<{ n: number }[]>(Prisma.sql`SELECT COUNT(*)::int n ${base}`),
+  ]);
+  const ids = storeRows.map((r) => r.storeId).filter((x): x is number => x != null);
+  const stores = ids.length ? await prisma.store.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }) : [];
+  const nameById = new Map(stores.map((s) => [s.id, shortStore(s.name)]));
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return {
+    total: num(totalRows[0]?.n),
+    byMonth: monthRows.map((r) => { const [y, m] = r.ym.split("-"); return { ym: r.ym, label: `${MONTHS[Number(m) - 1]} '${y.slice(2)}`, n: num(r.n) }; }),
+    byStore: storeRows.map((r) => ({ store: r.storeId != null ? (nameById.get(r.storeId) ?? `Store #${r.storeId}`) : "Unassigned", n: num(r.n) })),
+  };
+}
+
 /* ── Save the current filter as a live dynamic segment ── */
 export async function saveWorkbenchSegment(f: WbFilters, name: string): Promise<{ ok: boolean; id?: number; error?: string }> {
   const scoped = await scopeFilters(f);

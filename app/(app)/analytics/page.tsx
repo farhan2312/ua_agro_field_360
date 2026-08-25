@@ -8,6 +8,7 @@ import { getWorkbench, getWorkbenchFacets, type WbData, type WbFacets } from "@/
 import { VALUE_SEGMENTS, LIFECYCLE_SEGMENTS } from "@/lib/campaign-segments";
 import { AnalyticsWorkbench } from "@/components/analytics/AnalyticsWorkbench";
 import { ScopedDashboard, UnassignedDashboard, type ScopedDashboardData } from "@/components/dashboard/ScopedDashboard";
+import { LeadConversionsCard } from "@/components/analytics/LeadConversionsCard";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +49,7 @@ export default async function AnalyticsPage() {
   return (
     <div className="animate-fadeUp">
       {overview && <ScopedDashboard data={overview} name={persona.name} />}
+      {overview && <LeadConversionsCard />}
       <div className="mt-6">
         <div className="mb-3 text-[14px] font-bold text-[#1A1C1A]">Explore — filter, drill in, save as a cluster</div>
         <AnalyticsWorkbench initial={data} facets={facets} canChain={canManage(scope.role)} />
