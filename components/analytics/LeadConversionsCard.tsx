@@ -6,6 +6,25 @@ import { getLeadConversions, type LeadConversions } from "@/app/actions/analytic
 const CARD = "rounded-[14px] border border-black/[0.04] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]";
 const n = (x: number) => x.toLocaleString("en-IN");
 
+/** Tiny inline SVG sparkline of monthly conversion counts. */
+function Sparkline({ values }: { values: number[] }) {
+  const W = 132, H = 30, P = 3;
+  if (values.length < 2) return null;
+  const max = Math.max(1, ...values);
+  const step = (W - P * 2) / (values.length - 1);
+  const pts = values.map((v, i) => [P + i * step, H - P - (v / max) * (H - P * 2)]);
+  const line = pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const area = `${P},${H - P} ${line} ${(W - P).toFixed(1)},${H - P}`;
+  const [lx, ly] = pts[pts.length - 1];
+  return (
+    <svg width={W} height={H} className="shrink-0" aria-hidden>
+      <polygon points={area} fill="#2E7D32" opacity={0.10} />
+      <polyline points={line} fill="none" stroke="#2E7D32" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={lx} cy={ly} r={2.4} fill="#2E7D32" />
+    </svg>
+  );
+}
+
 /** Bar list — one row per bucket, bar width relative to the max. */
 function Bars({ rows }: { rows: { label: string; n: number }[] }) {
   const max = Math.max(1, ...rows.map((r) => r.n));
@@ -27,15 +46,25 @@ function Bars({ rows }: { rows: { label: string; n: number }[] }) {
 /** Lead → customer conversions, broken down by month and by store (role-scoped on the server). */
 export function LeadConversionsCard() {
   const [data, setData] = useState<LeadConversions | null>(null);
-  useEffect(() => { getLeadConversions().then(setData).catch(() => setData({ total: 0, byMonth: [], byStore: [] })); }, []);
+  useEffect(() => { getLeadConversions().then(setData).catch(() => setData({ total: 0, currentLeads: 0, byMonth: [], byStore: [] })); }, []);
+
+  const denom = data ? data.total + data.currentLeads : 0;
+  const rate = denom > 0 ? (data!.total / denom) * 100 : 0;
 
   return (
     <div className={`${CARD} mt-4 p-5`}>
-      <div className="mb-1 flex items-center gap-2">
+      <div className="mb-1 flex flex-wrap items-center gap-2">
         <span className="text-[14px] font-bold text-[#1A1C1A]">🌱 Lead → customer conversions</span>
         {data && <span className="rounded-full bg-[#E8F5E9] px-2 py-0.5 text-[11px] font-bold text-[#2E7D32]">{n(data.total)} total</span>}
+        {data && denom > 0 && (
+          <span className="rounded-full bg-[#E3F2FD] px-2 py-0.5 text-[11px] font-bold text-[#1565C0]"
+            title={`${n(data.total)} converted of ${n(denom)} ever-registered leads (${n(data.currentLeads)} still open)`}>
+            {rate.toFixed(1)}% conversion rate
+          </span>
+        )}
+        {data && data.byMonth.length >= 2 && <div className="ml-auto"><Sparkline values={data.byMonth.map((m) => m.n)} /></div>}
       </div>
-      <p className="mb-3 text-[12px] text-[#9E9E9E]">Farmers first registered as leads (no purchase) who have since bought. Counts from when tracking began.</p>
+      <p className="mb-3 text-[12px] text-[#9E9E9E]">Farmers first registered as leads (no purchase) who have since bought. Rate = converted ÷ everyone ever registered as a lead. Counts from when tracking began.</p>
 
       {data == null ? (
         <div className="py-6 text-center text-[12.5px] text-[#9E9E9E]">Loading…</div>

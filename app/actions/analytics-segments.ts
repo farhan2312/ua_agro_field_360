@@ -779,13 +779,14 @@ export async function getCropTrend(crops: string[]): Promise<CropTrendPoint[]> {
 
 /* ── Lead → customer conversions (wasLead flag), role-scoped, broken down by month + store ── */
 export interface LeadConversions {
-  total: number;
+  total: number;         // converted (wasLead = true)
+  currentLeads: number;  // still open leads (lifecycleSegment = LEAD) — the not-yet-converted
   byMonth: { ym: string; label: string; n: number }[];
   byStore: { store: string; n: number }[];
 }
 export async function getLeadConversions(): Promise<LeadConversions> {
   const { role, storeId, managedStoreIds } = await getScope();
-  if (role === "campaigner") return { total: 0, byMonth: [], byStore: [] };
+  if (role === "campaigner") return { total: 0, currentLeads: 0, byMonth: [], byStore: [] };
   const scope: Prisma.Sql =
     role === "officer"
       ? storeId != null ? Prisma.sql`AND f."storeId" = ${storeId}` : Prisma.sql`AND false`
@@ -793,13 +794,15 @@ export async function getLeadConversions(): Promise<LeadConversions> {
         ? managedStoreIds && managedStoreIds.length ? Prisma.sql`AND f."storeId" = ANY(${managedStoreIds})` : Prisma.sql`AND false`
         : Prisma.empty;
   const base = Prisma.sql`FROM "Farmer" f WHERE f."wasLead" = true ${scope}`;
-  const [monthRows, storeRows, totalRows] = await Promise.all([
+  const [monthRows, storeRows, totalRows, currentRows] = await Promise.all([
     prisma.$queryRaw<{ ym: string; n: number }[]>(Prisma.sql`
       SELECT to_char(date_trunc('month', f."leadConvertedAt"), 'YYYY-MM') ym, COUNT(*)::int n
       ${base} AND f."leadConvertedAt" IS NOT NULL GROUP BY 1 ORDER BY 1`),
     prisma.$queryRaw<{ storeId: number | null; n: number }[]>(Prisma.sql`
       SELECT f."storeId" "storeId", COUNT(*)::int n ${base} GROUP BY 1 ORDER BY 2 DESC LIMIT 40`),
     prisma.$queryRaw<{ n: number }[]>(Prisma.sql`SELECT COUNT(*)::int n ${base}`),
+    // Still-open leads (not yet converted) in the same scope → the conversion-rate denominator.
+    prisma.$queryRaw<{ n: number }[]>(Prisma.sql`SELECT COUNT(*)::int n FROM "Farmer" f WHERE f."lifecycleSegment" = 'LEAD' ${scope}`),
   ]);
   const ids = storeRows.map((r) => r.storeId).filter((x): x is number => x != null);
   const stores = ids.length ? await prisma.store.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }) : [];
@@ -807,6 +810,7 @@ export async function getLeadConversions(): Promise<LeadConversions> {
   const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   return {
     total: num(totalRows[0]?.n),
+    currentLeads: num(currentRows[0]?.n),
     byMonth: monthRows.map((r) => { const [y, m] = r.ym.split("-"); return { ym: r.ym, label: `${MONTHS[Number(m) - 1]} '${y.slice(2)}`, n: num(r.n) }; }),
     byStore: storeRows.map((r) => ({ store: r.storeId != null ? (nameById.get(r.storeId) ?? `Store #${r.storeId}`) : "Unassigned", n: num(r.n) })),
   };
