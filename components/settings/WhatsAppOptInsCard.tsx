@@ -134,7 +134,7 @@ export function WhatsAppOptInsCard({ initial, qrConfig }: { initial: { total: nu
                   <td className="py-2">
                     {r.farmerId
                       ? <span className="rounded-full bg-[#E8F5E9] px-2 py-0.5 text-[10px] font-bold text-[#2E7D32]">✓ Registered farmer</span>
-                      : <span className="rounded-full bg-[#F5F5F5] px-2 py-0.5 text-[10px] font-bold text-[#9E9E9E]">Not a farmer</span>}
+                      : <span className="rounded-full bg-[#F5F5F5] px-2 py-0.5 text-[10px] font-bold text-[#9E9E9E]">Not registered farmer</span>}
                   </td>
                   <td className="py-2 text-[#9E9E9E]"><span className="line-clamp-1">{r.lastMessage || "—"}</span></td>
                   <td className="py-2 pr-3 text-right text-[#616161]">{fmt(r.optInAt)}</td>

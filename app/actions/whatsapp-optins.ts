@@ -62,7 +62,7 @@ export async function exportOptInsXlsx(q?: string): Promise<{ ok: boolean; filen
   const body = rows.map((r) => [
     r.waId ? `+${r.waId.replace(/\D/g, "")}` : r.mobile,
     r.name || "",
-    r.farmerId ? "Registered farmer" : "Not a farmer",
+    r.farmerId ? "Registered farmer" : "Not registered farmer",
     r.farmerName || "",
     r.messageCount,
     r.lastMessage || "",

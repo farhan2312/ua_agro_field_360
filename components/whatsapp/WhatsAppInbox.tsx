@@ -81,7 +81,7 @@ export function WhatsAppInbox({ initial }: { initial: InboxData | null }) {
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, number, message…"
               className="mb-2 w-full rounded-[8px] border border-[#E0E0E0] px-3 py-1.5 text-[12.5px] outline-none focus:border-[#2E7D32]" />
             <div className="flex gap-1">
-              {([["all", "All"], ["unread", "Unread"], ["unmatched", "Not a farmer"]] as [Filter, string][]).map(([f, l]) => (
+              {([["all", "All"], ["unread", "Unread"], ["unmatched", "Not registered"]] as [Filter, string][]).map(([f, l]) => (
                 <button key={f} type="button" onClick={() => setFilter(f)}
                   className="rounded-full px-3 py-1 text-[11.5px] font-semibold"
                   style={{ background: filter === f ? "#E8F5E9" : "#F5F5F5", color: filter === f ? "#2E7D32" : "#9E9E9E" }}>{l}</button>
@@ -136,7 +136,7 @@ function ConvRow({ c, active, onClick }: { c: ConversationVM; active: boolean; o
           <span className="min-w-0 flex-1 truncate text-[11.5px] text-[#757575]">{c.lastDirection === "OUT" ? "You: " : ""}{c.lastMessage || "—"}</span>
           {c.unreadCount > 0 && <span className="shrink-0 rounded-full bg-[#25D366] px-1.5 py-0.5 text-[9px] font-bold text-white">{c.unreadCount}</span>}
         </div>
-        <div className="mt-0.5 text-[10px] text-[#BDBDBD]">{phone}{c.farmerId ? " · farmer" : " · not a farmer"}</div>
+        <div className="mt-0.5 text-[10px] text-[#BDBDBD]">{phone}{c.farmerId ? " · Registered farmer" : " · Not registered farmer"}</div>
       </div>
     </button>
   );
@@ -157,7 +157,7 @@ function ThreadView({ thread, quickReplies, templates, onBack, onSent, onManageQ
           <div className="text-[13.5px] font-bold text-[#1A1C1A]">{thread.name || phoneOf(thread)}</div>
           <div className="text-[11px] text-[#9E9E9E]">
             {phoneOf(thread)}
-            {thread.farmerId ? <> · <Link href={`/farmers/${thread.farmerId}`} className="font-semibold text-[#1565C0] hover:underline">{thread.farmerName || "View farmer"}</Link></> : " · not a farmer"}
+            {thread.farmerId ? <> · <Link href={`/farmers/${thread.farmerId}`} className="font-semibold text-[#1565C0] hover:underline">{thread.farmerName || "View farmer"}</Link></> : " · Not registered farmer"}
           </div>
         </div>
         <span className="ml-auto rounded-full px-2 py-0.5 text-[10.5px] font-bold"
