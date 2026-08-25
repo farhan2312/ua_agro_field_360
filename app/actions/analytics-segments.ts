@@ -325,7 +325,7 @@ export async function getWorkbench(f: WbFilters): Promise<WbData> {
     const sp = spendTierOr(f.spendTiers, Prisma.sql`f."lifetimeSpend"`); if (sp) conds.push(sp);
     const w = Prisma.join(conds, " AND ");
     [cross, histRows, zoneRows, cropRows] = await Promise.all([
-      prisma.$queryRaw<CrossRow[]>(Prisma.sql`SELECT f."storeId" "storeId", COALESCE(f."valueSegment",'REGULAR') vseg, COALESCE(f."lifecycleSegment",'LAPSED') lseg, COUNT(*)::int n, COALESCE(SUM(f."lifetimeSpend"),0)::bigint spendsum FROM "Farmer" f WHERE ${w} GROUP BY 1,2,3`),
+      prisma.$queryRaw<CrossRow[]>(Prisma.sql`SELECT f."storeId" "storeId", COALESCE(f."valueSegment",'NO_SPEND') vseg, COALESCE(f."lifecycleSegment",'LEAD') lseg, COUNT(*)::int n, COALESCE(SUM(f."lifetimeSpend"),0)::bigint spendsum FROM "Farmer" f WHERE ${w} GROUP BY 1,2,3`),
       prisma.$queryRaw<HistRow[]>(Prisma.sql`SELECT ${histCase(Prisma.sql`f."lifetimeSpend"`)} bucket, COUNT(*)::int n FROM "Farmer" f WHERE ${w} GROUP BY 1`),
       prisma.$queryRaw<ZoneRow[]>(Prisma.sql`SELECT f."zone" AS zone, COALESCE(SUM(f."lifetimeSpend"),0)::bigint spend FROM "Farmer" f WHERE ${w} AND f."zone" IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10`),
       prisma.$queryRaw<CropRow[]>(Prisma.sql`SELECT crop, COUNT(*)::int n FROM (SELECT unnest(f."salesCropTags") crop FROM "Farmer" f WHERE ${w}) u GROUP BY 1 ORDER BY 2 DESC LIMIT 12`),

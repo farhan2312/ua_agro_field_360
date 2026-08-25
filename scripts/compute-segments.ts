@@ -163,6 +163,13 @@ async function main() {
     );
   }
 
+  // Snapshot who is a LEAD right now (before we overwrite lifecycle) — any of these that end up with a
+  // purchase this run has just converted from lead → customer.
+  const priorLeadRows = await prisma.$queryRawUnsafe<{ id: number }[]>(
+    `SELECT id FROM "Farmer" WHERE source='REAL' AND "lifecycleSegment"='LEAD'`,
+  );
+  const priorLeadIds = priorLeadRows.map((r) => r.id);
+
   // ── Bulk UPDATE ... FROM (VALUES ...) in chunks ──
   const CHUNK = 2000;
   let updated = 0;
@@ -191,10 +198,21 @@ async function main() {
        AND NOT EXISTS (SELECT 1 FROM "Sale" s WHERE s."farmerId" = f.id)`,
   );
 
+  // Lead → customer conversions: farmers who were LEAD before this run but now have a purchase. Sticky
+  // (wasLead stays true forever); leadConvertedAt records the first crossing (their first purchase date).
+  const converted = priorLeadIds.length
+    ? await prisma.$executeRawUnsafe(
+        `UPDATE "Farmer" SET "wasLead"=true, "leadConvertedAt"=COALESCE("leadConvertedAt","lastPurchaseAt")
+         WHERE source='REAL' AND "wasLead"=false AND "lastPurchaseAt" IS NOT NULL AND id = ANY($1::int[])`,
+        priorLeadIds,
+      )
+    : 0;
+
   console.log("Legacy campaign segments:", JSON.stringify(segCounts));
   console.log("Value segments:", JSON.stringify(valueCounts));
   console.log("Lifecycle segments:", JSON.stringify(lifecycleCounts));
   console.log(`Leads (REAL farmers with no purchase) tagged LEAD: ${filled}`);
+  console.log(`Leads converted to customers this run: ${converted}`);
   console.log(`Crop tags — maize: ${maizeCount}, potato: ${potatoCount}`);
   await prisma.$disconnect();
 }

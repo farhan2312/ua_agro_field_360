@@ -31,7 +31,7 @@ export async function loadOverview(scope: Scope): Promise<ScopedDashboardData | 
       : {};
 
   try {
-    const [store, farmers, segRows, agg, visits, recentRows, storeCount, zoneCount] = await Promise.all([
+    const [store, farmers, segRows, agg, visits, recentRows, storeCount, zoneCount, leadsConverted] = await Promise.all([
       isStore ? prisma.store.findUnique({ where: { id: storeId! }, select: { name: true, zone: true } }) : Promise.resolve(null),
       prisma.farmer.count({ where: farmerWhere }),
       prisma.farmer.groupBy({ by: ["campaignSegment"], where: farmerWhere, _count: { _all: true } }),
@@ -47,6 +47,8 @@ export async function loadOverview(scope: Scope): Promise<ScopedDashboardData | 
       isStore || isZone
         ? Promise.resolve(0)
         : prisma.store.findMany({ where: { source: "REAL", zone: { not: null } }, distinct: ["zone"], select: { zone: true } }).then((r) => r.length),
+      // Leads that became customers (sticky wasLead flag), within scope.
+      prisma.farmer.count({ where: { ...farmerWhere, wasLead: true } }),
     ]);
 
     const countBy = new Map<string, number>();
@@ -80,6 +82,7 @@ export async function loadOverview(scope: Scope): Promise<ScopedDashboardData | 
         potentialHni: countBy.get("POTENTIAL_HNI") ?? 0,
         revenue12m: agg._sum.p12mSpend ?? 0,
         visits,
+        leadsConverted,
       },
       segments,
       recent,

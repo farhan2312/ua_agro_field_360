@@ -200,8 +200,9 @@ export async function submitVisitAction(
             issues: form.currentProblem,
             ...(lead ? { leadStatus: lead as never } : {}),
             ...(officerStore ? { storeId: officerStore.id, storeCode: officerStore.code } : {}),
-            // No sales yet → a lead with no value tier (compute-segments keeps this until they buy).
+            // No sales yet → a lead: LEAD lifecycle + NO_SPEND value (both dims stay filled until they buy).
             lifecycleSegment: "LEAD",
+            valueSegment: "NO_SPEND",
             source: "REAL",
           },
         });

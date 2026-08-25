@@ -182,6 +182,10 @@ model Farmer {
   lastPotatoItem    String?
   lastPotatoAt      DateTime?
   segmentComputedAt DateTime?
+  // Lead→customer conversion: sticky flag set the first time a farmer who was a LEAD (no purchase)
+  // records a purchase. Powers the "leads converted" analytics stat. Once true, never unset.
+  wasLead           Boolean   @default(false)
+  leadConvertedAt   DateTime? // when they first crossed from lead → customer (their first purchase date)
 
   sales     Sale[]
   saleLines SaleLine[]
@@ -197,6 +201,7 @@ model Farmer {
   @@index([campaignSegment])
   @@index([valueSegment])
   @@index([lifecycleSegment])
+  @@index([wasLead])
   @@index([lifetimeSpend])
   @@index([cropTags], type: Gin)
   @@index([salesCropTags], type: Gin)

@@ -1,4 +1,4 @@
-export interface ScopedKpi { farmers: number; hni: number; potentialHni: number; revenue12m: number; visits: number }
+export interface ScopedKpi { farmers: number; hni: number; potentialHni: number; revenue12m: number; visits: number; leadsConverted: number }
 export interface ScopedSegBar { key: string; label: string; count: number; color: string; bg: string }
 export interface ScopedRecentVisit { id: number; farmer: string; village: string; officer: string; date: string; status: string }
 export interface ScopedDashboardData {
@@ -23,9 +23,12 @@ export function ScopedDashboard({ data, name }: { data: ScopedDashboardData; nam
           <div className="truncate text-[18px] font-bold text-white">{data.label}</div>
           <div className="mt-0.5 text-[12px] text-white/80">{data.sub}</div>
         </div>
-        <span className="shrink-0 rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold text-white">
-          {scopeChip}
-        </span>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="rounded-full bg-white/15 px-3 py-1.5 text-[11px] font-semibold text-white" title="Leads (registered before any purchase) who have since bought — cumulative">
+            🌱 {data.kpi.leadsConverted.toLocaleString("en-IN")} leads converted
+          </span>
+          <span className="rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold text-white">{scopeChip}</span>
+        </div>
       </div>
     </div>
   );
