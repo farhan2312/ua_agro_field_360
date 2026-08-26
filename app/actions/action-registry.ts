@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { getScope, getActor, farmerScopeWhere } from "@/lib/scope";
+import { getScope, getActor, canSignOff, farmerScopeWhere } from "@/lib/scope";
 import { FOLLOWUP_REASONS, type ActionVM, type FarmerPick } from "@/lib/action-constants";
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
@@ -143,6 +143,11 @@ export async function completeAction(id: number, note?: string): Promise<{ ok: b
   const closing = (note ?? "").trim();
   if (!closing) return { ok: false, error: "A closing summary is required to mark an action done." };
   const actor = await getActor();
+  // Only the creator, the RM who manages that store, or a central/sysadmin may complete it.
+  const target = await prisma.action.findUnique({ where: { id }, select: { storeId: true, createdByCode: true } });
+  if (!target) return { ok: false, error: "Action not found." };
+  if (!canSignOff(scope, actor.code, { storeId: target.storeId, byCode: target.createdByCode }))
+    return { ok: false, error: "You can only complete actions you created, or (as their RM/admin) ones in your stores." };
   try {
     await prisma.action.update({
       where: { id },

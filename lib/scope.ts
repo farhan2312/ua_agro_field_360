@@ -46,6 +46,24 @@ export function canManage(role: RoleKey): boolean {
 }
 
 /**
+ * May the current user act on (complete an action / sign off a visit) a record made by someone?
+ * The maker themselves (by employee code, any role), the RM who manages that store, and any
+ * central/sysadmin qualify. Officers may only act on their OWN records. Campaigners: never.
+ */
+export function canSignOff(
+  scope: Scope,
+  actorCode: string | null,
+  target: { storeId: number | null; byCode: string | null | undefined },
+): boolean {
+  if (scope.role === "central" || scope.role === "sysadmin") return true;
+  const isMaker = !!actorCode && !!target.byCode && target.byCode === actorCode;
+  if (scope.role === "regional")
+    return isMaker || (target.storeId != null && (scope.managedStoreIds ?? []).includes(target.storeId));
+  if (scope.role === "officer") return isMaker;
+  return false; // campaigner
+}
+
+/**
  * Row-level scope fragments. `null` = unrestricted (central/sysadmin); `"none"` = show
  * nothing (a scoped user with no store assigned — fail CLOSED, never open).
  *

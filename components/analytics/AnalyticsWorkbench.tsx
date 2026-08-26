@@ -8,6 +8,7 @@ import { VALUE_SEGMENTS, LIFECYCLE_SEGMENTS, VALUE_TITLE, LIFECYCLE_TITLE, segMe
 import { cropLabel } from "@/lib/crops";
 import { tagLabel } from "@/lib/crop-pest";
 import { VisitDateFilter } from "./VisitDateFilter";
+import { LeadConversionsCard } from "./LeadConversionsCard";
 import {
   getWorkbench, getWorkbenchCustomers, saveWorkbenchSegment, getCropTrend, getVisitAnalytics, getSalesRawData,
   type Lens, type WbFilters, type WbData, type WbFacets, type WbBar, type WbCustomer, type CropTrendPoint,
@@ -231,6 +232,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
       {/* Sales board — trend, charts, matrix. The Visit lens gets its own board built purely from visit data. */}
       {filters.lens === "sales" ? (
       <div className="flex flex-col gap-[14px]">
+        <LeadConversionsCard />
         <CropTrendCard crops={filters.crops ?? []} years={years} />
 
         <div className="grid grid-cols-1 gap-[14px] lg:grid-cols-2">
