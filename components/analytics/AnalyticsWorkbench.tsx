@@ -43,7 +43,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
     const cur = (filters[key] as string[] | undefined) ?? [];
     apply({ [key]: cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v] } as Partial<WbFilters>);
   };
-  const toggleInt = (key: "storeIds" | "spendTiers" | "fyStarts", v: number) => {
+  const toggleInt = (key: "storeIds" | "spendTiers" | "fyStarts" | "storeTags", v: number) => {
     const cur = (filters[key] as number[] | undefined) ?? [];
     apply({ [key]: cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v].sort((a, b) => a - b) } as Partial<WbFilters>);
   };
@@ -62,7 +62,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
     setExporting(true); setExportBytes(0);
     try {
       const f = {
-        storeIds: filters.storeIds, zones: filters.zones, villages: filters.villages, crops: filters.crops, pests: filters.pests,
+        storeIds: filters.storeIds, storeTags: filters.storeTags, zones: filters.zones, villages: filters.villages, crops: filters.crops, pests: filters.pests,
         valueSegments: filters.valueSegments, lifecycleSegments: filters.lifecycleSegments,
         spendTiers: filters.spendTiers, fyStarts: filters.fyStarts, problems: filters.problems,
         visitFrom: filters.visitFrom, visitTo: filters.visitTo,
@@ -108,7 +108,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
     setExportScope((s) => (s === "both" ? s : lens === "visit" ? "visits" : "sales")); // follow the lens unless the user chose Both
     apply({ lens, crops: undefined, valueSegments: undefined, lifecycleSegments: undefined, spendTiers: undefined, problems: undefined });
   };
-  const clearAll = () => apply({ storeIds: undefined, zones: undefined, villages: undefined, crops: undefined, pests: undefined, valueSegments: undefined, lifecycleSegments: undefined, spendTiers: undefined, problems: undefined, fyStarts: undefined, visitFrom: undefined, visitTo: undefined });
+  const clearAll = () => apply({ storeIds: undefined, storeTags: undefined, zones: undefined, villages: undefined, crops: undefined, pests: undefined, valueSegments: undefined, lifecycleSegments: undefined, spendTiers: undefined, problems: undefined, fyStarts: undefined, visitFrom: undefined, visitTo: undefined });
 
   const openCell = (storeId: number | null, storeName: string, dim: SegDim | "cross", seg: string) => {
     setCell({ storeId, storeName, dim, seg }); setRows(null);
@@ -117,7 +117,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
 
   const cropOpts = filters.lens === "sales" ? facets.salesCrops : facets.visitCrops;
   const activeFilterCount = [
-    filters.storeIds, filters.zones, filters.villages, filters.crops, filters.pests,
+    filters.storeIds, filters.storeTags, filters.zones, filters.villages, filters.crops, filters.pests,
     filters.valueSegments, filters.lifecycleSegments, filters.spendTiers, filters.problems, filters.fyStarts,
   ].filter((a) => a && a.length).length;
   const k = data.kpis;
@@ -170,6 +170,10 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
         <span className="text-[11px] font-bold uppercase tracking-[0.5px] text-[#9E9E9E]">{filters.lens === "sales" ? "Sales filters" : "Visit filters"}:</span>
         <MultiSel ph="All stores" options={facets.stores.map((s) => [String(s.id), s.name])}
           selected={(filters.storeIds ?? []).map(String)} onToggle={(v) => toggleInt("storeIds", Number(v))} onClear={() => apply({ storeIds: undefined })} />
+        {facets.storeTags.length > 0 && (
+          <MultiSel ph="All store tags" accent="#00838F" options={facets.storeTags.map((t) => [String(t.id), t.name])}
+            selected={(filters.storeTags ?? []).map(String)} onToggle={(v) => toggleInt("storeTags", Number(v))} onClear={() => apply({ storeTags: undefined })} />
+        )}
         <MultiSel ph="All districts" options={facets.zones.map((z) => [z, z])}
           selected={filters.zones ?? []} onToggle={(v) => toggleStr("zones", v)} onClear={() => apply({ zones: undefined })} />
         <MultiSel ph="All villages" options={facets.villages.map((v) => [v.village, `${v.village} (${n(v.count)})`])}

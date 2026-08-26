@@ -12,6 +12,8 @@ import { listOptIns, getOptInQrConfig, type OptInRow } from "@/app/actions/whats
 import { WhatsAppTemplatesCard } from "@/components/settings/WhatsAppTemplatesCard";
 import { waTemplatesStatus, listTemplates, type WaTemplate } from "@/app/actions/whatsapp-templates";
 import { SettingsTabs } from "@/components/settings/SettingsTabs";
+import { StoreTagsCard } from "@/components/settings/StoreTagsCard";
+import { listStoreTags, type StoreTagVM } from "@/app/actions/store-tags";
 import { countVars } from "@/lib/wa-template-presets";
 
 export const dynamic = "force-dynamic";
@@ -99,6 +101,9 @@ export default async function SettingsPage() {
     optInCfg = { number: cfg.number, message: cfg.message };
   } catch { /* DB unavailable */ }
 
+  let storeTags: StoreTagVM[] = [];
+  try { storeTags = await listStoreTags(); } catch { /* DB unavailable */ }
+
   // WhatsApp template manager (create/submit/track approval via the Business Management API).
   let tplInit: { ready: boolean; missing: string[]; templates: WaTemplate[] } = { ready: false, missing: [], templates: [] };
   try {
@@ -141,6 +146,16 @@ export default async function SettingsPage() {
               <SmsTestCard plans={plans} smsReady={sms.ready} missing={sms.missing} senderId={sms.cfg.senderId} waReady={wa.ready} waMissing={wa.missing}
                 waTemplates={tplInit.templates.filter((t) => t.status === "APPROVED").map((t) => ({ name: t.name, language: t.language, body: t.body, varCount: countVars(t.body) }))} />
               <WhatsAppOptInsCard initial={optIns} qrConfig={optInCfg} />
+            </div>
+          ),
+        },
+        {
+          key: "store-tags",
+          label: "Store Tags",
+          icon: "🏷",
+          content: (
+            <div className="mx-auto max-w-3xl">
+              <StoreTagsCard initial={storeTags} />
             </div>
           ),
         },

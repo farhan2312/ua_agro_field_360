@@ -14,6 +14,7 @@ import { getStoreFarmers, createClusterFromSelection } from "@/app/actions/clust
 import { ChainNext } from "@/components/ChainNext";
 import type { FarmerFilters, StoreFarmersResult } from "@/lib/cluster";
 import type { StoreListItem } from "./types";
+import { StoreTagEditor } from "./StoreTagEditor";
 
 const EMPTY_FILTERS: FarmerFilters = {};
 const selectClass =
@@ -183,7 +184,7 @@ export function StoreFarmersPanel({
             </span>
           </div>
           <div className="mt-0.5 text-[11px] text-ink-muted">{activeFilterText}</div>
-        </div>
+        </div>{/* header text */}
         <div className="flex items-center gap-2">
           {selectedCount > 0 && (
             <span className="rounded-full bg-brand-50 px-3 py-1 text-[12px] font-semibold text-brand-700">
@@ -200,6 +201,9 @@ export function StoreFarmersPanel({
           </button>
         </div>
       </div>
+
+      {/* Store tags (single store) — RM/admin can assign; others see them read-only */}
+      {stores.length === 1 && <StoreTagEditor storeId={stores[0].id} />}
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2 border-b border-line bg-surface-50 px-5 py-3">

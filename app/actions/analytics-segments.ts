@@ -17,6 +17,7 @@ export type Lens = "sales" | "visit";
 export interface WbFilters {
   lens: Lens;
   storeIds?: number[];       // stores — match ANY
+  storeTags?: number[];      // store-tag ids — a farmer's store carries ANY of these (array overlap)
   zones?: string[];          // regions — match ANY
   villages?: string[];       // villages (UPPER-TRIMMED keys) — match ANY; both lenses
   crops?: string[];          // crops (sales or visit depending on lens) — match ANY (array overlap)
@@ -51,6 +52,7 @@ function spendTierOr(tiers: number[] | undefined, expr: Prisma.Sql): Prisma.Sql 
 function staticConds(f: WbFilters, alias = ""): Prisma.Sql[] {
   const c: Prisma.Sql[] = [Prisma.sql`${col(alias, "source")} = 'REAL'`];
   if (f.storeIds?.length) c.push(Prisma.sql`${col(alias, "storeId")} = ANY(${f.storeIds})`);
+  if (f.storeTags?.length) c.push(Prisma.sql`EXISTS (SELECT 1 FROM "Store" st WHERE st.id = ${col(alias, "storeId")} AND st."tagIds" && ${f.storeTags}::int[])`);
   if (f.zones?.length) c.push(Prisma.sql`${col(alias, "zone")} = ANY(${f.zones})`);
   if (f.villages?.length) c.push(Prisma.sql`upper(btrim(${col(alias, "village")})) = ANY(${f.villages})`);
   if (f.crops?.length) {
@@ -174,11 +176,12 @@ export interface WbFacets {
   years: number[]; // distinct financial-year start years (Apr–Mar) for the crop-trend FY filter, role-scoped
   visitMinDate: string | null; // earliest scoped visit date (ISO) — lower bound for the visit date slider
   villages: { village: string; count: number }[]; // top villages by farmer count (UPPER-TRIMMED), both lenses
+  storeTags: { id: number; name: string; color: string }[]; // store-tag catalog (for the tag filter)
 }
 export async function getWorkbenchFacets(): Promise<WbFacets> {
   const { role, storeId, managedStoreIds } = await getScope();
   if (role === "campaigner") // call team has no analytics access — fail closed
-    return { stores: [], zones: [], salesCrops: [], visitCrops: [], pests: [], problems: [], spendTiers: [], years: [], visitMinDate: null, villages: [] };
+    return { stores: [], zones: [], salesCrops: [], visitCrops: [], pests: [], problems: [], spendTiers: [], years: [], visitMinDate: null, villages: [], storeTags: [] };
   const isOfficer = role === "officer", isRM = role === "regional";
   // RM scope is the set of STORES they manage (Store.regionalManager). Empty → -1 (no rows).
   const rmIds = isRM && managedStoreIds && managedStoreIds.length ? managedStoreIds : [-1];
@@ -234,6 +237,7 @@ export async function getWorkbenchFacets(): Promise<WbFacets> {
     years: yr.map((r) => num(r.y)).filter(Boolean),
     visitMinDate: vmin[0]?.d ?? null,
     villages: vil.map((r) => ({ village: r.village, count: num(r.n) })),
+    storeTags: (await prisma.storeTag.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }] })).map((t) => ({ id: t.id, name: t.name, color: t.color })),
   };
 }
 

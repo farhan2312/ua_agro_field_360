@@ -68,6 +68,7 @@ model Store {
   regionalManager String?
   lat             Float?
   lng             Float?
+  tagIds          Int[]      @default([]) // StoreTag ids assigned to this store (RM/admin managed) — many-to-many
   source          DataSource @default(REAL)
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
@@ -79,6 +80,17 @@ model Store {
   actions   Action[]
 
   @@index([zone])
+  @@index([tagIds], type: Gin)
+}
+
+/// A tag a store can be labelled with (e.g. "Priority", "Border"). Catalog edited by sysadmin in
+/// Settings; assigned to stores by RM/central/sysadmin. Many-to-many via Store.tagIds.
+model StoreTag {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  color     String   @default("#2E7D32") // chip color
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
 }
 
 model Employee {
