@@ -9,6 +9,8 @@ import { cropLabel } from "@/lib/crops";
 import { tagLabel } from "@/lib/crop-pest";
 import { VisitDateFilter } from "./VisitDateFilter";
 import { LeadConversionsCard } from "./LeadConversionsCard";
+import { PerformanceBoard } from "./PerformanceBoard";
+import type { PerfKind } from "@/app/actions/analytics-performance";
 import {
   getWorkbench, getWorkbenchCustomers, saveWorkbenchSegment, getCropTrend, getVisitAnalytics, getSalesRawData,
   type Lens, type WbFilters, type WbData, type WbFacets, type WbBar, type WbCustomer, type CropTrendPoint,
@@ -27,6 +29,7 @@ const fyLabel = (y: number) => `FY ${y}–${String((y + 1) % 100).padStart(2, "0
 
 export function AnalyticsWorkbench({ initial, facets, canChain = false }: { initial: WbData; facets: WbFacets; canChain?: boolean }) {
   const [filters, setFilters] = useState<WbFilters>({ lens: "sales" });
+  const [perfTab, setPerfTab] = useState<PerfKind | null>(null); // null = segmentation (Sales/Visits); else a performance board
   const [data, setData] = useState(initial);
   const [visitData, setVisitData] = useState<VisitAnalytics | null>(null);
   const [loading, start] = useTransition();
@@ -127,17 +130,32 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
 
   return (
     <div className="animate-[fadeUp_0.4s_ease-out]">
-      {/* Lens toggle + save */}
+      {/* Tab strip: Sales / Visits (segmentation) + Stores / RMs / Agri Officers (performance) */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div className="inline-flex rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] p-1">
-          {(["sales", "visit"] as Lens[]).map((l) => (
-            <button key={l} type="button" onClick={() => setLens(l)}
-              className="rounded-[8px] px-5 py-2 text-[12.5px] font-bold transition-colors"
-              style={{ background: filters.lens === l ? "#fff" : "transparent", color: filters.lens === l ? "#2E7D32" : "#9E9E9E", boxShadow: filters.lens === l ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}>
-              {l === "sales" ? "Sales" : "Visits"}
-            </button>
-          ))}
+        <div className="inline-flex flex-wrap rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] p-1">
+          {(["sales", "visit"] as Lens[]).map((l) => {
+            const active = !perfTab && filters.lens === l;
+            return (
+              <button key={l} type="button" onClick={() => { setPerfTab(null); setLens(l); }}
+                className="rounded-[8px] px-5 py-2 text-[12.5px] font-bold transition-colors"
+                style={{ background: active ? "#fff" : "transparent", color: active ? "#2E7D32" : "#9E9E9E", boxShadow: active ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}>
+                {l === "sales" ? "Sales" : "Visits"}
+              </button>
+            );
+          })}
+          <span className="mx-1 my-1 w-px bg-[#E0E0E0]" />
+          {([["stores", "Stores"], ["rms", "RMs"], ["officers", "Agri Officers"]] as [PerfKind, string][]).map(([kind, label]) => {
+            const active = perfTab === kind;
+            return (
+              <button key={kind} type="button" onClick={() => setPerfTab(kind)}
+                className="rounded-[8px] px-5 py-2 text-[12.5px] font-bold transition-colors"
+                style={{ background: active ? "#fff" : "transparent", color: active ? "#1565C0" : "#9E9E9E", boxShadow: active ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}>
+                {label}
+              </button>
+            );
+          })}
         </div>
+        {!perfTab && (
         <div className="flex flex-wrap items-center gap-2">
           {loading && <span className="text-[12px] text-[#9E9E9E]">Updating…</span>}
           {/* Unified export: choose Sales / Visits / Both → one Excel (Both = separate sheets, filters respected). */}
@@ -163,8 +181,13 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
           <button type="button" onClick={() => setSaving(true)} disabled={k.farmers === 0}
             className="rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50">＋ Save as cluster</button>
         </div>
+        )}
       </div>
 
+      {perfTab ? (
+        <PerformanceBoard kind={perfTab} storeTags={facets.storeTags} />
+      ) : (
+      <>
       {/* Filter bar — every filter is a uniform-width multi-select (alphabetical options). */}
       <div className={`${CARD} mb-3 flex flex-wrap items-center gap-2 p-3`}>
         <span className="text-[11px] font-bold uppercase tracking-[0.5px] text-[#9E9E9E]">{filters.lens === "sales" ? "Sales filters" : "Visit filters"}:</span>
@@ -288,6 +311,8 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false }: { init
       </Modal>
 
       {saving && <SaveModal filters={filters} kpi={k.farmers} canChain={canChain} onClose={() => setSaving(false)} />}
+      </>
+      )}
     </div>
   );
 }
