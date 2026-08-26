@@ -786,6 +786,14 @@ model Visit {
   photos          String[] @default([])
   voiceNotes      String[] @default([])
 
+  // Optional review / sign-off layer. A visit is "reviewed" when reviewedAt is set. Officer visits are
+  // signed off by their managing RM (or the officer themselves / an admin); RM visits by themselves / admins.
+  reviewedAt     DateTime?
+  reviewNote     String?  @db.Text
+  reviewedByName String?
+  reviewedByCode String?
+  reviewedByRole String? // roleKey of the reviewer at sign-off
+
   source    DataSource @default(DEMO)
   createdAt DateTime   @default(now())
   actions   Action[]
@@ -794,6 +802,7 @@ model Visit {
   @@index([storeId])
   @@index([visitedAt]) // recent-visit sorts (dashboard, visit repository)
   @@index([officerName]) // per-officer dashboard + repository filters
+  @@index([reviewedAt]) // reviewed/unreviewed filter + pending-review counts
 }
 
 // ─────────────────── Action Registry (follow-ups) ───────────────────

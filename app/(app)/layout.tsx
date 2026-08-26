@@ -3,6 +3,7 @@ import { getRole, getPersona } from "@/lib/session";
 import { getSession } from "@/lib/auth";
 import { getHeaderCounts } from "@/lib/stats";
 import { countOverdueActions } from "@/app/actions/action-registry";
+import { pendingReviewCount } from "@/app/actions/visit-review";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { MobileNav } from "@/components/shell/MobileNav";
 import { Header } from "@/components/shell/Header";
@@ -14,11 +15,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const session = await getSession();
   if (!session) redirect("/login"); // belt-and-suspenders (middleware also guards)
 
-  const [role, persona, counts, overdueActions] = await Promise.all([
+  const [role, persona, counts, overdueActions, pendingReviews] = await Promise.all([
     getRole(),
     getPersona(),
     getHeaderCounts(),
     countOverdueActions(),
+    pendingReviewCount(),
   ]);
 
   const isAdmin = session.isAdmin;
@@ -33,6 +35,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         isAdmin={isAdmin}
         impersonating={impersonating}
         overdueActions={overdueActions}
+        pendingReviews={pendingReviews}
       />
       {/*
         min-w-0 is load-bearing: flex items default to min-width:auto, so without it this

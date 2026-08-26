@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import type { RecCard } from "@/lib/visit-types";
+import { VisitReviewSection } from "./VisitReviewSection";
 
 export interface VisitDetailData {
   vid: string;
@@ -12,6 +13,12 @@ export interface VisitDetailData {
   notes: string;
   officer: string;
   recordedBy: string; // audit — "Name (UA123) · 16 Jul 2026, 4:32 pm"
+  // Review / sign-off layer
+  visitId: number;
+  reviewed: boolean;
+  reviewNote: string;
+  reviewedBy: string; // "Name (UA123) · Regional Manager · 20 Aug 2026"
+  canReview: boolean;
   village: string;
   district: string;
   crop: string;
@@ -168,6 +175,12 @@ export function VisitDetailView({ data }: { data: VisitDetailData }) {
         </svg>
         Back to Visit Repository
       </Link>
+
+      {(data.reviewed || data.canReview) && (
+        <div className="mb-[18px]">
+          <VisitReviewSection visitId={data.visitId} reviewed={data.reviewed} reviewNote={data.reviewNote} reviewedBy={data.reviewedBy} canReview={data.canReview} />
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-[1fr_1.4fr] gap-[18px]">
         {/* LEFT column */}

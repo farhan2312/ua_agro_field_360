@@ -15,7 +15,7 @@ interface PersonaVM {
   color: string;
 }
 
-function NavLink({ item, active, badge }: { item: NavItem; active: boolean; badge?: number }) {
+function NavLink({ item, active, badge, badgeTitle }: { item: NavItem; active: boolean; badge?: number; badgeTitle?: string }) {
   const Icon = NavIcons[item.id];
   return (
     <Link
@@ -32,7 +32,7 @@ function NavLink({ item, active, badge }: { item: NavItem; active: boolean; badg
       {badge ? (
         <span
           className="ml-auto rounded-full bg-[#E53935] px-1.5 py-0.5 text-[10px] font-bold leading-none text-white"
-          title={`${badge} overdue`}
+          title={`${badge} ${badgeTitle ?? "overdue"}`}
         >
           {badge > 99 ? "99+" : badge}
         </span>
@@ -47,12 +47,14 @@ export function Sidebar({
   isAdmin,
   impersonating,
   overdueActions = 0,
+  pendingReviews = 0,
 }: {
   role: RoleKey;
   persona: PersonaVM;
   isAdmin: boolean;
   impersonating: RoleKey | null;
   overdueActions?: number;
+  pendingReviews?: number;
 }) {
   const pathname = usePathname();
   const active = activeNavHref(pathname);
@@ -77,7 +79,8 @@ export function Sidebar({
       <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 py-4">
         {main.map((item) => (
           <NavLink key={item.id} item={item} active={active === item.href}
-            badge={item.id === "actionRegistry" ? overdueActions : undefined} />
+            badge={item.id === "actionRegistry" ? overdueActions : item.id === "visitRepo" ? pendingReviews : undefined}
+            badgeTitle={item.id === "visitRepo" ? "awaiting review" : "overdue"} />
         ))}
 
         {showSalesGroup && (

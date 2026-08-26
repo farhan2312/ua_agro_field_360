@@ -20,8 +20,15 @@ export function VisitRow({ row }: { row: VisitRecord }) {
           {initials(row.farmerName)}
         </div>
         <div>
-          <div className="text-[13px] font-semibold text-[#1A1C1A]">
-            {row.farmerName}
+          <div className="flex items-center gap-[6px]">
+            <span className="text-[13px] font-semibold text-[#1A1C1A]">
+              {row.farmerName}
+            </span>
+            {row.reviewed && (
+              <span className="inline-flex items-center rounded-full px-[7px] py-[1px] text-[9.5px] font-bold shrink-0" style={{ background: "#E8F5E9", color: "#2E7D32" }}>
+                ✓ Reviewed
+              </span>
+            )}
           </div>
           <div className="text-[10.5px] text-[#BDBDBD]">
             {[row.village, row.district].filter(Boolean).join(", ")}

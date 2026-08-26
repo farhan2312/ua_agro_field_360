@@ -14,6 +14,7 @@ export interface VisitRecord {
   avBg: string;
   needsFollowup: boolean;
   followUp: string; // display date of the scheduled follow-up, or ""
+  reviewed: boolean; // has this visit been signed off / reviewed?
 }
 
 export interface VisitFilterState {
@@ -22,6 +23,7 @@ export interface VisitFilterState {
   rm: string; // regional manager filter
   type: string;
   period: string;
+  review: string; // "all" | "reviewed" | "pending"
   q: string; // free-text search (farmer name / mobile / village / officer)
 }
 

@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getScope, visitScopeWhere } from "@/lib/scope";
+import { getScope, visitScopeWhere, getActor, canSignOff } from "@/lib/scope";
+import { roleLabel } from "@/lib/roles";
 import { initials, avatarColor } from "@/lib/format";
 import { shortStoreName, storeColor } from "@/lib/store-utils";
 import {
@@ -28,6 +29,12 @@ type VisitRow = {
   officerName: string | null;
   recordedBy: string | null;
   recordedByCode: string | null;
+  storeId: number | null;
+  reviewedAt: Date | null;
+  reviewNote: string | null;
+  reviewedByName: string | null;
+  reviewedByCode: string | null;
+  reviewedByRole: string | null;
   createdAt: Date;
   visitMode: string | null;
   gpsLat: number | null;
@@ -102,6 +109,11 @@ function displayDate(dateStr: string | null, visitedAt: Date | null): string {
 function emptyDetail(id: number, justCreated: boolean): VisitDetailData {
   return {
     vid: `VIS-${String(id).padStart(4, "0")}`,
+    visitId: id,
+    reviewed: false,
+    reviewNote: "",
+    reviewedBy: "",
+    canReview: false,
     date: "",
     followUpDate: "",
     purpose: "",
@@ -174,7 +186,8 @@ export default async function VisitDetailPage({
 
   // RBAC: the id lookup is AND-ed with the caller's scope, so an out-of-store /
   // out-of-region visit 404s instead of opening by direct URL.
-  const visitScope = visitScopeWhere(await getScope());
+  const scope = await getScope();
+  const visitScope = visitScopeWhere(scope);
   if (visitScope === "none") notFound();
 
   let visit: VisitRow | null = null;
@@ -192,6 +205,12 @@ export default async function VisitDetailPage({
         officerName: true,
         recordedBy: true,
         recordedByCode: true,
+        storeId: true,
+        reviewedAt: true,
+        reviewNote: true,
+        reviewedByName: true,
+        reviewedByCode: true,
+        reviewedByRole: true,
         createdAt: true,
         visitMode: true,
         gpsLat: true,
@@ -261,8 +280,20 @@ export default async function VisitDetailPage({
     visit.landHoldingUnit ||
     (visit.farmer?.land != null ? `${visit.farmer.land} acres` : "");
 
+  // Review / sign-off: can the current user review this visit? (recorder / managing RM / admin)
+  const actor = await getActor();
+  const canReview = canSignOff(scope, actor.code, { storeId: visit.storeId ?? visit.store?.id ?? null, byCode: visit.recordedByCode });
+  const reviewedBy = visit.reviewedByName
+    ? `${visit.reviewedByName}${visit.reviewedByCode ? ` (${visit.reviewedByCode})` : ""}${visit.reviewedByRole ? ` · ${roleLabel(visit.reviewedByRole as never)}` : ""}${visit.reviewedAt ? ` · ${visit.reviewedAt.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}` : ""}`
+    : "";
+
   const data: VisitDetailData = {
     vid: `VIS-${String(visit.id).padStart(4, "0")}`,
+    visitId: visit.id,
+    reviewed: visit.reviewedAt != null,
+    reviewNote: visit.reviewNote ?? "",
+    reviewedBy,
+    canReview,
     date: displayDate(visit.date, visit.visitedAt),
     followUpDate: visit.followUpDate
       ? (() => { const d = new Date(`${visit.followUpDate}T00:00:00`); return Number.isNaN(d.getTime()) ? visit.followUpDate! : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); })()

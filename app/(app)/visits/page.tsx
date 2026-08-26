@@ -18,6 +18,7 @@ type SearchParams = {
   store?: string;
   rm?: string;
   type?: string;
+  review?: string;
   period?: string;
   q?: string;
   page?: string;
@@ -51,6 +52,7 @@ export default async function VisitRepoPage({
   const store = sp.store ?? "all";
   const rm = sp.rm ?? "all";
   const type = sp.type ?? "all";
+  const review = sp.review === "reviewed" || sp.review === "pending" ? sp.review : "all";
   const period = sp.period && sp.period in PERIOD_DAYS ? sp.period : "month";
   const q = (sp.q ?? "").trim();
   const page = Math.max(1, Number.parseInt(sp.page ?? "1", 10) || 1);
@@ -113,6 +115,8 @@ export default async function VisitRepoPage({
     const where: Prisma.VisitWhereInput = {};
     if (officer !== "all") where.officerName = officer;
     if (type !== "all") where.purpose = type;
+    if (review === "reviewed") where.reviewedAt = { not: null };
+    else if (review === "pending") where.reviewedAt = null;
     const cutoff = periodCutoff(period);
     if (cutoff) where.visitedAt = { gte: cutoff };
     // Store filter is a SHORT name (may cover several stores); RM filter is a manager name (covers their
@@ -186,6 +190,7 @@ export default async function VisitRepoPage({
           storeId: v.store?.id ?? null,
           rm: v.store?.regionalManager?.trim() || "",
           avBg: avatarColor(i),
+          reviewed: v.reviewedAt != null,
           needsFollowup: !!v.followUpDate,
           followUp: v.followUpDate
             ? (() => { const d = new Date(`${v.followUpDate}T00:00:00`); return Number.isNaN(d.getTime()) ? v.followUpDate! : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); })()
@@ -211,7 +216,7 @@ export default async function VisitRepoPage({
       />
 
       <VisitFilterBar
-        filter={{ officer, store, rm, type, period, q }}
+        filter={{ officer, store, rm, type, review, period, q }}
         options={{ officers: officerOptions, stores: storeOptions, rms: rmOptions, types: typeOptions }}
         total={total}
       />

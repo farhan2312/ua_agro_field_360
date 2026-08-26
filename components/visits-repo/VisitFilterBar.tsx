@@ -167,6 +167,18 @@ export function VisitFilterBar({
           ))}
         </select>
 
+        {/* Review status filter */}
+        <select
+          value={filter.review}
+          onChange={(e) => setParam("review", e.target.value)}
+          className={SELECT_CLASS}
+          aria-label="Filter by review status"
+        >
+          <option value="all">All Reviews</option>
+          <option value="reviewed">✓ Reviewed</option>
+          <option value="pending">Not reviewed</option>
+        </select>
+
         <div className="ml-auto text-xs text-[#9E9E9E] font-medium">
           {total} visits found
         </div>
