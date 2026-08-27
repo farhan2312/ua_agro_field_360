@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth";
-import { getScope } from "@/lib/scope";
+import { getScope, type Scope } from "@/lib/scope";
 
 export interface StoreTagVM { id: number; name: string; color: string; sortOrder: number }
 
@@ -91,6 +91,47 @@ export async function getStoreTagState(storeId: number): Promise<{ tags: StoreTa
     scope.role === "central" || scope.role === "sysadmin" ||
     (scope.role === "regional" && (scope.managedStoreIds ?? []).includes(storeId));
   return { tags: catalog, assigned: store?.tagIds ?? [], canEdit };
+}
+
+/** The subset of `ids` the viewer may tag: all of them for central/sysadmin, managed-only for an RM. */
+function editableStoreIds(scope: Scope, ids: number[]): number[] {
+  if (scope.role === "central" || scope.role === "sysadmin") return ids;
+  if (scope.role === "regional") { const m = new Set(scope.managedStoreIds ?? []); return ids.filter((id) => m.has(id)); }
+  return [];
+}
+
+/**
+ * Bulk tag state for a multi-store selection on the Map: the catalog, how many of the selected stores
+ * carry each tag (for the tri-state chips), the selection size, and how many the viewer may edit.
+ */
+export async function getStoreTagsBulkState(storeIds: number[]): Promise<{ tags: StoreTagVM[]; counts: Record<number, number>; total: number; editable: number; canEdit: boolean }> {
+  const scope = await getScope();
+  const ids = [...new Set(storeIds)].filter((n) => Number.isFinite(n));
+  const [catalog, stores] = await Promise.all([
+    listStoreTags(),
+    prisma.store.findMany({ where: { id: { in: ids.length ? ids : [-1] } }, select: { id: true, tagIds: true } }),
+  ]);
+  const counts: Record<number, number> = {};
+  for (const s of stores) for (const t of s.tagIds) counts[t] = (counts[t] ?? 0) + 1;
+  const editable = editableStoreIds(scope, ids).length;
+  return { tags: catalog, counts, total: stores.length, editable, canEdit: editable > 0 };
+}
+
+/** Add or remove ONE tag across the editable subset of the selected stores (idempotent, no duplicates). */
+export async function applyStoreTagBulk(storeIds: number[], tagId: number, on: boolean): Promise<{ ok: boolean; applied: number; error?: string }> {
+  const scope = await getScope();
+  const ids = editableStoreIds(scope, [...new Set(storeIds)].filter((n) => Number.isFinite(n)));
+  if (!ids.length) return { ok: false, applied: 0, error: "You can only tag stores you manage." };
+  const exists = await prisma.storeTag.findUnique({ where: { id: tagId }, select: { id: true } });
+  if (!exists) return { ok: false, applied: 0, error: "That tag no longer exists." };
+  try {
+    if (on) await prisma.$executeRawUnsafe(`UPDATE "Store" SET "tagIds" = array_append("tagIds", $1) WHERE id = ANY($2::int[]) AND NOT ($1 = ANY("tagIds"))`, tagId, ids);
+    else await prisma.$executeRawUnsafe(`UPDATE "Store" SET "tagIds" = array_remove("tagIds", $1) WHERE id = ANY($2::int[])`, tagId, ids);
+    revalidatePath("/map");
+    return { ok: true, applied: ids.length };
+  } catch (e) {
+    return { ok: false, applied: 0, error: e instanceof Error ? e.message : "Save failed." };
+  }
 }
 
 /* ── Assignment — RM (own stores) / central / sysadmin ── */
