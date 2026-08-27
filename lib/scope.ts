@@ -64,6 +64,24 @@ export function canSignOff(
 }
 
 /**
+ * May the current user REVIEW / sign off a visit? Unlike action-completion, visit sign-off is
+ * strictly a supervisory task: the managing RM and any central/sysadmin — NEVER the recording
+ * officer on their own visit. An RM may sign off their own visits too (maker, or in-their-stores).
+ */
+export function canReviewVisit(
+  scope: Scope,
+  actorCode: string | null,
+  target: { storeId: number | null; byCode: string | null | undefined },
+): boolean {
+  if (scope.role === "central" || scope.role === "sysadmin") return true;
+  if (scope.role === "regional") {
+    const isMaker = !!actorCode && !!target.byCode && target.byCode === actorCode;
+    return isMaker || (target.storeId != null && (scope.managedStoreIds ?? []).includes(target.storeId));
+  }
+  return false; // officer / campaigner — sign-off is not theirs to give
+}
+
+/**
  * Row-level scope fragments. `null` = unrestricted (central/sysadmin); `"none"` = show
  * nothing (a scoped user with no store assigned — fail CLOSED, never open).
  *

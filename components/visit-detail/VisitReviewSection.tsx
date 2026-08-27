@@ -23,10 +23,21 @@ export function VisitReviewSection({
     if (r.ok) location.reload(); else setErr(r.error ?? "Failed.");
   });
 
-  // Nothing to show a viewer who can't review an un-reviewed visit.
-  if (!reviewed && !canReview) return null;
-
   const box = "rounded-2xl border p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]";
+
+  // Viewer can't review an un-reviewed visit (e.g. the recording officer) — make it clear the
+  // sign-off is the Regional Manager's task, not pending work on the officer's side.
+  if (!reviewed && !canReview) {
+    return (
+      <div className={`${box} border-[#E3EAF0] bg-[#F7F9FB]`}>
+        <div className="flex items-center gap-2">
+          <span className="text-[14px] font-bold text-[#1A1C1A]">Visit review</span>
+          <span className="rounded-full bg-[#ECEFF1] px-2 py-0.5 text-[10.5px] font-bold text-[#546E7A]">Awaiting RM sign-off</span>
+        </div>
+        <p className="mt-1.5 text-[12.5px] text-[#607D8B]">Reviewing this visit is the Regional Manager’s task — nothing is pending on your side.</p>
+      </div>
+    );
+  }
 
   return (
     <div className={`${box} ${reviewed ? "border-[#C8E6C9] bg-[#F6FBF6]" : "border-[#FFE0B2] bg-[#FFFDF7]"}`}>

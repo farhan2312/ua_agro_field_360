@@ -92,7 +92,7 @@ export function PerformanceBoard({ kind, storeTags }: { kind: PerfKind; storeTag
       {t && (
         <div className="grid grid-cols-2 gap-[12px] sm:grid-cols-3 lg:grid-cols-6">
           {showSales && <Stat label="Sales" value={money(t.sales)} accent={ACCENT} delta={data.hasComparison ? t.salesGrowthPct : null} deltaGood="up" />}
-          <Stat label="Visits" value={n(t.visits)} sub={`${t.visits ? Math.round((t.visitsReviewed / t.visits) * 100) : 0}% reviewed`} />
+          <Stat label="Visits" value={n(t.visits)} sub={`${t.visits ? Math.round((t.visitsReviewed / t.visits) * 100) : 0}% ${kind === "officers" ? "RM-signed" : "reviewed"}`} />
           <Stat label="Open actions" value={n(t.actionsOpen)} sub={`${n(t.actionsOverdue)} overdue`} subColor={t.actionsOverdue ? "#C62828" : undefined} />
           {showSales && <Stat label="Leads converted" value={n(t.leadsConverted)} sub={`${n(t.currentLeads)} still open`} accent="#546E7A" />}
           {showSales && <Stat label="Farmers" value={n(t.farmers)} />}
@@ -108,6 +108,12 @@ export function PerformanceBoard({ kind, storeTags }: { kind: PerfKind; storeTag
 
       {/* Ranked table */}
       <RankTable kind={kind} rows={rows} showSales={showSales} hasComparison={!!data?.hasComparison} sel={sel} onToggle={toggleSel} />
+      {kind === "officers" && rows.length > 0 && (
+        <div className="-mt-1 flex items-start gap-1.5 text-[11.5px] text-[#78909C]">
+          <span>ℹ️</span>
+          <span><b>“RM signed %”</b> is how much of each officer’s fieldwork their Regional Manager has signed off — it’s the RM’s review task, not pending work for the officer.</span>
+        </div>
+      )}
 
       {rows.length === 0 && !loading && (
         <div className="rounded-[14px] border border-[#FFE0B2] bg-[#FFF8E1] px-4 py-10 text-center text-[13px] text-[#8D6E00]">
@@ -172,8 +178,9 @@ function RankTable({ kind, rows, showSales, hasComparison, sel, onToggle }: {
   if (rows.length === 0) return null;
 
   // Column groups make it unambiguous which family each metric belongs to (Field visits vs Actions vs Pipeline).
+  const officerAxis = kind === "officers"; // sign-off is the RM's job — label the review column so it doesn't read as the officer's pending work
   const salesCols: [SortKey, string][] = [["sales", "₹ Sales"], ["salesGrowthPct", "Growth"]];
-  const visitCols: [SortKey, string][] = [["visits", "Visits"], ["visitsReviewed", "Reviewed %"]];
+  const visitCols: [SortKey, string][] = [["visits", "Visits"], ["visitsReviewed", officerAxis ? "RM signed %" : "Reviewed %"]];
   const actionCols: [SortKey, string][] = [["actionsOpen", "Open"], ["actionsOverdue", "Overdue"], ["actionsDone", "Done"], ["actionsDonePct", "Done %"]];
   const pipeCols: [SortKey, string][] = [["leadsConverted", "Leads conv."], ["farmers", "Farmers"]];
   const groups: [string, [SortKey, string][]][] = [
@@ -237,7 +244,7 @@ function RankTable({ kind, rows, showSales, hasComparison, sel, onToggle }: {
                   <td className={`${td} ${showSales ? "border-l border-[#F4F4F4]" : ""}`}>{n(r.visits)}</td>
                   <td className={td}>
                     {r.visits === 0 ? <span className="text-[#DDD]">—</span> : (
-                      <span title={`${n(r.visitsReviewed)} of ${n(r.visits)} reviewed`}>
+                      <span title={`${n(r.visitsReviewed)} of ${n(r.visits)} ${officerAxis ? "signed off by their RM" : "reviewed"}`}>
                         <span className="font-semibold" style={{ color: reviewedPct >= 67 ? "#2E7D32" : reviewedPct >= 34 ? "#EF6C00" : "#C62828" }}>{reviewedPct}%</span>
                       </span>
                     )}
@@ -265,7 +272,7 @@ function ComparePanel({ kind, rows, showSales, onClear }: { kind: PerfKind; rows
     ...(showSales ? [["Sales", (r: PerfEntity) => money(r.sales), (r: PerfEntity) => r.sales]] as [string, (r: PerfEntity) => string, (r: PerfEntity) => number][] : []),
     ...(showSales ? [["Growth", (r: PerfEntity) => r.salesGrowthPct == null ? "—" : pct(r.salesGrowthPct), (r: PerfEntity) => r.salesGrowthPct ?? 0]] as [string, (r: PerfEntity) => string, (r: PerfEntity) => number][] : []),
     ["Visits", (r) => n(r.visits), (r) => r.visits],
-    ["Reviewed %", (r) => (r.visits ? `${Math.round((r.visitsReviewed / r.visits) * 100)}%` : "—"), (r) => (r.visits ? (r.visitsReviewed / r.visits) * 100 : 0)],
+    [kind === "officers" ? "RM signed %" : "Reviewed %", (r) => (r.visits ? `${Math.round((r.visitsReviewed / r.visits) * 100)}%` : "—"), (r) => (r.visits ? (r.visitsReviewed / r.visits) * 100 : 0)],
     ["Farmers visited", (r) => n(r.farmersVisited), (r) => r.farmersVisited],
     ["Actions open", (r) => n(r.actionsOpen), (r) => r.actionsOpen],
     ["Actions overdue", (r) => n(r.actionsOverdue), (r) => r.actionsOverdue],

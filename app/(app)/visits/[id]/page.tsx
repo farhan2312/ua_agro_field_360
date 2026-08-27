@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getScope, visitScopeWhere, getActor, canSignOff } from "@/lib/scope";
+import { getScope, visitScopeWhere, getActor, canReviewVisit } from "@/lib/scope";
 import { roleLabel } from "@/lib/roles";
 import { initials, avatarColor } from "@/lib/format";
 import { shortStoreName, storeColor } from "@/lib/store-utils";
@@ -282,7 +282,7 @@ export default async function VisitDetailPage({
 
   // Review / sign-off: can the current user review this visit? (recorder / managing RM / admin)
   const actor = await getActor();
-  const canReview = canSignOff(scope, actor.code, { storeId: visit.storeId ?? visit.store?.id ?? null, byCode: visit.recordedByCode });
+  const canReview = canReviewVisit(scope, actor.code, { storeId: visit.storeId ?? visit.store?.id ?? null, byCode: visit.recordedByCode });
   const reviewedBy = visit.reviewedByName
     ? `${visit.reviewedByName}${visit.reviewedByCode ? ` (${visit.reviewedByCode})` : ""}${visit.reviewedByRole ? ` · ${roleLabel(visit.reviewedByRole as never)}` : ""}${visit.reviewedAt ? ` · ${visit.reviewedAt.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}` : ""}`
     : "";

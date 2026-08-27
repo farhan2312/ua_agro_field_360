@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { getScope, getActor, canSignOff } from "@/lib/scope";
+import { getScope, getActor, canReviewVisit } from "@/lib/scope";
 
 const RECENT_DAYS = 30; // window for the RM "pending reviews" badge — recent visits awaiting sign-off
 
@@ -12,8 +12,8 @@ export async function reviewVisit(visitId: number, note: string): Promise<{ ok: 
   const actor = await getActor();
   const v = await prisma.visit.findUnique({ where: { id: visitId }, select: { storeId: true, recordedByCode: true } });
   if (!v) return { ok: false, error: "Visit not found." };
-  if (!canSignOff(scope, actor.code, { storeId: v.storeId, byCode: v.recordedByCode }))
-    return { ok: false, error: "You can review your own visits, or (as their RM/admin) visits in your stores." };
+  if (!canReviewVisit(scope, actor.code, { storeId: v.storeId, byCode: v.recordedByCode }))
+    return { ok: false, error: "Only the managing Regional Manager or an admin can review a visit." };
   try {
     await prisma.visit.update({
       where: { id: visitId },
@@ -34,7 +34,7 @@ export async function unreviewVisit(visitId: number): Promise<{ ok: boolean; err
   const actor = await getActor();
   const v = await prisma.visit.findUnique({ where: { id: visitId }, select: { storeId: true, recordedByCode: true } });
   if (!v) return { ok: false, error: "Visit not found." };
-  if (!canSignOff(scope, actor.code, { storeId: v.storeId, byCode: v.recordedByCode }))
+  if (!canReviewVisit(scope, actor.code, { storeId: v.storeId, byCode: v.recordedByCode }))
     return { ok: false, error: "Not authorised." };
   try {
     await prisma.visit.update({

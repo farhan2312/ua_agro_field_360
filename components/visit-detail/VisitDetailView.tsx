@@ -176,11 +176,9 @@ export function VisitDetailView({ data }: { data: VisitDetailData }) {
         Back to Visit Repository
       </Link>
 
-      {(data.reviewed || data.canReview) && (
-        <div className="mb-[18px]">
-          <VisitReviewSection visitId={data.visitId} reviewed={data.reviewed} reviewNote={data.reviewNote} reviewedBy={data.reviewedBy} canReview={data.canReview} />
-        </div>
-      )}
+      <div className="mb-[18px]">
+        <VisitReviewSection visitId={data.visitId} reviewed={data.reviewed} reviewNote={data.reviewNote} reviewedBy={data.reviewedBy} canReview={data.canReview} />
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-[1fr_1.4fr] gap-[18px]">
         {/* LEFT column */}
