@@ -4,18 +4,23 @@ import { useMemo, useState } from "react";
 import { cn } from "@/lib/cn";
 import { grouped } from "@/lib/format";
 import { SearchIcon, CheckIcon } from "@/components/icons";
-import type { StoreListItem } from "./types";
+import type { StoreListItem, StoreTagMeta } from "./types";
+import { StoreTagPills } from "./StoreTagPills";
 
 export function StoreList({
   stores,
   selectedIds,
   onToggle,
   onClear,
+  tagMap,
+  tagIdsByStore,
 }: {
   stores: StoreListItem[];
   selectedIds: number[];
   onToggle: (id: number) => void;
   onClear: () => void;
+  tagMap: Map<number, StoreTagMeta>;
+  tagIdsByStore: Record<number, number[]>;
 }) {
   const [q, setQ] = useState("");
   const selSet = useMemo(() => new Set(selectedIds), [selectedIds]);
@@ -98,6 +103,9 @@ export function StoreList({
                   <span className="block truncate text-[10.5px] text-ink-muted">
                     {s.zone ?? "—"}
                     {!s.hasGps && " · no GPS"}
+                  </span>
+                  <span className="mt-1 block">
+                    <StoreTagPills tagIds={tagIdsByStore[s.id] ?? s.tagIds} tagMap={tagMap} max={4} />
                   </span>
                 </span>
                 <span className="flex-none rounded-full bg-surface-200 px-2 py-0.5 text-[10.5px] font-semibold text-ink-600">

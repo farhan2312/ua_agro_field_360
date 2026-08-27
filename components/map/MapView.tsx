@@ -1,28 +1,60 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { LEGEND_META, type MapLayerKey } from "@/lib/map-layers";
 import { cn } from "@/lib/cn";
 import { EmptyState } from "@/components/ui";
-import type { MapFarmer, MapStore, StoreListItem } from "./types";
+import type { MapFarmer, MapStore, StoreListItem, StoreTagMeta } from "./types";
 import { colorFor, valueFor } from "./layer-util";
 import { MapCanvas } from "./MapCanvas";
 import { FarmerDetailPanel } from "./FarmerDetailPanel";
 import { StoreList } from "./StoreList";
 import { StoreFarmersPanel } from "./StoreFarmersPanel";
+import { StoreTagBoard } from "./StoreTagBoard";
+import { applyStoreTagBulk } from "@/app/actions/store-tags";
+
+type MapTab = "map" | "tags";
 
 export function MapView({
   farmers,
   stores,
   allStores,
+  storeTags,
   canChain = false,
 }: {
   farmers: MapFarmer[];
   stores: MapStore[];
   allStores: StoreListItem[];
+  storeTags: StoreTagMeta[];
   canChain?: boolean;
 }) {
+  const [tab, setTab] = useState<MapTab>("map");
   const [layer] = useState<MapLayerKey>("segment");
+  const [, startTag] = useTransition();
+
+  // Live per-store tag ids — shared by the Map-tab list pills and the Store-Tags board so edits reflect everywhere.
+  const [tagIdsByStore, setTagIdsByStore] = useState<Record<number, number[]>>(
+    () => Object.fromEntries(allStores.map((s) => [s.id, s.tagIds])),
+  );
+  const tagMap = useMemo(() => new Map(storeTags.map((t) => [t.id, t])), [storeTags]);
+
+  // Assign/unassign one tag across N stores (server-enforced scope). Optimistic, reverts on failure.
+  const applyTag = (storeIds: number[], tagId: number, on: boolean) => {
+    const prev = tagIdsByStore;
+    setTagIdsByStore((cur) => {
+      const next = { ...cur };
+      for (const id of storeIds) {
+        const set = new Set(next[id] ?? []);
+        on ? set.add(tagId) : set.delete(tagId);
+        next[id] = [...set];
+      }
+      return next;
+    });
+    startTag(async () => {
+      const r = await applyStoreTagBulk(storeIds, tagId, on);
+      if (!r.ok) { setTagIdsByStore(prev); alert(r.error ?? "Could not update tags."); }
+    });
+  };
   const [selectedStoreIds, setSelectedStoreIds] = useState<Set<number>>(new Set());
   const [showStorePins, setShowStorePins] = useState(true);
   const [showHeat, setShowHeat] = useState(true);
@@ -81,6 +113,21 @@ export function MapView({
 
   return (
     <div className="animate-[fadeUp_0.4s_ease-out]">
+      {/* Tabs: Map ↔ Store Tags */}
+      <div className="mb-3 inline-flex rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] p-1">
+        {([["map", "🗺️ Map"], ["tags", "🏷️ Store Tags"]] as [MapTab, string][]).map(([k, label]) => (
+          <button key={k} type="button" onClick={() => setTab(k)}
+            className="rounded-[8px] px-5 py-2 text-[12.5px] font-bold transition-colors"
+            style={{ background: tab === k ? "#fff" : "transparent", color: tab === k ? "#2E7D32" : "#9E9E9E", boxShadow: tab === k ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "tags" ? (
+        <StoreTagBoard stores={allStores} tags={storeTags} tagMap={tagMap} tagIdsByStore={tagIdsByStore} onApply={applyTag} />
+      ) : (
+      <>
       {/* Map display controls */}
       <div className="mb-2.5 flex flex-wrap items-center gap-2">
         <button
@@ -127,6 +174,8 @@ export function MapView({
             selectedIds={selectedIdList}
             onToggle={toggleStore}
             onClear={clearStores}
+            tagMap={tagMap}
+            tagIdsByStore={tagIdsByStore}
           />
         </div>
 
@@ -206,6 +255,8 @@ export function MapView({
             crop, purchase behaviour or segment, and save a cluster for later action.
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );

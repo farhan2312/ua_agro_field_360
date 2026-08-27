@@ -14,7 +14,6 @@ import { getStoreFarmers, createClusterFromSelection } from "@/app/actions/clust
 import { ChainNext } from "@/components/ChainNext";
 import type { FarmerFilters, StoreFarmersResult } from "@/lib/cluster";
 import type { StoreListItem } from "./types";
-import { StoreTagEditor } from "./StoreTagEditor";
 
 const EMPTY_FILTERS: FarmerFilters = {};
 const selectClass =
@@ -202,8 +201,6 @@ export function StoreFarmersPanel({
         </div>
       </div>
 
-      {/* Store tags — one store or many at once; RM/admin can assign, others see them read-only */}
-      {stores.length >= 1 && <StoreTagEditor storeIds={storeIds} />}
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2 border-b border-line bg-surface-50 px-5 py-3">

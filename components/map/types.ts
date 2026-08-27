@@ -48,4 +48,12 @@ export interface StoreListItem {
   /** Total farmers attached to this store (real count). */
   farmerCount: number;
   hasGps: boolean;
+  tagIds: number[]; // StoreTag ids assigned to this store
+}
+
+/** Store-tag catalog entry (for map list pills + the tagging tab). */
+export interface StoreTagMeta {
+  id: number;
+  name: string;
+  color: string;
 }

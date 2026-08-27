@@ -4,7 +4,8 @@ import { avatarColor } from "@/lib/format";
 import { shortStoreName, storeColor } from "@/lib/store-utils";
 import { SEGMENT_ENUM_TO_LABEL, LEAD_ENUM_TO_LABEL } from "@/lib/segments";
 import { MapView } from "@/components/map/MapView";
-import type { MapFarmer, MapStore, StoreListItem } from "@/components/map/types";
+import type { MapFarmer, MapStore, StoreListItem, StoreTagMeta } from "@/components/map/types";
+import { listStoreTags } from "@/app/actions/store-tags";
 import { getRole } from "@/lib/session";
 import { canAccess } from "@/lib/roles";
 import { canManage, getScope, farmerScopeWhere, storeScopeWhere } from "@/lib/scope";
@@ -34,6 +35,7 @@ export default async function MapViewPage() {
   let farmers: MapFarmer[] = [];
   let stores: MapStore[] = [];
   let allStores: StoreListItem[] = [];
+  let storeTags: StoreTagMeta[] = [];
 
   try {
     // Only farmers with real coordinates are plottable (the 12 enriched demo set).
@@ -127,6 +129,7 @@ export default async function MapViewPage() {
         name: true,
         zone: true,
         lat: true,
+        tagIds: true,
         _count: { select: { farmers: true } },
       },
     });
@@ -140,12 +143,14 @@ export default async function MapViewPage() {
       zone: s.zone,
       farmerCount: s._count.farmers,
       hasGps: s.lat != null,
+      tagIds: s.tagIds ?? [],
     }));
+    storeTags = await listStoreTags();
   } catch {
     farmers = [];
     stores = [];
     allStores = [];
   }
 
-  return <MapView farmers={farmers} stores={stores} allStores={allStores} canChain={canManage(role)} />;
+  return <MapView farmers={farmers} stores={stores} allStores={allStores} storeTags={storeTags} canChain={canManage(role)} />;
 }
