@@ -160,19 +160,26 @@ function Leaderboard({ kind, rows, metric }: { kind: PerfKind; rows: PerfEntity[
 }
 
 /* ── the ranked table (sortable) + compare checkboxes ── */
-type SortKey = "sales" | "salesGrowthPct" | "visits" | "visitsReviewed" | "actionsOpen" | "actionsOverdue" | "actionsDone" | "leadsConverted" | "farmers";
+type SortKey = "sales" | "salesGrowthPct" | "visits" | "visitsReviewed" | "actionsOpen" | "actionsOverdue" | "actionsDone" | "actionsDonePct" | "leadsConverted" | "farmers";
+// Completion rate = closed / (closed + still-open). null when there's nothing on the plate.
+const donePct = (r: PerfEntity): number | null => { const d = r.actionsDone + r.actionsOpen; return d ? Math.round((r.actionsDone / d) * 100) : null; };
+const sortVal = (r: PerfEntity, k: SortKey): number => (k === "actionsDonePct" ? (donePct(r) ?? -1) : Number(r[k] ?? 0));
 function RankTable({ kind, rows, showSales, hasComparison, sel, onToggle }: {
   kind: PerfKind; rows: PerfEntity[]; showSales: boolean; hasComparison: boolean; sel: Set<string>; onToggle: (id: string) => void;
 }) {
   const [sort, setSort] = useState<SortKey>(showSales ? "sales" : "visits");
-  const sorted = useMemo(() => [...rows].sort((a, b) => (Number(b[sort] ?? 0) - Number(a[sort] ?? 0)) || a.name.localeCompare(b.name)), [rows, sort]);
+  const sorted = useMemo(() => [...rows].sort((a, b) => (sortVal(b, sort) - sortVal(a, sort)) || a.name.localeCompare(b.name)), [rows, sort]);
   if (rows.length === 0) return null;
 
-  const cols: [SortKey, string][] = [
-    ...(showSales ? [["sales", "Sales"], ["salesGrowthPct", "Growth"]] as [SortKey, string][] : []),
-    ["visits", "Visits"], ["visitsReviewed", "Reviewed"],
-    ["actionsOpen", "Open"], ["actionsOverdue", "Overdue"], ["actionsDone", "Done"],
-    ...(showSales ? [["leadsConverted", "Conv."], ["farmers", "Farmers"]] as [SortKey, string][] : []),
+  // Column groups make it unambiguous which family each metric belongs to (Field visits vs Actions vs Pipeline).
+  const salesCols: [SortKey, string][] = [["sales", "₹ Sales"], ["salesGrowthPct", "Growth"]];
+  const visitCols: [SortKey, string][] = [["visits", "Visits"], ["visitsReviewed", "Reviewed %"]];
+  const actionCols: [SortKey, string][] = [["actionsOpen", "Open"], ["actionsOverdue", "Overdue"], ["actionsDone", "Done"], ["actionsDonePct", "Done %"]];
+  const pipeCols: [SortKey, string][] = [["leadsConverted", "Leads conv."], ["farmers", "Farmers"]];
+  const groups: [string, [SortKey, string][]][] = [
+    ...(showSales ? [["Sales", salesCols]] as [string, [SortKey, string][]][] : []),
+    ["Field visits", visitCols], ["Actions", actionCols],
+    ...(showSales ? [["Pipeline", pipeCols]] as [string, [SortKey, string][]][] : []),
   ];
   const th = "px-2.5 py-2 text-right text-[10.5px] font-bold uppercase tracking-[0.3px] cursor-pointer select-none whitespace-nowrap";
   const td = "px-2.5 py-2 text-right text-[12px] tabular-nums";
@@ -184,16 +191,27 @@ function RankTable({ kind, rows, showSales, hasComparison, sel, onToggle }: {
         <div className="text-[11px] text-[#9E9E9E]">Tick up to 4 to compare</div>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[860px] border-collapse">
+        <table className="w-full min-w-[900px] border-collapse">
           <thead>
+            {/* Group row — names the family each metric belongs to */}
+            <tr className="border-t border-[#F0F0F0] bg-[#F4F7FA] text-[#78909C]">
+              <th className="px-2.5 py-1.5" colSpan={2} />
+              {groups.map(([label, gc], i) => (
+                <th key={label} colSpan={gc.length}
+                  className={`px-2.5 py-1.5 text-center text-[9.5px] font-bold uppercase tracking-[0.6px] ${i > 0 ? "border-l border-[#E4EAF0]" : ""}`}>
+                  {label}
+                </th>
+              ))}
+            </tr>
             <tr className="border-y border-[#F0F0F0] bg-[#FAFAFA] text-[#9E9E9E]">
               <th className="w-8 px-2.5 py-2" />
               <th className="px-3 py-2 text-left text-[10.5px] font-bold uppercase tracking-[0.3px]">{KIND_NOUN[kind]}</th>
-              {cols.map(([k, label]) => (
-                <th key={k} className={th} style={sort === k ? { color: ACCENT } : undefined} onClick={() => setSort(k)}>
+              {groups.map(([, gc], gi) => gc.map(([k, label], ci) => (
+                <th key={k} className={`${th} ${gi > 0 && ci === 0 ? "border-l border-[#EEF1F4]" : ""}`}
+                  style={sort === k ? { color: ACCENT } : undefined} onClick={() => setSort(k)}>
                   {label}{sort === k ? " ▾" : ""}
                 </th>
-              ))}
+              )))}
             </tr>
           </thead>
           <tbody>
@@ -216,7 +234,7 @@ function RankTable({ kind, rows, showSales, hasComparison, sel, onToggle }: {
                         : <span className="font-semibold" style={{ color: r.salesGrowthPct >= 0 ? "#2E7D32" : "#C62828" }}>{pct(r.salesGrowthPct)}</span>}
                     </td>
                   )}
-                  <td className={td}>{n(r.visits)}</td>
+                  <td className={`${td} ${showSales ? "border-l border-[#F4F4F4]" : ""}`}>{n(r.visits)}</td>
                   <td className={td}>
                     {r.visits === 0 ? <span className="text-[#DDD]">—</span> : (
                       <span title={`${n(r.visitsReviewed)} of ${n(r.visits)} reviewed`}>
@@ -224,10 +242,12 @@ function RankTable({ kind, rows, showSales, hasComparison, sel, onToggle }: {
                       </span>
                     )}
                   </td>
-                  <td className={td}>{n(r.actionsOpen)}</td>
+                  <td className={`${td} border-l border-[#F4F4F4]`}>{n(r.actionsOpen)}</td>
                   <td className={td}>{r.actionsOverdue ? <span className="font-semibold text-[#C62828]">{n(r.actionsOverdue)}</span> : <span className="text-[#DDD]">0</span>}</td>
                   <td className={td}>{n(r.actionsDone)}</td>
-                  {showSales && <td className={td}>{r.leadsConverted ? <span className="font-semibold text-[#37474F]">{n(r.leadsConverted)}</span> : <span className="text-[#DDD]">0</span>}</td>}
+                  <td className={td}>{(() => { const p = donePct(r); return p == null ? <span className="text-[#DDD]">—</span>
+                    : <span className="font-semibold" style={{ color: p >= 67 ? "#2E7D32" : p >= 34 ? "#EF6C00" : "#C62828" }} title={`${n(r.actionsDone)} done of ${n(r.actionsDone + r.actionsOpen)} on the plate`}>{p}%</span>; })()}</td>
+                  {showSales && <td className={`${td} border-l border-[#F4F4F4]`}>{r.leadsConverted ? <span className="font-semibold text-[#37474F]">{n(r.leadsConverted)}</span> : <span className="text-[#DDD]">0</span>}</td>}
                   {showSales && <td className={td}>{n(r.farmers)}</td>}
                 </tr>
               );
@@ -247,9 +267,10 @@ function ComparePanel({ kind, rows, showSales, onClear }: { kind: PerfKind; rows
     ["Visits", (r) => n(r.visits), (r) => r.visits],
     ["Reviewed %", (r) => (r.visits ? `${Math.round((r.visitsReviewed / r.visits) * 100)}%` : "—"), (r) => (r.visits ? (r.visitsReviewed / r.visits) * 100 : 0)],
     ["Farmers visited", (r) => n(r.farmersVisited), (r) => r.farmersVisited],
-    ["Open actions", (r) => n(r.actionsOpen), (r) => r.actionsOpen],
-    ["Overdue", (r) => n(r.actionsOverdue), (r) => r.actionsOverdue],
-    ["Completed", (r) => n(r.actionsDone), (r) => r.actionsDone],
+    ["Actions open", (r) => n(r.actionsOpen), (r) => r.actionsOpen],
+    ["Actions overdue", (r) => n(r.actionsOverdue), (r) => r.actionsOverdue],
+    ["Actions done", (r) => n(r.actionsDone), (r) => r.actionsDone],
+    ["Actions done %", (r) => { const p = donePct(r); return p == null ? "—" : `${p}%`; }, (r) => donePct(r) ?? 0],
     ...(showSales ? [["Leads converted", (r: PerfEntity) => n(r.leadsConverted), (r: PerfEntity) => r.leadsConverted]] as [string, (r: PerfEntity) => string, (r: PerfEntity) => number][] : []),
   ];
   const PALETTE = ["#1565C0", "#2E7D32", "#EF6C00", "#6A1B9A"];
