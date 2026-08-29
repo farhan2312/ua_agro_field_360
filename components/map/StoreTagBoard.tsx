@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { grouped } from "@/lib/format";
 import { SearchIcon } from "@/components/icons";
 import type { StoreListItem, StoreTagMeta } from "./types";
@@ -23,6 +23,15 @@ export function StoreTagBoard({ stores, tags, tagMap, tagIdsByStore, onApply }: 
   const [filterTags, setFilterTags] = useState<Set<number>>(new Set());
   const [untagged, setUntagged] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+
+  // Close any open per-row "＋" tag popover when clicking outside it.
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      document.querySelectorAll("details[open]").forEach((d) => { if (!d.contains(e.target as Node)) (d as HTMLDetailsElement).open = false; });
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, []);
 
   const tagsOf = (id: number) => tagIdsByStore[id] ?? [];
 
