@@ -116,12 +116,16 @@ export function BroadcastPanel({ campaignId, campaignName, commPlans, templates,
               <div className="mt-3 rounded-[8px] bg-[#E8F5E9] px-3 py-2 text-[11.5px] text-[#2E7D32]">WhatsApp sends only to <b>opted-in</b> farmers with an <b>approved</b> template — this protects your number's quality rating.</div>
             )}
             {channel === "SMS" && bal && (
-              bal.total < Math.max(0, eligible) ? (
+              // Credit-count accounts: 1 credit ≈ 1 SMS, so we can warn on shortfall. Rupee-wallet accounts
+              // (currency set) cost a fraction of a rupee per SMS — just show the balance, no false alarm.
+              !bal.currency && bal.total < Math.max(0, eligible) ? (
                 <div className="mt-3 rounded-[8px] bg-[#FDECEA] px-3 py-2 text-[11.5px] font-semibold text-[#C62828]">
                   ⚠ Only {n(bal.total)} SMS credits left — this send needs ~{n(Math.max(0, eligible))}. Top up, or it will stop partway.
                 </div>
               ) : (
-                <div className="mt-3 text-[11.5px] text-[#9E9E9E]">💳 {bal.currency}{n(bal.total)} SMS credits available.</div>
+                <div className="mt-3 text-[11.5px] text-[#9E9E9E]">
+                  💳 {bal.currency ? `${bal.currency}${bal.total.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} balance` : `${n(bal.total)} SMS credits`} available.
+                </div>
               )
             )}
             {err && <div className="mt-2 rounded-[8px] bg-[#FDECEA] px-3 py-2 text-[12px] font-semibold text-[#C62828]">{err}</div>}

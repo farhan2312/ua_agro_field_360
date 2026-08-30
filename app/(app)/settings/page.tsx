@@ -83,10 +83,10 @@ export default async function SettingsPage() {
   // Test-messaging bench data: gateway status + saved comm plans to optionally load a message from.
   const sms = zapConfig();
   const wa = waConfig();
-  let plans: { id: number; name: string; template: string; dltTemplateId: string | null }[] = [];
+  let plans: { id: number; name: string; template: string; dltTemplateId: string | null; medium: string | null }[] = [];
   try {
     plans = await prisma.commTemplate.findMany({
-      select: { id: true, name: true, template: true, dltTemplateId: true },
+      select: { id: true, name: true, template: true, dltTemplateId: true, medium: true },
       orderBy: [{ priority: "asc" }, { name: "asc" }],
     });
   } catch {

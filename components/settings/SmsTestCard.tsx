@@ -3,11 +3,12 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { searchFarmersForAction } from "@/app/actions/action-registry";
 import { sendTestSms, sendTestWhatsApp, getRecentWhatsAppLogs, getRecentSmsLogs, refreshSmsDeliveryStatus, smsBalance, type WaLogRow, type SmsLogRow } from "@/app/actions/test-messaging";
+import { getSmsTemplates } from "@/app/actions/campaigns";
 import type { SmsBalance } from "@/lib/zapsms";
 import { fillPreview } from "@/lib/wa-template-presets";
 import type { FarmerPick } from "@/lib/action-constants";
 
-type Plan = { id: number; name: string; template: string; dltTemplateId: string | null };
+type Plan = { id: number; name: string; template: string; dltTemplateId: string | null; medium: string | null };
 type WaTemplateOpt = { name: string; language: string; body: string; varCount: number };
 type Channel = "sms" | "whatsapp";
 type WaMode = "text" | "template";
@@ -87,6 +88,20 @@ export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMis
   const refreshLogs = () => getRecentWhatsAppLogs(8).then(setWaLogs);
   const [bal, setBal] = useState<SmsBalance | null>(null);
   const loadBalance = () => smsBalance().then((r) => setBal(r.ok && r.balance ? r.balance : null));
+
+  // Only SMS-medium comm plans belong in the SMS test loader (WhatsApp/Call plans use {{n}} and no DLT).
+  const smsPlans = plans.filter((p) => (p.medium ?? "").toUpperCase().includes("SMS"));
+  // Approved DLT template ids synced from ZapSMS — used to mark which comm plans are actually send-ready.
+  const [approvedIds, setApprovedIds] = useState<Set<string> | null>(null);
+  const loadApproved = () => getSmsTemplates().then((r) => setApprovedIds(new Set((r.templates ?? []).filter((t) => t.approved).map((t) => t.dltTemplateId))));
+  // A comm plan's DLT readiness: no id / id-not-approved / approved / (approved-list not loaded yet).
+  const dltState = (p: Plan): "none" | "unapproved" | "approved" | "unknown" => {
+    const id = (p.dltTemplateId ?? "").trim();
+    if (!id) return "none";
+    if (approvedIds == null) return "unknown";
+    return approvedIds.has(id) ? "approved" : "unapproved";
+  };
+  const DLT_MARK: Record<ReturnType<typeof dltState>, string> = { approved: "✓ DLT approved", unapproved: "⚠ DLT not approved", none: "⚠ no DLT id", unknown: "• DLT set" };
   const [smsLogs, setSmsLogs] = useState<SmsLogRow[] | null>(null);
   const [refreshingSms, startRefreshSms] = useTransition();
   const loadSmsLogs = () => getRecentSmsLogs(10).then(setSmsLogs);
@@ -115,8 +130,8 @@ export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMis
     });
   };
 
-  // Load the delivery log for whichever channel is active (+ SMS balance).
-  useEffect(() => { if (isWa) refreshLogs(); else { loadSmsLogs(); if (smsReady) loadBalance(); } }, [isWa]); // eslint-disable-line
+  // Load the delivery log for whichever channel is active (+ SMS balance + approved-DLT sync).
+  useEffect(() => { if (isWa) refreshLogs(); else { loadSmsLogs(); if (smsReady) { loadBalance(); loadApproved(); } } }, [isWa]); // eslint-disable-line
 
   const inputCls = "w-full rounded-[10px] border border-[#E0E0E0] px-3 py-2.5 text-[13px] outline-none focus:border-[#2E7D32]";
 
@@ -145,8 +160,10 @@ export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMis
           <span>✓ {isWa ? "WhatsApp Cloud API configured." : `Gateway configured${senderId ? ` · sender ${senderId}` : ""}.`}</span>
           {!isWa && bal && (
             <span className="shrink-0 rounded-full bg-white/70 px-2.5 py-0.5 text-[11px] font-bold text-[#1B5E20]"
-              title={bal.items.map((i) => `${i.productType}: ${i.credits.toLocaleString("en-IN")}`).join(" · ")}>
-              💳 {bal.currency}{bal.total.toLocaleString("en-IN")} credits
+              title={bal.total > 0 ? bal.items.map((i) => `${i.productType}: ${i.credits.toLocaleString("en-IN")}`).join(" · ") : `Raw gateway response: ${bal.raw ?? "—"}`}>
+              💳 {bal.currency
+                ? `${bal.currency}${bal.total.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                : `${Math.round(bal.total).toLocaleString("en-IN")} credits`}
             </span>
           )}
         </div>
@@ -250,14 +267,16 @@ export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMis
         </div>
       ) : (
         <>
-          {/* Message + optional plan loader */}
+          {/* Message + optional plan loader (SMS comm plans only) */}
           <div className="mt-3 flex items-end justify-between gap-2">
             <label className="text-[11px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Message *</label>
-            {plans.length > 0 && (
+            {smsPlans.length > 0 && (
               <select value={planId ?? ""} onChange={(e) => loadPlan(e.target.value ? Number(e.target.value) : null)}
-                className="rounded-[8px] border border-[#E0E0E0] bg-white px-2 py-1 text-[11.5px] text-[#616161] outline-none focus:border-[#2E7D32]">
+                className="max-w-[260px] rounded-[8px] border border-[#E0E0E0] bg-white px-2 py-1 text-[11.5px] text-[#616161] outline-none focus:border-[#2E7D32]">
                 <option value="">Load from a Comm Plan…</option>
-                {plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                {smsPlans.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name.trim() || `Untitled plan #${p.id}`} · {DLT_MARK[dltState(p)]}</option>
+                ))}
               </select>
             )}
           </div>
@@ -267,6 +286,17 @@ export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMis
             <span>{planId != null ? "Loaded from a Comm Plan — placeholders like [name] are sent as-is in a test." : "Free text."}</span>
             <span>{message.length} chars</span>
           </div>
+          {/* DLT status for the loaded plan */}
+          {planId != null && (() => {
+            const p = smsPlans.find((x) => x.id === planId); if (!p) return null;
+            const st = dltState(p); const id = (p.dltTemplateId ?? "").trim();
+            const tone = st === "approved" ? { bg: "#E8F5E9", fg: "#2E7D32" } : st === "unknown" ? { bg: "#EEF2F6", fg: "#546E7A" } : { bg: "#FDECEA", fg: "#C62828" };
+            const msg = st === "approved" ? `DLT template ${id} — approved ✓`
+              : st === "unapproved" ? `DLT id ${id} isn’t in your approved templates — carrier may reject it. Fix it in the Comm Plan.`
+              : st === "none" ? "This comm plan has no DLT template id — SMS will be rejected. Add one in the Comm Plan tab."
+              : `DLT id ${id} set (approved list not loaded).`;
+            return <div className="mt-1.5 rounded-[8px] px-2.5 py-1.5 text-[11.5px] font-medium" style={{ background: tone.bg, color: tone.fg }}>{msg}</div>;
+          })()}
         </>
       )}
 
