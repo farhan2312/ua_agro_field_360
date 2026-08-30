@@ -16,7 +16,7 @@ import { cropLabel } from "@/lib/crops";
 import { buildWorkbookB64 } from "@/lib/xlsx-export";
 import { sendSms, zapConfig, listSmsTemplates, type SmsTemplate } from "@/lib/zapsms";
 import { sendWhatsApp, waConfig, waCreateTemplate } from "@/lib/whatsapp";
-import { SAMPLE_VARS } from "@/lib/campaign-vars";
+import { SAMPLE_VARS, resolveVars, fillDltTemplate, fillWaTemplate, positionalParams, countDltVars, VAR_LABEL, type FarmerVarSource } from "@/lib/campaign-vars";
 
 const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
 async function requireManager(): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -248,6 +248,7 @@ export interface CommTemplatePatch {
   waTemplateName?: string | null;
   waLanguage?: string | null;
   waVariables?: string[];
+  smsVariables?: string[];
 }
 
 /** Keep the legacy single `segment` column in sync with segments[0] (or a sensible default). */
@@ -1007,19 +1008,31 @@ export async function prepareCampaignSms(input: { memberId: number; commTemplate
       select: { farmerId: true, campaign: { select: { endDate: true } } },
     });
     if (!member) return { ok: false, error: "Member not found or out of your scope." };
-    const tpl = await prisma.commTemplate.findUnique({ where: { id: input.commTemplateId }, select: { name: true, template: true, dltTemplateId: true } });
+    const tpl = await prisma.commTemplate.findUnique({ where: { id: input.commTemplateId }, select: { name: true, template: true, dltTemplateId: true, smsVariables: true } });
     if (!tpl) return { ok: false, error: "Comm plan not found." };
 
     const [farmer, lastSale, actorMobileRow] = await Promise.all([
-      prisma.farmer.findUnique({ where: { id: member.farmerId }, select: { name: true, mobile: true, hniGap: true, store: { select: { name: true } } } }),
+      prisma.farmer.findUnique({ where: { id: member.farmerId }, select: { name: true, mobile: true, hniGap: true, village: true, crop: true, cropTags: true, store: { select: { name: true } } } }),
       prisma.sale.findFirst({ where: { farmerId: member.farmerId, soldAt: { not: null } }, orderBy: { soldAt: "desc" }, select: { items: true } }),
       (async () => { const s = await getSession(); return s ? prisma.user.findUnique({ where: { id: s.userId }, select: { mobile: true } }) : null; })(),
     ]);
     const store = farmer?.store?.name ? shortStoreName(farmer.store.name) : "";
     const dateStr = member.campaign?.endDate ? new Date(member.campaign.endDate).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "";
-    const { text, missing } = fillSmsTemplate(tpl.template, {
-      name: farmer?.name, gap: farmer?.hniGap, lastItem: (lastSale?.items ?? "").split(" · ")[0], store, number: actorMobileRow?.mobile, date: dateStr,
-    });
+
+    // DLT model: locked template with {#var#} positions mapped in smsVariables. Legacy plans: named [slots].
+    const isDlt = (tpl.smsVariables?.length ?? 0) > 0 || /\{#var#\}/i.test(tpl.template);
+    let text: string, missing: string[];
+    if (isDlt) {
+      const src: FarmerVarSource = { name: farmer?.name ?? null, mobile: farmer?.mobile ?? null, village: farmer?.village ?? null, hniGap: farmer?.hniGap ?? null, cropTags: farmer?.cropTags ?? [], crop: farmer?.crop ?? null, storeName: farmer?.store?.name ?? null };
+      const vars = resolveVars(src, member.campaign?.endDate ?? null);
+      text = fillDltTemplate(tpl.template, tpl.smsVariables, vars);
+      // Flag mapped positions that resolve empty (e.g. no name/village on file).
+      const n = countDltVars(tpl.template);
+      missing = Array.from({ length: n }, (_, i) => tpl.smsVariables?.[i]).filter((k): k is string => !!k && !vars[k]).map((k) => VAR_LABEL[k] ?? k);
+    } else {
+      const r = fillSmsTemplate(tpl.template, { name: farmer?.name, gap: farmer?.hniGap, lastItem: (lastSale?.items ?? "").split(" · ")[0], store, number: actorMobileRow?.mobile, date: dateStr });
+      text = r.text; missing = r.missing;
+    }
     return { ok: true, message: text, missing, mobile: farmer?.mobile ?? null, templateName: tpl.name, smsReady: zapConfig().ready, dltReady: !!tpl.dltTemplateId };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Could not prepare the message." };
@@ -1102,19 +1115,15 @@ export async function prepareCampaignWhatsApp(input: { memberId: number; commTem
       select: { farmerId: true, campaign: { select: { endDate: true } } },
     });
     if (!member) return { ok: false, error: "Member not found or out of your scope." };
-    const tpl = await prisma.commTemplate.findUnique({ where: { id: input.commTemplateId }, select: { name: true, template: true, waTemplateName: true } });
+    const tpl = await prisma.commTemplate.findUnique({ where: { id: input.commTemplateId }, select: { name: true, template: true, waTemplateName: true, waVariables: true } });
     if (!tpl) return { ok: false, error: "Comm plan not found." };
 
-    const [farmer, lastSale, actorMobileRow] = await Promise.all([
-      prisma.farmer.findUnique({ where: { id: member.farmerId }, select: { name: true, mobile: true, hniGap: true, store: { select: { name: true } } } }),
-      prisma.sale.findFirst({ where: { farmerId: member.farmerId, soldAt: { not: null } }, orderBy: { soldAt: "desc" }, select: { items: true } }),
-      (async () => { const s = await getSession(); return s ? prisma.user.findUnique({ where: { id: s.userId }, select: { mobile: true } }) : null; })(),
-    ]);
-    const store = farmer?.store?.name ? shortStoreName(farmer.store.name) : "";
-    const dateStr = member.campaign?.endDate ? new Date(member.campaign.endDate).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "";
-    const { text, missing } = fillSmsTemplate(tpl.template, {
-      name: farmer?.name, gap: farmer?.hniGap, lastItem: (lastSale?.items ?? "").split(" · ")[0], store, number: actorMobileRow?.mobile, date: dateStr,
-    });
+    const farmer = await prisma.farmer.findUnique({ where: { id: member.farmerId }, select: { name: true, mobile: true, hniGap: true, village: true, crop: true, cropTags: true, store: { select: { name: true } } } });
+    // WA templates are {{n}}-based: fill positionally from the mapped farmer fields.
+    const src: FarmerVarSource = { name: farmer?.name ?? null, mobile: farmer?.mobile ?? null, village: farmer?.village ?? null, hniGap: farmer?.hniGap ?? null, cropTags: farmer?.cropTags ?? [], crop: farmer?.crop ?? null, storeName: farmer?.store?.name ?? null };
+    const vars = resolveVars(src, member.campaign?.endDate ?? null);
+    const text = fillWaTemplate(tpl.template, tpl.waVariables, vars);
+    const missing = (tpl.waVariables ?? []).filter((k) => !vars[k]).map((k) => VAR_LABEL[k] ?? k);
     return { ok: true, message: text, missing, mobile: farmer?.mobile ?? null, templateName: tpl.name, waReady: waConfig().ready, hasTemplate: !!tpl.waTemplateName };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Could not prepare the message." };
@@ -1131,24 +1140,27 @@ export async function sendCampaignWhatsApp(input: { memberId: number; commTempla
   try {
     const member = await prisma.campaignMember.findFirst({
       where: { id: input.memberId, ...(scope ?? {}) },
-      select: { id: true, farmerId: true, campaignId: true, mediums: true },
+      select: { id: true, farmerId: true, campaignId: true, mediums: true, campaign: { select: { endDate: true } } },
     });
     if (!member) return { ok: false, error: "Member not found or out of your scope." };
-    const farmer = await prisma.farmer.findUnique({ where: { id: member.farmerId }, select: { mobile: true } });
+    const farmer = await prisma.farmer.findUnique({ where: { id: member.farmerId }, select: { name: true, mobile: true, hniGap: true, village: true, crop: true, cropTags: true, store: { select: { name: true } } } });
     const mobile = farmer?.mobile ?? "";
     if (!mobile) return { ok: false, error: "No phone number on file for this farmer." };
 
     const tpl = input.commTemplateId
-      ? await prisma.commTemplate.findUnique({ where: { id: input.commTemplateId }, select: { waTemplateName: true, waLanguage: true } })
+      ? await prisma.commTemplate.findUnique({ where: { id: input.commTemplateId }, select: { waTemplateName: true, waLanguage: true, waVariables: true } })
       : null;
     const useTemplate = !!tpl?.waTemplateName;
+    // Template sends need one param per {{n}}, in the comm plan's mapped order — not the whole message text.
+    const src: FarmerVarSource = { name: farmer?.name ?? null, mobile: farmer?.mobile ?? null, village: farmer?.village ?? null, hniGap: farmer?.hniGap ?? null, cropTags: farmer?.cropTags ?? [], crop: farmer?.crop ?? null, storeName: farmer?.store?.name ?? null };
+    const vars = resolveVars(src, member.campaign?.endDate ?? null);
 
     const actor = await getActor();
     const res = await sendWhatsApp({
       mobile, message,
       templateName: useTemplate ? tpl!.waTemplateName : null,
       languageCode: tpl?.waLanguage ?? null,
-      bodyParams: useTemplate ? [message] : undefined,
+      bodyParams: useTemplate ? positionalParams(tpl!.waVariables, vars) : undefined,
     });
 
     await prisma.whatsAppLog.create({

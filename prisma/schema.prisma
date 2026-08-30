@@ -511,6 +511,7 @@ model CommTemplate {
   waTemplateName String? // WhatsApp Cloud API approved template name (for template-mode WhatsApp sends)
   waLanguage     String? // WhatsApp template language code, e.g. "en" | "en_US" | "hi"
   waVariables    String[] @default([]) // ordered token keys filling the WA template's {{1}},{{2}}… (name|crop|store|…)
+  smsVariables   String[] @default([]) // ordered token keys filling a DLT template's {#var#} positions (SMS)
   active      Boolean  @default(true)
   updatedAt   DateTime @updatedAt
 

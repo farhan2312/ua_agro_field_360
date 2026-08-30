@@ -11,12 +11,13 @@ import { BroadcastPanel } from "./BroadcastPanel";
 import { BroadcastHistory } from "./BroadcastHistory";
 import { PhasesPanel } from "./phases/PhasesPanel";
 import { PhaseOutreachPanel } from "./phases/PhaseOutreachPanel";
-import { WA_VAR_TOKENS, SAMPLE_VARS, fillNamedTemplate } from "@/lib/campaign-vars";
+import { WA_VAR_TOKENS, SAMPLE_VARS, fillNamedTemplate, countDltVars, fillDltTemplate } from "@/lib/campaign-vars";
+import { listTemplates, type WaTemplate } from "@/app/actions/whatsapp-templates";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { cropLabel } from "@/lib/crops";
 import { inr } from "@/lib/format";
 import {
-  saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, getCampaignTracker, extendCampaign, updateCampaignCommPlans, deleteCampaign, submitCommPlanForApproval, getCampaignMembers, markCampaignMember, getCampaignAnalytics, exportCampaignAudienceXlsx, getSmsTemplates,
+  saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, getCampaignTracker, extendCampaign, updateCampaignCommPlans, deleteCampaign, getCampaignMembers, markCampaignMember, getCampaignAnalytics, exportCampaignAudienceXlsx, getSmsTemplates,
   type CampaignListItem, type CampaignTracker, type ProjectVM, type CampaignMemberVM, type CampaignAnalytics, type SmsTemplateVM,
 } from "@/app/actions/campaigns";
 import { downloadB64 } from "@/lib/download";
@@ -33,6 +34,7 @@ export interface CommTemplateVM {
   waTemplateName?: string | null;
   waLanguage?: string | null;
   waVariables?: string[];
+  smsVariables?: string[];
 }
 export interface StoreLite { id: number; name: string }
 /** An approved Meta template + the friendly names of its {{1}},{{2}}… slots (for comm-plan var mapping). */
@@ -76,7 +78,6 @@ function CommPlanForm({ draft, setDraft }: { draft: CommTemplateVM; setDraft: (t
     setDraft({ ...draft, template: next });
     requestAnimationFrame(() => { if (ta) { ta.focus(); const p = at + s.length; ta.setSelectionRange(p, p); } });
   };
-  const nextN = new Set((body.match(/\{\{\s*(\d+)\s*\}\}/g) ?? []).map((x) => x.replace(/\D/g, ""))).size + 1;
   const preview = samplePreview(draft);
   return (
     <div className="flex flex-col gap-2">
@@ -124,52 +125,52 @@ function CommPlanForm({ draft, setDraft }: { draft: CommTemplateVM; setDraft: (t
       <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Offer</label>
         <input className={`${input} w-full`} value={draft.offer} onChange={(e) => setDraft({ ...draft, offer: e.target.value })} placeholder="Offer" /></div>
 
-      {/* Message — insert-slot buttons + live preview. WhatsApp uses {{n}}; SMS/Call use named [slots]. */}
-      <div>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <label className="text-[10px] font-bold uppercase text-[#9E9E9E]">{isWa ? "Message — becomes the WhatsApp template" : isCall ? "Call script" : "Message"}</label>
-          <div className="flex flex-wrap gap-1">
-            {isWa
-              ? <button type="button" onClick={() => insertSlot(`{{${nextN}}}`)} className="rounded-md border border-[#E0E0E0] bg-white px-2 py-0.5 text-[10.5px] font-semibold text-[#0B8A3D] hover:bg-[#E8F5E9]">+ Insert {`{{${nextN}}}`}</button>
-              : NAMED_SLOTS.map((t) => <button key={t.slot} type="button" title={t.label} onClick={() => insertSlot(t.slot)} className="rounded-md border border-[#E0E0E0] bg-white px-2 py-0.5 text-[10.5px] font-semibold text-[#616161] hover:bg-[#F5F5F5]">{t.slot}</button>)}
-          </div>
-        </div>
-        <textarea ref={taRef} className={`${input} mt-1 min-h-[90px] w-full`} value={body} dir="auto"
-          onChange={(e) => setDraft({ ...draft, template: e.target.value })}
-          placeholder={isWa ? "Namaste {{1}}! Book your {{2}} at UA Agro before {{3}}." : "Namaste [name]! ..."} />
-        {body.trim() && (
-          <>
-            <div className="mt-1.5 text-[10px] font-bold uppercase text-[#9E9E9E]">Preview (sample customer)</div>
-            <div className="mt-1 rounded-[10px] bg-[#F5F7F5] px-3 py-2 text-[12.5px] italic leading-[1.6] text-[#424242]" dir="auto" style={{ whiteSpace: "pre-wrap" }}>{preview}</div>
-          </>
-        )}
-      </div>
-
-      {isSms && <SmsTemplatePicker draft={draft} setDraft={setDraft} inputCls={input} />}
-
-      {isWa && (
-        <>
-          <div>
-            <label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Template variables <span className="normal-case text-[#BDBDBD]">— map each {"{{n}}"} to a farmer field (fills at send + example for approval)</span></label>
-            <div className="mt-1 flex flex-col gap-1.5">
-              {(draft.waVariables ?? []).map((tok, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <span className="w-9 shrink-0 text-[11px] font-mono font-bold text-[#616161]">{`{{${i + 1}}}`}</span>
-                  <select className={`${input} flex-1`} value={tok}
-                    onChange={(e) => setDraft({ ...draft, waVariables: (draft.waVariables ?? []).map((x, j) => (j === i ? e.target.value : x)) })}>
-                    {WA_VAR_TOKENS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
-                  </select>
-                  <button type="button" onClick={() => setDraft({ ...draft, waVariables: (draft.waVariables ?? []).filter((_, j) => j !== i) })}
-                    className="text-[12px] font-semibold text-[#C62828] hover:underline">Remove</button>
-                </div>
-              ))}
-              <button type="button" onClick={() => setDraft({ ...draft, waVariables: [...(draft.waVariables ?? []), WA_VAR_TOKENS[0].key] })}
-                className="self-start rounded-[8px] border border-[#E0E0E0] px-2.5 py-1 text-[11.5px] font-semibold text-[#616161] hover:bg-[#F5F5F5]">+ Add variable</button>
+      {/* Message / template. Call: free script. SMS & WhatsApp: pick an APPROVED template — no free typing. */}
+      {isCall ? (
+        <div>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Call script</label>
+            <div className="flex flex-wrap gap-1">
+              {NAMED_SLOTS.map((t) => <button key={t.slot} type="button" title={t.label} onClick={() => insertSlot(t.slot)} className="rounded-md border border-[#E0E0E0] bg-white px-2 py-0.5 text-[10.5px] font-semibold text-[#616161] hover:bg-[#F5F5F5]">{t.slot}</button>)}
             </div>
           </div>
-          <div className="rounded-[8px] bg-[#F1F8F1] px-3 py-2 text-[11.5px] text-[#33691E]">Save the plan, then hit <b>Submit for approval</b> on its row to send this to Meta. The approval status shows there.</div>
-        </>
+          <textarea ref={taRef} className={`${input} mt-1 min-h-[90px] w-full`} value={body} dir="auto"
+            onChange={(e) => setDraft({ ...draft, template: e.target.value })} placeholder="Namaste [name]! ..." />
+          {body.trim() && (
+            <>
+              <div className="mt-1.5 text-[10px] font-bold uppercase text-[#9E9E9E]">Preview (sample customer)</div>
+              <div className="mt-1 rounded-[10px] bg-[#F5F7F5] px-3 py-2 text-[12.5px] italic leading-[1.6] text-[#424242]" dir="auto" style={{ whiteSpace: "pre-wrap" }}>{preview}</div>
+            </>
+          )}
+        </div>
+      ) : isSms ? (
+        <SmsPlanEditor draft={draft} setDraft={setDraft} inputCls={input} />
+      ) : (
+        <WaPlanEditor draft={draft} setDraft={setDraft} inputCls={input} />
       )}
+    </div>
+  );
+}
+
+/** One variable-mapping row list: map N positions to farmer fields (shared by SMS {#var#} and WA {{n}}). */
+function VarMap({ label, positions, values, onChange, inputCls, fmtPos }: {
+  label: string; positions: number; values: string[]; onChange: (v: string[]) => void; inputCls: string; fmtPos: (i: number) => string;
+}) {
+  if (positions === 0) return <div className="text-[11.5px] text-[#9E9E9E]">This template has no variables — it sends exactly as approved.</div>;
+  const set = (i: number, tok: string) => onChange(Array.from({ length: positions }, (_, j) => (j === i ? tok : values[j] ?? WA_VAR_TOKENS[0].key)));
+  return (
+    <div>
+      <label className="text-[10px] font-bold uppercase text-[#9E9E9E]">{label}</label>
+      <div className="mt-1 flex flex-col gap-1.5">
+        {Array.from({ length: positions }, (_, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <span className="w-12 shrink-0 text-[11px] font-mono font-bold text-[#616161]">{fmtPos(i)}</span>
+            <select className={`${inputCls} flex-1`} value={values[i] ?? WA_VAR_TOKENS[0].key} onChange={(e) => set(i, e.target.value)}>
+              {WA_VAR_TOKENS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+            </select>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -178,7 +179,12 @@ function CommPlanForm({ draft, setDraft }: { draft: CommTemplateVM; setDraft: (t
  * SMS DLT template picker — syncs the account's approved templates from ZapSMS and lets the user
  * pick one (fills the DLT id + offers to load the approved text). Manual id entry stays as a fallback.
  */
-function SmsTemplatePicker({ draft, setDraft, inputCls }: { draft: CommTemplateVM; setDraft: (t: CommTemplateVM) => void; inputCls: string }) {
+/**
+ * SMS comm plan: pick an APPROVED DLT template — the body is locked to the approved content and its
+ * `{#var#}` positions are mapped to farmer fields. No free typing (DLT compliance). Legacy plans whose
+ * id isn't in the synced approved list are shown read-only with a prompt to switch.
+ */
+function SmsPlanEditor({ draft, setDraft, inputCls }: { draft: CommTemplateVM; setDraft: (t: CommTemplateVM) => void; inputCls: string }) {
   const [tpls, setTpls] = useState<SmsTemplateVM[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, start] = useTransition();
@@ -190,56 +196,152 @@ function SmsTemplatePicker({ draft, setDraft, inputCls }: { draft: CommTemplateV
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const curId = (draft.dltTemplateId ?? "").trim();
+  const approved = (tpls ?? []).filter((t) => t.approved);
   const selected = (tpls ?? []).find((t) => t.dltTemplateId === curId) ?? null;
+  const isLegacy = !!(draft.template && !selected); // has content but not tied to a synced template
+  const content = selected ? selected.content : draft.template;
+  const positions = countDltVars(content);
+
+  const pick = (id: string) => {
+    const t = (tpls ?? []).find((x) => x.dltTemplateId === id);
+    if (!t) return;
+    const positions = countDltVars(t.content);
+    const smsVariables = Array.from({ length: positions }, (_, i) => draft.smsVariables?.[i] ?? WA_VAR_TOKENS[0].key);
+    setDraft({ ...draft, dltTemplateId: t.dltTemplateId, template: t.content, smsVariables });
+  };
+  const previewText = fillDltTemplate(content, draft.smsVariables, SAMPLE_VARS);
 
   return (
     <div className="rounded-[10px] border border-[#EDE7F6] bg-[#FBFAFF] p-3">
       <div className="flex items-center justify-between">
-        <label className="text-[10px] font-bold uppercase text-[#6A1B9A]">DLT SMS Template <span className="normal-case text-[#BDBDBD]">(required for delivery in India)</span></label>
+        <label className="text-[10px] font-bold uppercase text-[#6A1B9A]">DLT SMS template <span className="normal-case text-[#BDBDBD]">— pick an approved one (content is locked)</span></label>
         <button type="button" onClick={load} disabled={loading} className="text-[11px] font-semibold text-[#6A1B9A] hover:underline disabled:opacity-50">{loading ? "Syncing…" : "↻ Sync"}</button>
       </div>
 
-      {/* Picker */}
-      <select className={`${inputCls} mt-1 w-full bg-white`} value={selected ? curId : ""} disabled={loading || !(tpls && tpls.length)}
-        onChange={(e) => {
-          const t = (tpls ?? []).find((x) => x.dltTemplateId === e.target.value);
-          if (t) setDraft({ ...draft, dltTemplateId: t.dltTemplateId });
-        }}>
-        <option value="">{loading ? "Loading templates…" : tpls && tpls.length ? "— Pick an approved template —" : "No templates found"}</option>
-        {(tpls ?? []).map((t) => (
-          <option key={t.dltTemplateId} value={t.dltTemplateId}>
-            {t.name} · {t.dltTemplateId}{t.approved ? "" : " (not approved)"}
-          </option>
-        ))}
+      <select className={`${inputCls} mt-1 w-full bg-white`} value={selected ? curId : ""} disabled={loading}
+        onChange={(e) => pick(e.target.value)}>
+        <option value="">{loading ? "Loading approved templates…" : approved.length ? "— Pick an approved template —" : "No approved templates found"}</option>
+        {approved.map((t) => <option key={t.dltTemplateId} value={t.dltTemplateId}>{t.name} · {t.dltTemplateId}</option>)}
       </select>
-
       {err && <div className="mt-1.5 text-[11.5px] text-[#C62828]">{err}</div>}
+      {!loading && approved.length === 0 && !isLegacy && (
+        <div className="mt-1.5 text-[11px] text-[#8D6E00]">Approve content templates on your DLT portal — they’ll sync here automatically.</div>
+      )}
 
-      {/* Selected template — approved content + load-into-message */}
-      {selected && (
-        <div className="mt-2 rounded-[8px] border border-[#E0E0E0] bg-white p-2.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase text-[#9E9E9E]">Approved content{selected.approved ? "" : " · ⚠ not approved"}</span>
-            {selected.content && (
-              <button type="button" onClick={() => setDraft({ ...draft, template: selected.content })}
-                className="text-[11px] font-semibold text-[#2E7D32] hover:underline">Use as message text</button>
-            )}
-          </div>
-          <div className="mt-1 text-[12px] leading-[1.5] text-[#424242]" dir="auto" style={{ whiteSpace: "pre-wrap" }}>{selected.content || "—"}</div>
+      {isLegacy && (
+        <div className="mt-2 rounded-[8px] border border-[#FFE0B2] bg-[#FFFDF7] p-2.5 text-[11.5px] text-[#8D6E00]">
+          ⚠ Legacy free-text message (id {curId || "—"}). It still sends, but pick an approved template above to update it.
         </div>
       )}
 
-      {/* Manual fallback (id not in the list, or gateway unreachable) */}
-      <div className="mt-2">
-        <label className="text-[10px] font-bold uppercase text-[#9E9E9E]">DLT Template ID</label>
-        <input className={`${inputCls} w-full`} value={draft.dltTemplateId ?? ""} onChange={(e) => setDraft({ ...draft, dltTemplateId: e.target.value })} placeholder="e.g. 1207xxxxxxxxxxxxx" />
-        {curId && !selected && tpls && tpls.length > 0 && <div className="mt-1 text-[11px] text-[#EF6C00]">This id isn’t in the synced list — double-check it’s an approved template.</div>}
-      </div>
+      {content && (
+        <div className="mt-2 rounded-[8px] border border-[#E0E0E0] bg-white p-2.5">
+          <div className="text-[10px] font-bold uppercase text-[#9E9E9E]">Approved content · locked</div>
+          <div className="mt-1 text-[12px] leading-[1.5] text-[#424242]" dir="auto" style={{ whiteSpace: "pre-wrap" }}>{content}</div>
+        </div>
+      )}
+
+      {content && (
+        <div className="mt-2">
+          <VarMap label={`Map the ${positions} variable${positions === 1 ? "" : "s"} to farmer fields`} positions={positions}
+            values={draft.smsVariables ?? []} onChange={(v) => setDraft({ ...draft, smsVariables: v })} inputCls={inputCls} fmtPos={(i) => `#${i + 1}`} />
+          {positions > 0 && (
+            <>
+              <div className="mt-1.5 text-[10px] font-bold uppercase text-[#9E9E9E]">Preview (sample customer)</div>
+              <div className="mt-1 rounded-[10px] bg-[#F5F7F5] px-3 py-2 text-[12.5px] italic leading-[1.6] text-[#424242]" dir="auto" style={{ whiteSpace: "pre-wrap" }}>{previewText}</div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-const EMPTY_PLAN: CommTemplateVM = { id: 0, name: "", language: "hi", promoType: "General", segment: "REGULAR", segments: [], priority: 5, medium: "WhatsApp", offer: "", timingLabel: "", template: "", dltTemplateId: "", waTemplateName: "", waLanguage: "", waVariables: [] };
+/** WhatsApp comm plan: pick an APPROVED Meta template. Body is locked; {{n}} positions map to farmer fields. */
+function WaPlanEditor({ draft, setDraft, inputCls }: { draft: CommTemplateVM; setDraft: (t: CommTemplateVM) => void; inputCls: string }) {
+  const [tpls, setTpls] = useState<WaTemplate[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [loading, start] = useTransition();
+  const load = () => start(async () => {
+    setErr(null);
+    const r = await listTemplates();
+    if (r.ok && r.templates) setTpls(r.templates); else { setTpls([]); setErr(r.error ?? "Could not load templates."); }
+  });
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const approved = (tpls ?? []).filter((t) => t.status === "APPROVED");
+  const curName = (draft.waTemplateName ?? "").trim();
+  const selected = (tpls ?? []).find((t) => t.name === curName) ?? null;
+  const isLegacy = !!(curName && !selected);
+  const body = selected ? selected.body : draft.template;
+  const positions = waVarCount(body);
+
+  const pick = (name: string) => {
+    const t = (tpls ?? []).find((x) => x.name === name);
+    if (!t) return;
+    const positions = waVarCount(t.body);
+    const waVariables = Array.from({ length: positions }, (_, i) => draft.waVariables?.[i] ?? WA_VAR_TOKENS[0].key);
+    setDraft({ ...draft, waTemplateName: t.name, waLanguage: t.language, template: t.body, waVariables });
+  };
+  const previewText = fillWaPreview(body, draft.waVariables);
+
+  return (
+    <div className="rounded-[10px] border border-[#E0F2E9] bg-[#F7FCF9] p-3">
+      <div className="flex items-center justify-between">
+        <label className="text-[10px] font-bold uppercase text-[#0B8A3D]">WhatsApp template <span className="normal-case text-[#BDBDBD]">— pick an approved one</span></label>
+        <button type="button" onClick={load} disabled={loading} className="text-[11px] font-semibold text-[#0B8A3D] hover:underline disabled:opacity-50">{loading ? "Syncing…" : "↻ Sync"}</button>
+      </div>
+
+      <select className={`${inputCls} mt-1 w-full bg-white`} value={selected ? curName : ""} disabled={loading}
+        onChange={(e) => pick(e.target.value)}>
+        <option value="">{loading ? "Loading approved templates…" : approved.length ? "— Pick an approved template —" : "No approved templates found"}</option>
+        {approved.map((t) => <option key={`${t.name}-${t.language}`} value={t.name}>{t.name} ({t.language})</option>)}
+      </select>
+      {err && <div className="mt-1.5 text-[11.5px] text-[#C62828]">{err}</div>}
+      <div className="mt-1.5 text-[11px] text-[#607D8B]">Create &amp; approve new templates in <b>Settings → WhatsApp Templates</b>; approved ones appear here.</div>
+
+      {isLegacy && (
+        <div className="mt-2 rounded-[8px] border border-[#FFE0B2] bg-[#FFFDF7] p-2.5 text-[11.5px] text-[#8D6E00]">
+          ⚠ “{curName}” isn’t in the approved list (maybe still pending). It stays until you pick an approved template.
+        </div>
+      )}
+
+      {body && (
+        <div className="mt-2 rounded-[8px] border border-[#E0E0E0] bg-white p-2.5">
+          <div className="text-[10px] font-bold uppercase text-[#9E9E9E]">Template body · locked</div>
+          <div className="mt-1 text-[12px] leading-[1.5] text-[#424242]" dir="auto" style={{ whiteSpace: "pre-wrap" }}>{body}</div>
+        </div>
+      )}
+
+      {body && (
+        <div className="mt-2">
+          <VarMap label={`Map the ${positions} variable${positions === 1 ? "" : "s"} to farmer fields`} positions={positions}
+            values={draft.waVariables ?? []} onChange={(v) => setDraft({ ...draft, waVariables: v })} inputCls={inputCls} fmtPos={(i) => `{{${i + 1}}}`} />
+          {positions > 0 && (
+            <>
+              <div className="mt-1.5 text-[10px] font-bold uppercase text-[#9E9E9E]">Preview (sample customer)</div>
+              <div className="mt-1 rounded-[10px] bg-[#F5F7F5] px-3 py-2 text-[12.5px] italic leading-[1.6] text-[#424242]" dir="auto" style={{ whiteSpace: "pre-wrap" }}>{previewText}</div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Count distinct {{n}} placeholders in a WhatsApp template body. */
+function waVarCount(body: string): number {
+  return new Set((body.match(/\{\{\s*(\d+)\s*\}\}/g) ?? []).map((x) => x.replace(/\D/g, ""))).size;
+}
+/** Fill {{1}},{{2}}… in a WA body with sample values, in the mapped-token order. */
+function fillWaPreview(body: string, waVariables: string[] | null | undefined): string {
+  return body.replace(/\{\{\s*(\d+)\s*\}\}/g, (_m, d) => {
+    const tok = (waVariables ?? [])[Number(d) - 1];
+    return tok ? (SAMPLE_VARS[tok] ?? `{{${d}}}`) : `{{${d}}}`;
+  });
+}
+
+const EMPTY_PLAN: CommTemplateVM = { id: 0, name: "", language: "hi", promoType: "General", segment: "REGULAR", segments: [], priority: 5, medium: "WhatsApp", offer: "", timingLabel: "", template: "", dltTemplateId: "", waTemplateName: "", waLanguage: "", waVariables: [], smsVariables: [] };
 
 function CommPlanTab({ templates, templateVars }: { templates: CommTemplateVM[]; templateVars: TemplateVarHint[] }) {
   const [rows, setRows] = useState(templates);
@@ -263,7 +365,7 @@ function CommPlanTab({ templates, templateVars }: { templates: CommTemplateVM[];
     if (!draft) return;
     setErr(null);
     start(async () => {
-      const patch = { name: draft.name, language: draft.language, promoType: draft.promoType, segments: draft.segments, medium: draft.medium, offer: draft.offer, timingLabel: draft.timingLabel, template: draft.template, dltTemplateId: (draft.dltTemplateId ?? "").trim() || null, waTemplateName: (draft.waTemplateName ?? "").trim() || null, waLanguage: (draft.waLanguage ?? "").trim() || null, waVariables: draft.waVariables ?? [] };
+      const patch = { name: draft.name, language: draft.language, promoType: draft.promoType, segments: draft.segments, medium: draft.medium, offer: draft.offer, timingLabel: draft.timingLabel, template: draft.template, dltTemplateId: (draft.dltTemplateId ?? "").trim() || null, waTemplateName: (draft.waTemplateName ?? "").trim() || null, waLanguage: (draft.waLanguage ?? "").trim() || null, waVariables: draft.waVariables ?? [], smsVariables: draft.smsVariables ?? [] };
       if (adding) {
         const res = await createCommTemplate(patch);
         if (res.ok && res.id != null) { setRows((r) => [...r, { ...draft, id: res.id! }]); setAdding(false); setDraft(null); }
@@ -282,13 +384,6 @@ function CommPlanTab({ templates, templateVars }: { templates: CommTemplateVM[];
   };
   // Approved Meta template names (templateVars are already filtered to APPROVED on the server).
   const approvedNames = new Set(templateVars.map((v) => v.name));
-  const submitApproval = (t: CommTemplateVM) =>
-    start(async () => {
-      setErr(null);
-      const res = await submitCommPlanForApproval(t.id);
-      if (res.ok) setRows((r) => r.map((x) => (x.id === t.id ? { ...x, waTemplateName: res.name ?? x.waTemplateName } : x)));
-      else setErr(res.error ?? "Submit failed");
-    });
 
   return (
     <div className="flex flex-col gap-3.5">
@@ -349,15 +444,19 @@ function CommPlanTab({ templates, templateVars }: { templates: CommTemplateVM[];
               <span className="rounded-full bg-[#F3E5F5] px-2 py-0.5 text-[10px] font-semibold text-[#6A1B9A]">{cur.promoType}</span>
               <span className="text-[11.5px] text-[#616161]">{cur.medium}</span>
               <span className="text-[11.5px] text-[#9E9E9E]">· {cur.timingLabel}</span>
-              {/* WhatsApp plans: Meta approval status / submit button (message = the template). */}
+              {/* WhatsApp plans: which approved Meta template is selected (created in Settings). */}
               {t.medium === "WhatsApp" && (
                 t.waTemplateName && approvedNames.has(t.waTemplateName)
                   ? <span className="rounded-full bg-[#E8F5E9] px-2 py-0.5 text-[10px] font-bold text-[#2E7D32]">✓ WA approved</span>
                   : t.waTemplateName
                     ? <span className="rounded-full bg-[#FFF8E1] px-2 py-0.5 text-[10px] font-bold text-[#8D6E00]">⏳ WA pending</span>
-                    : <button type="button" onClick={() => submitApproval(t)} disabled={saving}
-                        className="rounded-[8px] border border-[#0B8A3D] px-2 py-0.5 text-[11px] font-semibold text-[#0B8A3D] hover:bg-[#E8F5E9] disabled:opacity-50">
-                        {saving ? "Submitting…" : "Submit for approval"}</button>
+                    : <span className="rounded-full bg-[#FDECEA] px-2 py-0.5 text-[10px] font-bold text-[#C62828]">⚠ No template</span>
+              )}
+              {/* SMS plans: DLT template attached? */}
+              {t.medium === "SMS" && (
+                t.dltTemplateId
+                  ? <span className="rounded-full bg-[#EDE7F6] px-2 py-0.5 text-[10px] font-bold text-[#6A1B9A]">DLT set</span>
+                  : <span className="rounded-full bg-[#FDECEA] px-2 py-0.5 text-[10px] font-bold text-[#C62828]">⚠ No DLT template</span>
               )}
               <div className="ml-auto flex items-center gap-3">
                 <button type="button" onClick={() => { setEditing(isEditing ? null : t.id); setAdding(false); setDraft({ ...t }); setErr(null); }}

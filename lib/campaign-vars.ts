@@ -71,3 +71,40 @@ export function fillNamedTemplate(template: string, vars: Record<string, string>
 export function positionalParams(waVariables: string[] | null | undefined, vars: Record<string, string>): string[] {
   return (waVariables ?? []).map((tok) => vars[tok] ?? "");
 }
+
+/** Render a WhatsApp template body: replace {{1}},{{2}}… with the mapped farmer values (for previews/logs). */
+export function fillWaTemplate(body: string, waVariables: string[] | null | undefined, vars: Record<string, string>): string {
+  return body.replace(/\{\{\s*(\d+)\s*\}\}/g, (_m, d) => {
+    const tok = (waVariables ?? [])[Number(d) - 1];
+    return tok ? (vars[tok] ?? "") : "";
+  });
+}
+
+/** DLT variable placeholder (the TRAI standard): `{#var#}`. */
+export const DLT_VAR = /\{#var#\}/gi;
+/** How many `{#var#}` positions a DLT template body has. */
+export function countDltVars(body: string): number {
+  return (body.match(DLT_VAR) ?? []).length;
+}
+/**
+ * Fill a DLT template body by replacing each `{#var#}` (in order) with the farmer value for the mapped
+ * token in `smsVariables`. An unmapped / missing position becomes empty. Non-`{#var#}` text is preserved
+ * exactly — so the sent message still matches the DLT-approved template.
+ */
+export function fillDltTemplate(body: string, smsVariables: string[] | null | undefined, vars: Record<string, string>): string {
+  let i = 0;
+  return body.replace(DLT_VAR, () => {
+    const tok = (smsVariables ?? [])[i++];
+    return tok ? (vars[tok] ?? "") : "";
+  });
+}
+
+/**
+ * Fill an SMS comm plan for one farmer. New model: DLT body with `{#var#}` positions mapped via
+ * `smsVariables`. Legacy (grandfathered) plans have no smsVariables and use named [slots].
+ */
+export function fillSmsTemplate(tpl: { template: string; smsVariables?: string[] | null }, vars: Record<string, string>): string {
+  if (tpl.smsVariables && tpl.smsVariables.length) return fillDltTemplate(tpl.template, tpl.smsVariables, vars);
+  if (/\{#var#\}/i.test(tpl.template)) return fillDltTemplate(tpl.template, tpl.smsVariables, vars); // DLT body, no mapping yet
+  return fillNamedTemplate(tpl.template, vars); // legacy [slot] text
+}
