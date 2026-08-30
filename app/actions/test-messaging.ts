@@ -2,7 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { getScope, canManage, getActor } from "@/lib/scope";
-import { zapConfig, sendSms, getSmsStatus } from "@/lib/zapsms";
+import { zapConfig, sendSms, getSmsStatus, getSmsBalance, type SmsBalance } from "@/lib/zapsms";
 import { waConfig, sendWhatsApp } from "@/lib/whatsapp";
 
 /** Admins / super admins only (Central Admin + System Admin). */
@@ -21,6 +21,12 @@ export interface TestSmsResult {
 export interface WaLogRow {
   id: number; mobile: string; kind: string; status: string | null; error: string | null;
   ok: boolean; deliveredAt: string | null; readAt: string | null; createdAt: string;
+}
+
+/** SMS credit balance for the Settings chip + pre-send checks. Admin-only. */
+export async function smsBalance(): Promise<{ ok: boolean; balance?: SmsBalance; error?: string }> {
+  if (!(await adminOnly())) return { ok: false, error: "Admins only." };
+  return getSmsBalance();
 }
 
 export interface SmsLogRow {

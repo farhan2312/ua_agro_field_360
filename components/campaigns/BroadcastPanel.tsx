@@ -7,6 +7,8 @@ import {
   getBroadcastAudience, createBroadcast, runBroadcastBatch, cancelBroadcast,
   type Channel, type BroadcastAudience,
 } from "@/app/actions/broadcasts";
+import { smsBalance } from "@/app/actions/test-messaging";
+import type { SmsBalance } from "@/lib/zapsms";
 
 const n = (x: number) => x.toLocaleString("en-IN");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -32,7 +34,10 @@ export function BroadcastPanel({ campaignId, campaignName, commPlans, templates,
   const plans = templates.filter((t) => commPlans.includes(t.name) && (channel === "SMS" || !!t.waTemplateName));
   const accent = channel === "WHATSAPP" ? "#0B8A3D" : "#6A1B9A";
 
+  const [bal, setBal] = useState<SmsBalance | null>(null);
   useEffect(() => { setTplId(null); setAud(null); getBroadcastAudience(campaignId, channel).then(setAud); }, [campaignId, channel]);
+  // SMS credit balance — to warn before a mass send burns through more credits than the account has.
+  useEffect(() => { setBal(null); if (channel === "SMS") smsBalance().then((r) => setBal(r.ok && r.balance ? r.balance : null)); }, [channel]);
 
   const ready = channel === "WHATSAPP" ? aud?.waReady : aud?.smsReady;
   const eligible = aud ? (channel === "WHATSAPP" ? aud.optedIn : aud.withMobile) - (skipContacted ? aud.alreadyContacted : 0) : 0;
@@ -109,6 +114,15 @@ export function BroadcastPanel({ campaignId, campaignName, commPlans, templates,
 
             {channel === "WHATSAPP" && (
               <div className="mt-3 rounded-[8px] bg-[#E8F5E9] px-3 py-2 text-[11.5px] text-[#2E7D32]">WhatsApp sends only to <b>opted-in</b> farmers with an <b>approved</b> template — this protects your number's quality rating.</div>
+            )}
+            {channel === "SMS" && bal && (
+              bal.total < Math.max(0, eligible) ? (
+                <div className="mt-3 rounded-[8px] bg-[#FDECEA] px-3 py-2 text-[11.5px] font-semibold text-[#C62828]">
+                  ⚠ Only {n(bal.total)} SMS credits left — this send needs ~{n(Math.max(0, eligible))}. Top up, or it will stop partway.
+                </div>
+              ) : (
+                <div className="mt-3 text-[11.5px] text-[#9E9E9E]">💳 {bal.currency}{n(bal.total)} SMS credits available.</div>
+              )
             )}
             {err && <div className="mt-2 rounded-[8px] bg-[#FDECEA] px-3 py-2 text-[12px] font-semibold text-[#C62828]">{err}</div>}
 

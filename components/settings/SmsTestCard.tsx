@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { searchFarmersForAction } from "@/app/actions/action-registry";
-import { sendTestSms, sendTestWhatsApp, getRecentWhatsAppLogs, getRecentSmsLogs, refreshSmsDeliveryStatus, type WaLogRow, type SmsLogRow } from "@/app/actions/test-messaging";
+import { sendTestSms, sendTestWhatsApp, getRecentWhatsAppLogs, getRecentSmsLogs, refreshSmsDeliveryStatus, smsBalance, type WaLogRow, type SmsLogRow } from "@/app/actions/test-messaging";
+import type { SmsBalance } from "@/lib/zapsms";
 import { fillPreview } from "@/lib/wa-template-presets";
 import type { FarmerPick } from "@/lib/action-constants";
 
@@ -84,6 +85,8 @@ export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMis
 
   const [waLogs, setWaLogs] = useState<WaLogRow[] | null>(null);
   const refreshLogs = () => getRecentWhatsAppLogs(8).then(setWaLogs);
+  const [bal, setBal] = useState<SmsBalance | null>(null);
+  const loadBalance = () => smsBalance().then((r) => setBal(r.ok && r.balance ? r.balance : null));
   const [smsLogs, setSmsLogs] = useState<SmsLogRow[] | null>(null);
   const [refreshingSms, startRefreshSms] = useTransition();
   const loadSmsLogs = () => getRecentSmsLogs(10).then(setSmsLogs);
@@ -112,8 +115,8 @@ export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMis
     });
   };
 
-  // Load the delivery log for whichever channel is active.
-  useEffect(() => { if (isWa) refreshLogs(); else loadSmsLogs(); }, [isWa]); // eslint-disable-line
+  // Load the delivery log for whichever channel is active (+ SMS balance).
+  useEffect(() => { if (isWa) refreshLogs(); else { loadSmsLogs(); if (smsReady) loadBalance(); } }, [isWa]); // eslint-disable-line
 
   const inputCls = "w-full rounded-[10px] border border-[#E0E0E0] px-3 py-2.5 text-[13px] outline-none focus:border-[#2E7D32]";
 
@@ -138,8 +141,14 @@ export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMis
 
       {/* Gateway status */}
       {ready ? (
-        <div className="mb-4 rounded-[10px] bg-[#E8F5E9] px-3 py-2 text-[12px] text-[#2E7D32]">
-          ✓ {isWa ? "WhatsApp Cloud API configured." : `Gateway configured${senderId ? ` · sender ${senderId}` : ""}.`}
+        <div className="mb-4 flex items-center justify-between gap-2 rounded-[10px] bg-[#E8F5E9] px-3 py-2 text-[12px] text-[#2E7D32]">
+          <span>✓ {isWa ? "WhatsApp Cloud API configured." : `Gateway configured${senderId ? ` · sender ${senderId}` : ""}.`}</span>
+          {!isWa && bal && (
+            <span className="shrink-0 rounded-full bg-white/70 px-2.5 py-0.5 text-[11px] font-bold text-[#1B5E20]"
+              title={bal.items.map((i) => `${i.productType}: ${i.credits.toLocaleString("en-IN")}`).join(" · ")}>
+              💳 {bal.currency}{bal.total.toLocaleString("en-IN")} credits
+            </span>
+          )}
         </div>
       ) : (
         <div className="mb-4 rounded-[10px] bg-[#FFF8E1] px-3 py-2 text-[12px] text-[#8D6E00]">
