@@ -96,7 +96,12 @@ export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMis
           )
         : await sendTestSms({ mobile, message, commTemplateId: planId, farmerId: picked?.id ?? null });
       setResult(r.ok
-        ? { ok: true, text: `Accepted by Meta${r.providerId ? ` · id ${r.providerId}` : ""}${r.status ? ` · ${r.status}` : ""} — watch delivery status below.` }
+        ? {
+            ok: true,
+            text: isWa
+              ? `Accepted by Meta${r.providerId ? ` · id ${r.providerId}` : ""}${r.status ? ` · ${r.status}` : ""} — watch delivery status below.`
+              : `Submitted to the SMS gateway${r.providerId ? ` · id ${r.providerId}` : ""}${r.status ? ` · ${r.status}` : ""}.`,
+          }
         : { ok: false, text: r.error ?? "Send failed." });
       if (isWa) { refreshLogs(); setTimeout(refreshLogs, 4000); } // status webhook lands a few seconds later
     });

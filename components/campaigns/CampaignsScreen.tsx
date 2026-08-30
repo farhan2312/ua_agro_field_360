@@ -16,8 +16,8 @@ import { useConfirm } from "@/components/ConfirmDialog";
 import { cropLabel } from "@/lib/crops";
 import { inr } from "@/lib/format";
 import {
-  saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, getCampaignTracker, extendCampaign, updateCampaignCommPlans, deleteCampaign, submitCommPlanForApproval, getCampaignMembers, markCampaignMember, getCampaignAnalytics, exportCampaignAudienceXlsx,
-  type CampaignListItem, type CampaignTracker, type ProjectVM, type CampaignMemberVM, type CampaignAnalytics,
+  saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, getCampaignTracker, extendCampaign, updateCampaignCommPlans, deleteCampaign, submitCommPlanForApproval, getCampaignMembers, markCampaignMember, getCampaignAnalytics, exportCampaignAudienceXlsx, getSmsTemplates,
+  type CampaignListItem, type CampaignTracker, type ProjectVM, type CampaignMemberVM, type CampaignAnalytics, type SmsTemplateVM,
 } from "@/app/actions/campaigns";
 import { downloadB64 } from "@/lib/download";
 
@@ -145,10 +145,7 @@ function CommPlanForm({ draft, setDraft }: { draft: CommTemplateVM; setDraft: (t
         )}
       </div>
 
-      {isSms && (
-        <div><label className="text-[10px] font-bold uppercase text-[#9E9E9E]">DLT Template ID <span className="normal-case text-[#BDBDBD]">(required for SMS delivery in India)</span></label>
-          <input className={`${input} w-full`} value={draft.dltTemplateId ?? ""} onChange={(e) => setDraft({ ...draft, dltTemplateId: e.target.value })} placeholder="e.g. 1207xxxxxxxxxxxxx" /></div>
-      )}
+      {isSms && <SmsTemplatePicker draft={draft} setDraft={setDraft} inputCls={input} />}
 
       {isWa && (
         <>
@@ -173,6 +170,71 @@ function CommPlanForm({ draft, setDraft }: { draft: CommTemplateVM; setDraft: (t
           <div className="rounded-[8px] bg-[#F1F8F1] px-3 py-2 text-[11.5px] text-[#33691E]">Save the plan, then hit <b>Submit for approval</b> on its row to send this to Meta. The approval status shows there.</div>
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * SMS DLT template picker — syncs the account's approved templates from ZapSMS and lets the user
+ * pick one (fills the DLT id + offers to load the approved text). Manual id entry stays as a fallback.
+ */
+function SmsTemplatePicker({ draft, setDraft, inputCls }: { draft: CommTemplateVM; setDraft: (t: CommTemplateVM) => void; inputCls: string }) {
+  const [tpls, setTpls] = useState<SmsTemplateVM[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [loading, start] = useTransition();
+  const load = () => start(async () => {
+    setErr(null);
+    const r = await getSmsTemplates();
+    if (r.ok) setTpls(r.templates); else { setTpls([]); setErr(r.error ?? "Could not load templates."); }
+  });
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const curId = (draft.dltTemplateId ?? "").trim();
+  const selected = (tpls ?? []).find((t) => t.dltTemplateId === curId) ?? null;
+
+  return (
+    <div className="rounded-[10px] border border-[#EDE7F6] bg-[#FBFAFF] p-3">
+      <div className="flex items-center justify-between">
+        <label className="text-[10px] font-bold uppercase text-[#6A1B9A]">DLT SMS Template <span className="normal-case text-[#BDBDBD]">(required for delivery in India)</span></label>
+        <button type="button" onClick={load} disabled={loading} className="text-[11px] font-semibold text-[#6A1B9A] hover:underline disabled:opacity-50">{loading ? "Syncing…" : "↻ Sync"}</button>
+      </div>
+
+      {/* Picker */}
+      <select className={`${inputCls} mt-1 w-full bg-white`} value={selected ? curId : ""} disabled={loading || !(tpls && tpls.length)}
+        onChange={(e) => {
+          const t = (tpls ?? []).find((x) => x.dltTemplateId === e.target.value);
+          if (t) setDraft({ ...draft, dltTemplateId: t.dltTemplateId });
+        }}>
+        <option value="">{loading ? "Loading templates…" : tpls && tpls.length ? "— Pick an approved template —" : "No templates found"}</option>
+        {(tpls ?? []).map((t) => (
+          <option key={t.dltTemplateId} value={t.dltTemplateId}>
+            {t.name} · {t.dltTemplateId}{t.approved ? "" : " (not approved)"}
+          </option>
+        ))}
+      </select>
+
+      {err && <div className="mt-1.5 text-[11.5px] text-[#C62828]">{err}</div>}
+
+      {/* Selected template — approved content + load-into-message */}
+      {selected && (
+        <div className="mt-2 rounded-[8px] border border-[#E0E0E0] bg-white p-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-bold uppercase text-[#9E9E9E]">Approved content{selected.approved ? "" : " · ⚠ not approved"}</span>
+            {selected.content && (
+              <button type="button" onClick={() => setDraft({ ...draft, template: selected.content })}
+                className="text-[11px] font-semibold text-[#2E7D32] hover:underline">Use as message text</button>
+            )}
+          </div>
+          <div className="mt-1 text-[12px] leading-[1.5] text-[#424242]" dir="auto" style={{ whiteSpace: "pre-wrap" }}>{selected.content || "—"}</div>
+        </div>
+      )}
+
+      {/* Manual fallback (id not in the list, or gateway unreachable) */}
+      <div className="mt-2">
+        <label className="text-[10px] font-bold uppercase text-[#9E9E9E]">DLT Template ID</label>
+        <input className={`${inputCls} w-full`} value={draft.dltTemplateId ?? ""} onChange={(e) => setDraft({ ...draft, dltTemplateId: e.target.value })} placeholder="e.g. 1207xxxxxxxxxxxxx" />
+        {curId && !selected && tpls && tpls.length > 0 && <div className="mt-1 text-[11px] text-[#EF6C00]">This id isn’t in the synced list — double-check it’s an approved template.</div>}
+      </div>
     </div>
   );
 }

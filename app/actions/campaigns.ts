@@ -14,7 +14,7 @@ import { getScope, canManage, getActor, farmerScopeWhere } from "@/lib/scope";
 import { getSession } from "@/lib/auth";
 import { cropLabel } from "@/lib/crops";
 import { buildWorkbookB64 } from "@/lib/xlsx-export";
-import { sendSms, zapConfig } from "@/lib/zapsms";
+import { sendSms, zapConfig, listSmsTemplates, type SmsTemplate } from "@/lib/zapsms";
 import { sendWhatsApp, waConfig, waCreateTemplate } from "@/lib/whatsapp";
 import { SAMPLE_VARS } from "@/lib/campaign-vars";
 
@@ -279,6 +279,17 @@ export async function createCommTemplate(data: Required<CommTemplatePatch>): Pro
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Create failed" };
   }
+}
+
+export interface SmsTemplateVM extends SmsTemplate {}
+/** Approved DLT SMS templates from the ZapSMS account (for the Comm Plan picker). Manager-only. */
+export async function getSmsTemplates(): Promise<{ ok: boolean; templates: SmsTemplateVM[]; error?: string }> {
+  const perm = await requireManager(); if (!perm.ok) return { ok: false, templates: [], error: perm.error };
+  const r = await listSmsTemplates();
+  // Prefer approved-and-active first, then approved, then the rest — all usable, but the good ones lead.
+  const rank = (t: SmsTemplate) => (t.approved && t.active ? 0 : t.approved ? 1 : 2);
+  const templates = [...r.templates].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+  return { ok: r.ok, templates, error: r.error };
 }
 
 export async function deleteCommTemplate(id: number): Promise<{ ok: boolean; error?: string }> {
