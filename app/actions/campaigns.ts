@@ -436,6 +436,24 @@ export async function updateCampaignCommPlans(campaignId: number, commPlans: str
   } catch (e) { return { ok: false, error: e instanceof Error ? e.message : "Update failed" }; }
 }
 
+/**
+ * Delete a campaign and everything scoped to it: members, phases, phase-advances and caller
+ * assignments cascade at the DB; broadcasts (+ their recipients) are cleared explicitly since they
+ * key off campaignId without an FK. SMS/WhatsApp audit logs are KEPT (real message history).
+ */
+export async function deleteCampaign(campaignId: number): Promise<{ ok: boolean; error?: string }> {
+  const perm = await requireManager(); if (!perm.ok) return perm;
+  const camp = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { id: true } });
+  if (!camp) return { ok: false, error: "Campaign not found." };
+  try {
+    await prisma.broadcastRecipient.deleteMany({ where: { broadcast: { campaignId } } });
+    await prisma.broadcast.deleteMany({ where: { campaignId } });
+    await prisma.campaign.delete({ where: { id: campaignId } }); // cascades members/phases/advances/callers
+    revalidatePath("/campaigns");
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e instanceof Error ? e.message : "Delete failed" }; }
+}
+
 export interface CampaignListItem {
   id: number; name: string; status: string; startDate: string; endDate: string;
   target: string; members: number;

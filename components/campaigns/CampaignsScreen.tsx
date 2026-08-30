@@ -16,7 +16,7 @@ import { useConfirm } from "@/components/ConfirmDialog";
 import { cropLabel } from "@/lib/crops";
 import { inr } from "@/lib/format";
 import {
-  saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, getCampaignTracker, extendCampaign, updateCampaignCommPlans, submitCommPlanForApproval, getCampaignMembers, markCampaignMember, getCampaignAnalytics, exportCampaignAudienceXlsx,
+  saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, getCampaignTracker, extendCampaign, updateCampaignCommPlans, deleteCampaign, submitCommPlanForApproval, getCampaignMembers, markCampaignMember, getCampaignAnalytics, exportCampaignAudienceXlsx,
   type CampaignListItem, type CampaignTracker, type ProjectVM, type CampaignMemberVM, type CampaignAnalytics,
 } from "@/app/actions/campaigns";
 import { downloadB64 } from "@/lib/download";
@@ -645,6 +645,15 @@ function EditCommPlansModal({ campaign, commPlanNames, onClose }: { campaign: Ca
   const [selected, setSelected] = useState<string[]>(campaign.commPlans ?? []);
   const [saving, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [deleting, startDel] = useTransition();
+  const del = () => {
+    setErr(null);
+    startDel(async () => {
+      const res = await deleteCampaign(campaign.id);
+      if (res.ok) location.reload(); else setErr(res.error ?? "Delete failed");
+    });
+  };
   const toggle = (p: string) => setSelected((s) => (s.includes(p) ? s.filter((x) => x !== p) : [...s, p]));
   // Show every known comm plan, plus any the campaign already has that no longer exist in the catalog.
   const options = [...new Set([...commPlanNames, ...(campaign.commPlans ?? [])])].sort((a, b) => a.localeCompare(b));
@@ -681,6 +690,28 @@ function EditCommPlansModal({ campaign, commPlanNames, onClose }: { campaign: Ca
         <div className="mt-4 flex justify-end gap-2">
           <button type="button" onClick={onClose} className="rounded-[10px] border border-[#E0E0E0] px-4 py-2 text-[13px] font-semibold text-[#616161]">Cancel</button>
           <button type="button" onClick={save} disabled={saving || selected.length === 0} className="rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Save comm plans"}</button>
+        </div>
+
+        {/* Danger zone — delete the whole campaign (two-step confirm) */}
+        <div className="mt-5 rounded-[12px] border border-[#F2C4C4] bg-[#FDF3F3] p-3.5">
+          {!confirmDel ? (
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[12.5px] font-bold text-[#B71C1C]">Delete this campaign</div>
+                <div className="text-[11.5px] text-[#8E5252]">Permanently removes the campaign, its {inr(campaign.members)} members and outreach. Message logs are kept.</div>
+              </div>
+              <button type="button" onClick={() => setConfirmDel(true)} className="shrink-0 rounded-[10px] border-[1.5px] border-[#C62828] px-3.5 py-1.5 text-[12px] font-semibold text-[#C62828] hover:bg-[#FDECEA]">Delete…</button>
+            </div>
+          ) : (
+            <div>
+              <div className="text-[12.5px] font-bold text-[#B71C1C]">Delete “{campaign.name}” permanently?</div>
+              <div className="mt-0.5 text-[11.5px] text-[#8E5252]">This can’t be undone. {inr(campaign.members)} members and all outreach state will be removed.</div>
+              <div className="mt-2.5 flex justify-end gap-2">
+                <button type="button" onClick={() => setConfirmDel(false)} disabled={deleting} className="rounded-[10px] border border-[#E0E0E0] px-4 py-2 text-[12.5px] font-semibold text-[#616161] disabled:opacity-50">Keep it</button>
+                <button type="button" onClick={del} disabled={deleting} className="rounded-[10px] bg-[#C62828] px-5 py-2 text-[12.5px] font-semibold text-white hover:bg-[#B71C1C] disabled:opacity-50">{deleting ? "Deleting…" : "Yes, delete permanently"}</button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </Modal>
