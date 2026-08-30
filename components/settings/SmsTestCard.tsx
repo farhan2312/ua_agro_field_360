@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { searchFarmersForAction } from "@/app/actions/action-registry";
-import { sendTestSms, sendTestWhatsApp, getRecentWhatsAppLogs, type WaLogRow } from "@/app/actions/test-messaging";
+import { sendTestSms, sendTestWhatsApp, getRecentWhatsAppLogs, getRecentSmsLogs, refreshSmsDeliveryStatus, type WaLogRow, type SmsLogRow } from "@/app/actions/test-messaging";
 import { fillPreview } from "@/lib/wa-template-presets";
 import type { FarmerPick } from "@/lib/action-constants";
 
@@ -84,6 +84,10 @@ export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMis
 
   const [waLogs, setWaLogs] = useState<WaLogRow[] | null>(null);
   const refreshLogs = () => getRecentWhatsAppLogs(8).then(setWaLogs);
+  const [smsLogs, setSmsLogs] = useState<SmsLogRow[] | null>(null);
+  const [refreshingSms, startRefreshSms] = useTransition();
+  const loadSmsLogs = () => getRecentSmsLogs(10).then(setSmsLogs);
+  const refreshSmsStatus = () => startRefreshSms(async () => { const r = await refreshSmsDeliveryStatus(10); setSmsLogs(r.rows); });
 
   const send = () => {
     setResult(null);
@@ -104,11 +108,12 @@ export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMis
           }
         : { ok: false, text: r.error ?? "Send failed." });
       if (isWa) { refreshLogs(); setTimeout(refreshLogs, 4000); } // status webhook lands a few seconds later
+      else loadSmsLogs(); // SMS: show the new row immediately (DLR is pulled on demand)
     });
   };
 
-  // Load WhatsApp delivery log when the WhatsApp channel is active.
-  useEffect(() => { if (isWa) refreshLogs(); }, [isWa]); // eslint-disable-line
+  // Load the delivery log for whichever channel is active.
+  useEffect(() => { if (isWa) refreshLogs(); else loadSmsLogs(); }, [isWa]); // eslint-disable-line
 
   const inputCls = "w-full rounded-[10px] border border-[#E0E0E0] px-3 py-2.5 text-[13px] outline-none focus:border-[#2E7D32]";
 
@@ -299,6 +304,40 @@ export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMis
               </div>
             )}
           <div className="mt-1.5 text-[11px] text-[#9E9E9E]">Status updates need the webhook subscribed to <b>messages</b> in Meta. FAILED rows show Meta&apos;s error code — that&apos;s the real reason.</div>
+        </div>
+      )}
+
+      {/* SMS delivery reports — pulled on demand from the gateway (DLR). "Submitted" ≠ delivered. */}
+      {!isWa && (
+        <div className="mt-5 border-t border-[#F0F0F0] pt-4">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[12px] font-bold text-[#1A1C1A]">Recent SMS delivery status</span>
+            <button type="button" onClick={refreshSmsStatus} disabled={refreshingSms} className="text-[11.5px] font-semibold text-[#6A1B9A] hover:underline disabled:opacity-50">{refreshingSms ? "Checking…" : "↻ Refresh status"}</button>
+          </div>
+          {smsLogs == null ? <div className="text-[11.5px] text-[#9E9E9E]">Loading…</div>
+            : smsLogs.length === 0 ? <div className="text-[11.5px] text-[#BDBDBD]">No SMS sends yet.</div>
+            : (
+              <div className="flex flex-col gap-1.5">
+                {smsLogs.map((l) => {
+                  const dlr = (l.deliveryStatus ?? "").toUpperCase();
+                  const submitFailed = !l.ok;
+                  const failed = submitFailed || dlr === "FAILED";
+                  const delivered = dlr === "DELIVERED" || !!l.deliveredAt;
+                  const label = submitFailed ? "NOT SENT" : dlr || "SUBMITTED";
+                  const color = failed ? "#C62828" : delivered ? "#2E7D32" : "#E65100";
+                  const bg = failed ? "#FDECEA" : delivered ? "#E8F5E9" : "#FFF3E0";
+                  return (
+                    <div key={l.id} className="flex flex-wrap items-center gap-2 rounded-[8px] border border-[#EEE] px-2.5 py-1.5 text-[11.5px]">
+                      <span className="font-mono text-[#616161]">{l.mobile}</span>
+                      <span className="rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: bg, color }}>{label}</span>
+                      <span className="text-[#9E9E9E]">{new Date(l.createdAt).toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit", hour12: true })}</span>
+                      {failed && (l.error || (submitFailed ? l.status : null)) && <span className="text-[#C62828]">{l.error ?? l.status}</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          <div className="mt-1.5 text-[11px] text-[#9E9E9E]">SMS delivery reports are pulled on demand — hit <b>Refresh status</b> a few seconds after sending. A blank/PENDING status just means the carrier hasn&apos;t reported back yet.</div>
         </div>
       )}
     </div>

@@ -2,7 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { getScope, canManage, getActor } from "@/lib/scope";
-import { zapConfig, sendSms } from "@/lib/zapsms";
+import { zapConfig, sendSms, getSmsStatus } from "@/lib/zapsms";
 import { waConfig, sendWhatsApp } from "@/lib/whatsapp";
 
 /** Admins / super admins only (Central Admin + System Admin). */
@@ -21,6 +21,50 @@ export interface TestSmsResult {
 export interface WaLogRow {
   id: number; mobile: string; kind: string; status: string | null; error: string | null;
   ok: boolean; deliveredAt: string | null; readAt: string | null; createdAt: string;
+}
+
+export interface SmsLogRow {
+  id: number; mobile: string; message: string; ok: boolean;
+  status: string | null; deliveryStatus: string | null; deliveredAt: string | null;
+  error: string | null; providerId: string | null; createdAt: string;
+}
+
+/** Recent SMS sends + their (on-demand refreshed) delivery status. Admin-only. */
+export async function getRecentSmsLogs(limit = 10): Promise<SmsLogRow[]> {
+  if (!(await adminOnly())) return [];
+  const rows = await prisma.smsLog.findMany({ orderBy: { createdAt: "desc" }, take: Math.min(30, limit) });
+  return rows.map((r) => ({
+    id: r.id, mobile: r.mobile, message: r.message, ok: r.ok,
+    status: r.status, deliveryStatus: r.deliveryStatus, deliveredAt: r.deliveredAt?.toISOString() ?? null,
+    error: r.error, providerId: r.providerId, createdAt: r.createdAt.toISOString(),
+  }));
+}
+
+/**
+ * Pull fresh delivery reports for recent SMS from the gateway (GET /api/v2/MessageStatus) and persist
+ * them. Only re-checks rows that were submitted OK, have a providerId, and aren't already DELIVERED/FAILED.
+ * Admin-only. Returns the refreshed recent list.
+ */
+export async function refreshSmsDeliveryStatus(limit = 10): Promise<{ ok: boolean; checked: number; rows: SmsLogRow[]; error?: string }> {
+  if (!(await adminOnly())) return { ok: false, checked: 0, rows: [], error: "Admins only." };
+  if (!zapConfig().ready) return { ok: false, checked: 0, rows: await getRecentSmsLogs(limit), error: "SMS gateway not configured." };
+  const recent = await prisma.smsLog.findMany({
+    where: { ok: true, providerId: { not: null }, NOT: { deliveryStatus: { in: ["DELIVERED", "FAILED"] } } },
+    orderBy: { createdAt: "desc" }, take: Math.min(30, limit),
+    select: { id: true, providerId: true },
+  });
+  let checked = 0;
+  for (const r of recent) {
+    if (!r.providerId) continue;
+    const s = await getSmsStatus(r.providerId);
+    if (!s.ok || s.status === "UNKNOWN") continue;
+    checked++;
+    await prisma.smsLog.update({
+      where: { id: r.id },
+      data: { deliveryStatus: s.status, ...(s.status === "DELIVERED" ? { deliveredAt: new Date() } : {}) },
+    });
+  }
+  return { ok: true, checked, rows: await getRecentSmsLogs(limit) };
 }
 
 /** Recent WhatsApp sends + their live delivery status (updated by Meta's status webhook). Admin-only. */

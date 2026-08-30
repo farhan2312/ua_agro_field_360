@@ -529,7 +529,9 @@ model SmsLog {
   message       String   @db.Text
   ok            Boolean  @default(false)
   providerId    String? // gateway message id, when returned
-  status        String? // gateway status / short result
+  status        String? // gateway submit-time status / short result
+  deliveryStatus String? // DLR from the gateway (DELIVERED | FAILED | SENT | PENDING…), refreshed on demand
+  deliveredAt   DateTime? // set when the DLR reports delivered
   error         String?
   sentByName    String?
   sentByCode    String?
@@ -538,6 +540,7 @@ model SmsLog {
   @@index([campaignId])
   @@index([farmerId])
   @@index([createdAt])
+  @@index([providerId])
 }
 
 /// One WhatsApp send attempt (via the Meta Cloud API) — the WhatsApp outreach audit log.
