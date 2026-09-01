@@ -108,7 +108,7 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
     startSend(async () => {
       const r = isWa
         ? await sendTestWhatsApp({ mobile, templateName: selectedTpl!.name, languageCode: selectedTpl!.language, bodyParams: tplParams.slice(0, selectedTpl!.varCount), farmerId: picked?.id ?? null })
-        : await sendTestSms({ mobile, message: smsBody, dltTemplateId: dltId || null, farmerId: picked?.id ?? null });
+        : await sendTestSms({ mobile, message: smsBody, templateId: selectedDlt?.templateId ?? null, dltTemplateId: dltId || null, farmerId: picked?.id ?? null });
       setResult(r.ok
         ? {
             ok: true,

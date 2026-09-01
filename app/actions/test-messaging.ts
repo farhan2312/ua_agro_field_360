@@ -104,7 +104,8 @@ export async function getRecentWhatsAppLogs(limit = 8): Promise<WaLogRow[]> {
 export async function sendTestSms(input: {
   mobile: string;
   message: string;
-  dltTemplateId?: string | null; // preferred: a DLT template id picked directly (from the approved list)
+  templateId?: string | null;    // ZapSMS internal template id (what SendSMS's TemplateId expects)
+  dltTemplateId?: string | null; // the 19-digit DLT id (for logging / fallback)
   commTemplateId?: number | null; // fallback: look the id up off a comm plan
   farmerId?: number | null;
 }): Promise<TestSmsResult> {
@@ -125,7 +126,7 @@ export async function sendTestSms(input: {
         ? (await prisma.commTemplate.findUnique({ where: { id: input.commTemplateId }, select: { dltTemplateId: true } }))?.dltTemplateId ?? null
         : null);
     const actor = await getActor();
-    const res = await sendSms({ mobile, message, dltTemplateId });
+    const res = await sendSms({ mobile, message, templateId: input.templateId ?? null, dltTemplateId });
 
     await prisma.smsLog.create({
       data: {
