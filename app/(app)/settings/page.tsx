@@ -7,9 +7,8 @@ import {
 } from "@/components/settings/SystemConfigCard";
 import { DataManagementCard } from "@/components/settings/DataManagementCard";
 import { SmsTestCard } from "@/components/settings/SmsTestCard";
-import { WhatsAppOptInsCard } from "@/components/settings/WhatsAppOptInsCard";
 import { listOptIns, getOptInQrConfig, type OptInRow } from "@/app/actions/whatsapp-optins";
-import { WhatsAppTemplatesCard } from "@/components/settings/WhatsAppTemplatesCard";
+import { WhatsAppSettingsTab } from "@/components/settings/WhatsAppSettingsTab";
 import { waTemplatesStatus, listTemplates, type WaTemplate } from "@/app/actions/whatsapp-templates";
 import { SettingsTabs } from "@/components/settings/SettingsTabs";
 import { StoreTagsCard } from "@/components/settings/StoreTagsCard";
@@ -142,12 +141,12 @@ export default async function SettingsPage() {
           label: "WhatsApp",
           icon: "⚡",
           content: (
-            <div className="mx-auto flex max-w-3xl flex-col gap-[18px]">
-              <SmsTestCard only="whatsapp" plans={plans} smsReady={sms.ready} missing={sms.missing} senderId={sms.cfg.senderId} waReady={wa.ready} waMissing={wa.missing}
-                waTemplates={tplInit.templates.filter((t) => t.status === "APPROVED").map((t) => ({ name: t.name, language: t.language, body: t.body, varCount: countVars(t.body) }))} />
-              <WhatsAppTemplatesCard initial={tplInit} />
-              <WhatsAppOptInsCard initial={optIns} qrConfig={optInCfg} />
-            </div>
+            <WhatsAppSettingsTab
+              sms={{ plans, smsReady: sms.ready, missing: sms.missing, senderId: sms.cfg.senderId, waReady: wa.ready, waMissing: wa.missing,
+                waTemplates: tplInit.templates.filter((t) => t.status === "APPROVED").map((t) => ({ name: t.name, language: t.language, body: t.body, varCount: countVars(t.body) })) }}
+              templates={tplInit}
+              optIns={{ initial: optIns, qrConfig: optInCfg }}
+            />
           ),
         },
         {
