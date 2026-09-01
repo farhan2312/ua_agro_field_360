@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
 import type { CommTemplateVM } from "./CampaignsScreen";
 import {
-  getBroadcastAudience, createBroadcast, runBroadcastBatch, cancelBroadcast,
-  type Channel, type BroadcastAudience,
+  getBroadcastAudience, createBroadcast, runBroadcastBatch, cancelBroadcast, getBroadcastPreview,
+  type Channel, type BroadcastAudience, type BroadcastPreviewRow,
 } from "@/app/actions/broadcasts";
 import { smsBalance } from "@/app/actions/test-messaging";
 import type { SmsBalance } from "@/lib/zapsms";
@@ -33,11 +33,19 @@ export function BroadcastPanel({ campaignId, campaignName, commPlans, templates,
   // Plans tagged to this campaign; for WhatsApp, only those that carry a WA template.
   const plans = templates.filter((t) => commPlans.includes(t.name) && (channel === "SMS" || !!t.waTemplateName));
   const accent = channel === "WHATSAPP" ? "#0B8A3D" : "#6A1B9A";
+  const selectedPlan = plans.find((t) => t.id === tplId) ?? null;
 
   const [bal, setBal] = useState<SmsBalance | null>(null);
+  const [preview, setPreview] = useState<BroadcastPreviewRow[] | null>(null);
   useEffect(() => { setTplId(null); setAud(null); getBroadcastAudience(campaignId, channel).then(setAud); }, [campaignId, channel]);
   // SMS credit balance — to warn before a mass send burns through more credits than the account has.
   useEffect(() => { setBal(null); if (channel === "SMS") smsBalance().then((r) => setBal(r.ok && r.balance ? r.balance : null)); }, [channel]);
+  // Sample of exactly what will be sent (real farmers, variables filled).
+  useEffect(() => {
+    setPreview(null);
+    if (tplId == null) return;
+    getBroadcastPreview({ campaignId, channel, commTemplateId: tplId, limit: 3 }).then((r) => setPreview(r.ok ? r.rows : []));
+  }, [campaignId, channel, tplId]);
 
   const ready = channel === "WHATSAPP" ? aud?.waReady : aud?.smsReady;
   const eligible = aud ? (channel === "WHATSAPP" ? aud.optedIn : aud.withMobile) - (skipContacted ? aud.alreadyContacted : 0) : 0;
@@ -107,6 +115,13 @@ export function BroadcastPanel({ campaignId, campaignName, commPlans, templates,
               <div className={cell} style={{ background: "#E8F5E9" }}><div className="text-[10px] font-bold uppercase text-[#2E7D32]">Will send</div><div className="text-[16px] font-bold text-[#2E7D32]">{aud ? n(Math.max(0, eligible)) : "…"}</div></div>
             </div>
 
+            {/* Skipped — invalid or missing number (never sent) */}
+            {aud && (aud.invalidMobile > 0 || aud.noMobile > 0) && (
+              <div className="mt-2 text-[11.5px] text-[#EF6C00]">
+                ⚠ {n(aud.invalidMobile + aud.noMobile)} skipped —{aud.invalidMobile ? ` ${n(aud.invalidMobile)} invalid number` : ""}{aud.invalidMobile && aud.noMobile ? "," : ""}{aud.noMobile ? ` ${n(aud.noMobile)} no number on file` : ""}.
+              </div>
+            )}
+
             <label className="mt-3 flex cursor-pointer items-center gap-2 text-[12.5px] text-[#424242]">
               <input type="checkbox" checked={skipContacted} onChange={(e) => setSkipContacted(e.target.checked)} />
               Skip farmers already contacted on {channel === "WHATSAPP" ? "WhatsApp" : "SMS"} ({aud ? n(aud.alreadyContacted) : 0})
@@ -128,6 +143,32 @@ export function BroadcastPanel({ campaignId, campaignName, commPlans, templates,
                 </div>
               )
             )}
+            {/* The comm plan + exactly how it will look per farmer */}
+            {selectedPlan && (
+              <div className="mt-4 rounded-[10px] border border-[#EEE] bg-[#FCFCFD] p-3">
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Comm plan · {selectedPlan.name}</span>
+                  <span className="text-[10px] font-semibold text-[#9E9E9E]">{channel === "WHATSAPP" ? (selectedPlan.waTemplateName ? `WA: ${selectedPlan.waTemplateName}` : "") : (selectedPlan.dltTemplateId ? `DLT ${selectedPlan.dltTemplateId}` : "")}</span>
+                </div>
+                <div className="rounded-[8px] bg-white px-3 py-2 text-[12.5px] leading-relaxed text-[#616161] ring-1 ring-[#F0F0F0]" dir="auto" style={{ whiteSpace: "pre-wrap" }}>{selectedPlan.template || "—"}</div>
+
+                <div className="mt-2.5 text-[10px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">How it will look when sent</div>
+                {preview == null ? <div className="mt-1 text-[11.5px] text-[#9E9E9E]">Loading sample…</div>
+                  : preview.length === 0 ? <div className="mt-1 text-[11.5px] text-[#BDBDBD]">No sample recipients.</div>
+                  : (
+                    <div className="mt-1 flex flex-col gap-1.5">
+                      {preview.map((r, i) => (
+                        <div key={i} className="rounded-[8px] bg-[#F5F7F5] px-3 py-2 text-[12.5px] leading-relaxed text-[#1A1C1A]" dir="auto" style={{ whiteSpace: "pre-wrap" }}>
+                          <div className="mb-0.5 text-[10.5px] font-semibold text-[#9E9E9E]">{r.name} · {r.mobile}</div>
+                          {r.message}
+                        </div>
+                      ))}
+                      <div className="text-[11px] text-[#9E9E9E]">Sample of {preview.length} — every farmer gets their own name in place of the variable.</div>
+                    </div>
+                  )}
+              </div>
+            )}
+
             {err && <div className="mt-2 rounded-[8px] bg-[#FDECEA] px-3 py-2 text-[12px] font-semibold text-[#C62828]">{err}</div>}
 
             <div className="mt-4 flex items-center justify-end gap-2">
