@@ -24,7 +24,9 @@ export function SettingsTabs({ tabs }: { tabs: SettingsTab[] }) {
           );
         })}
       </div>
-      <div>{cur?.content}</div>
+      {/* key by active tab: remount the content on every switch so tabs never share state
+          (e.g. the SMS and WhatsApp test benches stay fully separate — no number carry-over). */}
+      <div key={active}>{cur?.content}</div>
     </div>
   );
 }
