@@ -23,6 +23,13 @@ export interface WaLogRow {
   ok: boolean; deliveredAt: string | null; readAt: string | null; createdAt: string;
 }
 
+/** Plain-English hints for delivery-failure codes we've confirmed (evidence / ZapSMS's own list). */
+const DLT_CODE_HINTS: Record<string, string> = {
+  "129": "number on DND / blocked for promotional SMS (or unreachable) — NOT a template problem",
+  "013": "invalid mobile number",
+  "13": "invalid mobile number",
+};
+
 /** SMS credit balance for the Settings chip + pre-send checks. Admin-only. */
 export async function smsBalance(): Promise<{ ok: boolean; balance?: SmsBalance; error?: string }> {
   if (!(await adminOnly())) return { ok: false, error: "Admins only." };
@@ -66,9 +73,10 @@ export async function refreshSmsDeliveryStatus(limit = 10): Promise<{ ok: boolea
     if (!s.ok || s.status === "UNKNOWN") continue;
     checked++;
     // Keep the normalized status for coloring, but surface the exact gateway word + operator/DLT code
-    // (e.g. "REJECTD (code 129)") in `error` so the real reason shows in the list, like the ZapSMS portal.
+    // (e.g. "REJECTD (code 129)") in `error`, plus a plain-English hint for the common codes.
+    const hint = s.errorCode ? DLT_CODE_HINTS[s.errorCode] : undefined;
     const detail = s.status === "DELIVERED" ? null
-      : [s.rawStatus, s.errorCode ? `(code ${s.errorCode})` : null].filter(Boolean).join(" ") || null;
+      : [s.rawStatus, s.errorCode ? `(code ${s.errorCode})` : null, hint ? `— ${hint}` : null].filter(Boolean).join(" ") || null;
     await prisma.smsLog.update({
       where: { id: r.id },
       data: { deliveryStatus: s.status, error: detail, ...(s.status === "DELIVERED" ? { deliveredAt: new Date() } : {}) },
