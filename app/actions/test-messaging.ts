@@ -65,9 +65,13 @@ export async function refreshSmsDeliveryStatus(limit = 10): Promise<{ ok: boolea
     const s = await getSmsStatus(r.providerId);
     if (!s.ok || s.status === "UNKNOWN") continue;
     checked++;
+    // Keep the normalized status for coloring, but surface the exact gateway word + operator/DLT code
+    // (e.g. "REJECTD (code 129)") in `error` so the real reason shows in the list, like the ZapSMS portal.
+    const detail = s.status === "DELIVERED" ? null
+      : [s.rawStatus, s.errorCode ? `(code ${s.errorCode})` : null].filter(Boolean).join(" ") || null;
     await prisma.smsLog.update({
       where: { id: r.id },
-      data: { deliveryStatus: s.status, ...(s.status === "DELIVERED" ? { deliveredAt: new Date() } : {}) },
+      data: { deliveryStatus: s.status, error: detail, ...(s.status === "DELIVERED" ? { deliveredAt: new Date() } : {}) },
     });
   }
   return { ok: true, checked, rows: await getRecentSmsLogs(limit) };
