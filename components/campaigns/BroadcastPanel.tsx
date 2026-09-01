@@ -50,23 +50,29 @@ export function BroadcastPanel({ campaignId, campaignName, commPlans, templates,
   const ready = channel === "WHATSAPP" ? aud?.waReady : aud?.smsReady;
   const eligible = aud ? (channel === "WHATSAPP" ? aud.optedIn : aud.withMobile) - (skipContacted ? aud.alreadyContacted : 0) : 0;
 
+  const [starting, setStarting] = useState(false);
   const start = async () => {
     if (tplId == null) { setErr("Pick a comm plan / template."); return; }
-    setErr(null); stopRef.current = false;
-    const c = await createBroadcast({ campaignId, channel, commTemplateId: tplId, skipContacted });
-    if (!c.ok || c.broadcastId == null) { setErr(c.error ?? "Could not start."); return; }
-    bidRef.current = c.broadcastId;
-    setPhase("running"); setProg({ sent: 0, failed: 0, total: c.total ?? 0, remaining: c.total ?? 0 });
-    // Batch loop.
-    for (;;) {
-      if (stopRef.current) break;
-      const r = await runBroadcastBatch({ broadcastId: c.broadcastId, limit: 40 });
-      if (!r.ok) { setErr(r.error ?? "Send error."); break; }
-      setProg({ sent: r.sent, failed: r.failed, total: r.total, remaining: r.remaining });
-      if (r.done) break;
-      await sleep(1200); // pace to respect gateway rate limits
+    setErr(null); stopRef.current = false; setStarting(true);
+    // Wrap the whole run: a thrown server error used to vanish silently ("nothing happened, no code").
+    try {
+      const c = await createBroadcast({ campaignId, channel, commTemplateId: tplId, skipContacted });
+      if (!c.ok || c.broadcastId == null) { setErr(c.error ?? "Could not start the broadcast."); setStarting(false); return; }
+      bidRef.current = c.broadcastId;
+      setPhase("running"); setStarting(false); setProg({ sent: 0, failed: 0, total: c.total ?? 0, remaining: c.total ?? 0 });
+      for (;;) {
+        if (stopRef.current) break;
+        const r = await runBroadcastBatch({ broadcastId: c.broadcastId, limit: 40 });
+        if (!r.ok) { setErr(r.error ?? "Send error mid-run."); break; }
+        setProg({ sent: r.sent, failed: r.failed, total: r.total, remaining: r.remaining });
+        if (r.done) break;
+        await sleep(1200); // pace to respect gateway rate limits
+      }
+      setPhase("done");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "The send failed to start (server error).");
+      setStarting(false); setPhase("setup");
     }
-    setPhase("done");
   };
 
   const stop = async () => { stopRef.current = true; if (bidRef.current) await cancelBroadcast(bidRef.current); };
@@ -173,9 +179,9 @@ export function BroadcastPanel({ campaignId, campaignName, commPlans, templates,
 
             <div className="mt-4 flex items-center justify-end gap-2">
               <button type="button" onClick={onClose} className="rounded-[10px] border border-[#E0E0E0] px-4 py-2 text-[12.5px] font-semibold text-[#616161] hover:bg-[#F5F5F5]">Cancel</button>
-              <button type="button" onClick={start} disabled={!ready || tplId == null || eligible <= 0}
+              <button type="button" onClick={start} disabled={!ready || tplId == null || eligible <= 0 || starting}
                 className="rounded-[10px] px-5 py-2 text-[12.5px] font-bold text-white disabled:opacity-50" style={{ background: accent }}>
-                Send to {aud ? n(Math.max(0, eligible)) : "…"} farmers
+                {starting ? "Starting…" : `Send to ${aud ? n(Math.max(0, eligible)) : "…"} farmers`}
               </button>
             </div>
           </>
