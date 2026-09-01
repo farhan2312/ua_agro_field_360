@@ -1064,7 +1064,7 @@ export async function sendCampaignSms(input: { memberId: number; commTemplateId?
     const actor = await getActor();
     const { cfg } = zapConfig();
     const internalTpl = await internalTemplateIdFor(tpl?.dltTemplateId);
-    const res = await sendSms({ mobile, message, templateId: internalTpl, dltTemplateId: tpl?.dltTemplateId ?? null });
+    const res = await sendSms({ mobile, message, templateId: internalTpl ?? tpl?.dltTemplateId ?? null });
 
     await prisma.smsLog.create({
       data: {

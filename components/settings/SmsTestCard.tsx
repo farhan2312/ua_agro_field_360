@@ -34,7 +34,10 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
   const [picked, setPicked] = useState<FarmerPick | null>(null);
   const [mobile, setMobile] = useState("");
   const [dltId, setDltId] = useState<string>(""); // selected approved DLT template id (SMS)
+  const [smsText, setSmsText] = useState<string>(""); // editable body — make it byte-identical to the DLT registration
   const [smsParams, setSmsParams] = useState<string[]>([]); // one value per {#var#} in the DLT template
+  const [showWs, setShowWs] = useState(false); // reveal spaces (single vs double) in the preview
+  const [tplIdMode, setTplIdMode] = useState<"internal" | "dlt" | "none">("internal"); // which id to send as TemplateId
   const [sending, startSend] = useTransition();
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
   const lastQ = useRef("");
@@ -63,10 +66,11 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
   };
   const clearPick = () => { setPicked(null); setQ(""); };
 
-  // Pick an approved DLT template → one input box per {#var#}; the content stays locked to the template.
+  // Pick an approved DLT template → prefill the editable body from the API + one input per {#var#}.
   const pickDlt = (id: string) => {
     setDltId(id);
     const t = (tpls ?? []).find((x) => x.dltTemplateId === id);
+    setSmsText(t?.content ?? "");
     setSmsParams(t ? Array(countDltVars(t.content)).fill("") : []);
   };
 
@@ -87,19 +91,21 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
   const [tpls, setTpls] = useState<SmsTemplateVM[] | null>(null);
   const loadApproved = () => getSmsTemplates().then((r) => setTpls((r.templates ?? []).filter((t) => t.approved)));
   const selectedDlt = (tpls ?? []).find((t) => t.dltTemplateId === dltId) ?? null;
-  const dltVarCount = selectedDlt ? countDltVars(selectedDlt.content) : 0;
-  // The exact message that goes out: the approved template content with each {#var#} replaced by its input.
-  const smsBody = selectedDlt ? fillDltValues(selectedDlt.content, smsParams) : "";
-  const smsParamsFilled = !!selectedDlt && smsParams.slice(0, dltVarCount).filter((s) => s.trim()).length === dltVarCount;
+  const dltVarCount = countDltVars(smsText); // from the editable body, so it tracks edits
+  // Exactly what goes out: the (editable) body with each {#var#} replaced by its input value.
+  const smsBody = fillDltValues(smsText, smsParams);
+  const smsParamsFilled = smsParams.slice(0, dltVarCount).filter((s) => s.trim()).length === dltVarCount;
+  // Which id to send as SendSMS TemplateId.
+  const sendTemplateId = tplIdMode === "internal" ? (selectedDlt?.templateId ?? "") : tplIdMode === "dlt" ? dltId : "";
 
   const canSend = ready && mobileValid && !sending && (
-    isTemplateMode ? !!selectedTpl && paramsFilled : !!selectedDlt && smsParamsFilled && smsBody.trim().length > 0
+    isTemplateMode ? !!selectedTpl && paramsFilled : !!dltId && smsBody.trim().length > 0 && smsParamsFilled
   );
 
   const [bal, setBal] = useState<SmsBalance | null>(null);
   const loadBalance = () => smsBalance().then((r) => setBal(r.ok && r.balance ? r.balance : null));
   const [reqUrl, setReqUrl] = useState<string | null>(null);
-  const showRequest = () => debugSmsRequest({ mobile, message: smsBody, templateId: selectedDlt?.templateId ?? null, dltTemplateId: dltId || null })
+  const showRequest = () => debugSmsRequest({ mobile, message: smsBody, templateId: sendTemplateId || null })
     .then((r) => setReqUrl(r.ok ? (r.url ?? "") : `Error: ${r.error ?? "failed"}`));
   const [smsLogs, setSmsLogs] = useState<SmsLogRow[] | null>(null);
   const [refreshingSms, startRefreshSms] = useTransition();
@@ -111,7 +117,7 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
     startSend(async () => {
       const r = isWa
         ? await sendTestWhatsApp({ mobile, templateName: selectedTpl!.name, languageCode: selectedTpl!.language, bodyParams: tplParams.slice(0, selectedTpl!.varCount), farmerId: picked?.id ?? null })
-        : await sendTestSms({ mobile, message: smsBody, templateId: selectedDlt?.templateId ?? null, dltTemplateId: dltId || null, farmerId: picked?.id ?? null });
+        : await sendTestSms({ mobile, message: smsBody, templateId: sendTemplateId || null, dltTemplateId: dltId || null, farmerId: picked?.id ?? null });
       setResult(r.ok
         ? {
             ok: true,
@@ -261,11 +267,22 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
             {(tpls ?? []).map((t) => <option key={t.dltTemplateId} value={t.dltTemplateId}>{t.name} · {t.dltTemplateId}</option>)}
           </select>
 
-          {selectedDlt ? (
+          {dltId ? (
             <>
-              {/* One input per {#var#} — the content is locked to the approved template. */}
+              {/* Editable body, prefilled from the API. Make it byte-identical to the DLT registration —
+                  toggle "show spaces" to spot single vs double spaces; keep the {#var#} markers. */}
+              <div className="mt-3 flex items-end justify-between gap-2">
+                <label className="text-[11px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Template body <span className="normal-case text-[#BDBDBD]">— must match the DLT registration exactly</span></label>
+                <div className="flex items-center gap-3">
+                  <label className="flex cursor-pointer items-center gap-1 text-[11px] font-semibold text-[#6A1B9A]"><input type="checkbox" checked={showWs} onChange={(e) => setShowWs(e.target.checked)} /> show spaces</label>
+                  {selectedDlt && <button type="button" onClick={() => { setSmsText(selectedDlt.content); setSmsParams(Array(countDltVars(selectedDlt.content)).fill("")); }} className="text-[11px] font-semibold text-[#6A1B9A] hover:underline">Reset to synced</button>}
+                </div>
+              </div>
+              <textarea className={`${inputCls} mt-1 resize-y font-mono`} rows={5} value={smsText} dir="auto"
+                onChange={(e) => setSmsText(e.target.value)} placeholder="Paste the approved template (keep the {#var#} markers)…" />
+
               {dltVarCount > 0 && (
-                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {Array.from({ length: dltVarCount }).map((_, i) => (
                     <div key={i}>
                       <label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Variable {i + 1} <span className="normal-case text-[#BDBDBD]">({`{#var#}`})</span></label>
@@ -276,16 +293,29 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
                   ))}
                 </div>
               )}
-              <div className="mt-3 text-[10px] font-bold uppercase text-[#9E9E9E]">Exactly what will be sent</div>
-              <div className="mt-1 rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] px-3 py-2.5 text-[13px] leading-relaxed text-[#1A1C1A]" dir="auto" style={{ whiteSpace: "pre-wrap" }}>{smsBody}</div>
+
+              {/* TemplateId to send */}
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span className="text-[10px] font-bold uppercase text-[#9E9E9E]">Send TemplateId as:</span>
+                {([["internal", `Internal (${selectedDlt?.templateId || "—"})`], ["dlt", "DLT id"], ["none", "None"]] as [typeof tplIdMode, string][]).map(([m, label]) => (
+                  <button key={m} type="button" onClick={() => setTplIdMode(m)}
+                    className="rounded-full border px-2.5 py-0.5 text-[11px] font-semibold"
+                    style={{ background: tplIdMode === m ? "#EDE7F6" : "#fff", color: tplIdMode === m ? "#6A1B9A" : "#9E9E9E", borderColor: tplIdMode === m ? "#6A1B9A" : "#E0E0E0" }}>{label}</button>
+                ))}
+              </div>
+
+              <div className="mt-3 text-[10px] font-bold uppercase text-[#9E9E9E]">Exactly what will be sent{showWs ? " · spaces shown as ␣" : ""}</div>
+              <div className="mt-1 rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] px-3 py-2.5 text-[13px] leading-relaxed text-[#1A1C1A]" dir="auto" style={{ whiteSpace: "pre-wrap" }}>
+                {showWs ? smsBody.replace(/ /g, "␣") : smsBody}
+              </div>
               <div className="mt-1 flex items-center justify-between text-[11px] text-[#9E9E9E]">
-                <span>DLT template {selectedDlt.dltTemplateId}{selectedDlt.approved ? " — approved ✓" : ""}</span>
+                <span>DLT {dltId} · internal {selectedDlt?.templateId || "—"}{selectedDlt?.approved ? " · approved ✓" : ""}</span>
                 <span>{smsBody.length} chars</span>
               </div>
             </>
           ) : (
             <div className="mt-3 rounded-[10px] bg-[#FFF8E1] px-3 py-2.5 text-[12px] text-[#8D6E00]">
-              Pick an approved DLT template above to compose the message. Free-typed SMS is rejected by the carrier (code 129), so it’s disabled.
+              Pick an approved DLT template above to compose the message.
             </div>
           )}
         </>

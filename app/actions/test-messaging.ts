@@ -31,9 +31,9 @@ const DLT_CODE_HINTS: Record<string, string> = {
 };
 
 /** Admin diagnostic: the exact SendSMS URL the app would fire (keys masked) — to diff vs a working request. */
-export async function debugSmsRequest(input: { mobile: string; message: string; templateId?: string | null; dltTemplateId?: string | null }): Promise<{ ok: boolean; url?: string; fields?: Record<string, string>; error?: string }> {
+export async function debugSmsRequest(input: { mobile: string; message: string; templateId?: string | null }): Promise<{ ok: boolean; url?: string; fields?: Record<string, string>; error?: string }> {
   if (!(await adminOnly())) return { ok: false, error: "Admins only." };
-  return smsRequestPreview(input);
+  return smsRequestPreview({ mobile: input.mobile, message: input.message, templateId: input.templateId ?? null });
 }
 
 /** SMS credit balance for the Settings chip + pre-send checks. Admin-only. */
@@ -110,9 +110,9 @@ export async function getRecentWhatsAppLogs(limit = 8): Promise<WaLogRow[]> {
 export async function sendTestSms(input: {
   mobile: string;
   message: string;
-  templateId?: string | null;    // ZapSMS internal template id (what SendSMS's TemplateId expects)
-  dltTemplateId?: string | null; // the 19-digit DLT id (for logging / fallback)
-  commTemplateId?: number | null; // fallback: look the id up off a comm plan
+  templateId?: string | null;    // exact value to send as SendSMS TemplateId (chosen in the bench)
+  dltTemplateId?: string | null; // the DLT id, for the log only
+  commTemplateId?: number | null; // fallback: look the id up off a comm plan (for logging)
   farmerId?: number | null;
 }): Promise<TestSmsResult> {
   if (!(await adminOnly())) return { ok: false, error: "Test SMS is available to admins only." };
@@ -132,7 +132,7 @@ export async function sendTestSms(input: {
         ? (await prisma.commTemplate.findUnique({ where: { id: input.commTemplateId }, select: { dltTemplateId: true } }))?.dltTemplateId ?? null
         : null);
     const actor = await getActor();
-    const res = await sendSms({ mobile, message, templateId: input.templateId ?? null, dltTemplateId });
+    const res = await sendSms({ mobile, message, templateId: input.templateId ?? null });
 
     await prisma.smsLog.create({
       data: {

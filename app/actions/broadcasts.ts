@@ -161,7 +161,7 @@ export async function runBroadcastBatch(input: { broadcastId: number; limit?: nu
         await prisma.whatsAppLog.create({ data: { farmerId: r.farmerId, campaignId: bc.campaignId, memberId: r.memberId, mobile: r.mobile, kind: "template", templateName: tpl?.waTemplateName ?? null, message: messageText, ok, providerId: providerId ?? null, status: res.status ?? null, error: error ?? null, sentByName: actor.name, sentByCode: actor.code } });
       } else {
         messageText = fillSmsTemplate({ template: tpl?.template ?? "", smsVariables: tpl?.smsVariables }, vars);
-        const res = await sendSms({ mobile: r.mobile, message: messageText, templateId: smsInternalTpl, dltTemplateId: tpl?.dltTemplateId ?? null });
+        const res = await sendSms({ mobile: r.mobile, message: messageText, templateId: smsInternalTpl ?? tpl?.dltTemplateId ?? null });
         ok = res.ok; providerId = res.providerId; error = res.error;
         await prisma.smsLog.create({ data: { farmerId: r.farmerId, campaignId: bc.campaignId, memberId: r.memberId, mobile: r.mobile, senderId: zap.senderId || null, dltTemplateId: tpl?.dltTemplateId ?? null, message: messageText, ok, providerId: providerId ?? null, status: res.status ? `BROADCAST · ${res.status}` : "BROADCAST", error: error ?? null, sentByName: actor.name, sentByCode: actor.code } });
       }
