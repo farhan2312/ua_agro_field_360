@@ -8,8 +8,6 @@ import { countDltVars } from "@/lib/campaign-vars";
 
 // Fill a DLT body by dropping each input value into its {#var#} position (fixed text stays intact).
 const fillDltValues = (body: string, values: string[]) => { let i = 0; return body.replace(/\{#var#\}/gi, () => values[i++] ?? ""); };
-// Collapse runs of spaces to one + trim each line (mirrors the server) — DLT wants single spaces.
-const collapseSpaces = (s: string) => s.split("\n").map((l) => l.replace(/[ \t]+/g, " ").replace(/^[ \t]+|[ \t]+$/g, "")).join("\n");
 import type { SmsBalance } from "@/lib/zapsms";
 import { fillPreview } from "@/lib/wa-template-presets";
 import type { FarmerPick } from "@/lib/action-constants";
@@ -39,7 +37,6 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
   const [smsText, setSmsText] = useState<string>(""); // editable body — make it byte-identical to the DLT registration
   const [smsParams, setSmsParams] = useState<string[]>([]); // one value per {#var#} in the DLT template
   const [showWs, setShowWs] = useState(false); // reveal spaces (single vs double) in the preview
-  const [tplIdMode, setTplIdMode] = useState<"internal" | "dlt" | "none">("internal"); // which id to send as TemplateId
   const [sending, startSend] = useTransition();
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
   const lastQ = useRef("");
@@ -94,11 +91,10 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
   const loadApproved = () => getSmsTemplates().then((r) => setTpls((r.templates ?? []).filter((t) => t.approved)));
   const selectedDlt = (tpls ?? []).find((t) => t.dltTemplateId === dltId) ?? null;
   const dltVarCount = countDltVars(smsText); // from the editable body, so it tracks edits
-  // Exactly what goes out: the (editable) body with each {#var#} filled, spaces normalized to single.
-  const smsBody = collapseSpaces(fillDltValues(smsText, smsParams));
+  // Exactly what goes out: the (editable) body with each {#var#} filled. Sent EXACTLY (no space changes)
+  // with TemplateId = the 19-digit DLT id and no entity id — the combination proven to deliver.
+  const smsBody = fillDltValues(smsText, smsParams);
   const smsParamsFilled = smsParams.slice(0, dltVarCount).filter((s) => s.trim()).length === dltVarCount;
-  // Which id to send as SendSMS TemplateId.
-  const sendTemplateId = tplIdMode === "internal" ? (selectedDlt?.templateId ?? "") : tplIdMode === "dlt" ? dltId : "";
 
   const canSend = ready && mobileValid && !sending && (
     isTemplateMode ? !!selectedTpl && paramsFilled : !!dltId && smsBody.trim().length > 0 && smsParamsFilled
@@ -107,7 +103,7 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
   const [bal, setBal] = useState<SmsBalance | null>(null);
   const loadBalance = () => smsBalance().then((r) => setBal(r.ok && r.balance ? r.balance : null));
   const [reqUrl, setReqUrl] = useState<string | null>(null);
-  const showRequest = () => debugSmsRequest({ mobile, message: smsBody, templateId: sendTemplateId || null })
+  const showRequest = () => debugSmsRequest({ mobile, message: smsBody, templateId: dltId || null })
     .then((r) => setReqUrl(r.ok ? (r.url ?? "") : `Error: ${r.error ?? "failed"}`));
   const [smsLogs, setSmsLogs] = useState<SmsLogRow[] | null>(null);
   const [refreshingSms, startRefreshSms] = useTransition();
@@ -119,7 +115,7 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
     startSend(async () => {
       const r = isWa
         ? await sendTestWhatsApp({ mobile, templateName: selectedTpl!.name, languageCode: selectedTpl!.language, bodyParams: tplParams.slice(0, selectedTpl!.varCount), farmerId: picked?.id ?? null })
-        : await sendTestSms({ mobile, message: smsBody, templateId: sendTemplateId || null, dltTemplateId: dltId || null, farmerId: picked?.id ?? null });
+        : await sendTestSms({ mobile, message: smsBody, templateId: dltId || null, dltTemplateId: dltId || null, farmerId: picked?.id ?? null });
       setResult(r.ok
         ? {
             ok: true,
@@ -295,16 +291,6 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
                   ))}
                 </div>
               )}
-
-              {/* TemplateId to send */}
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <span className="text-[10px] font-bold uppercase text-[#9E9E9E]">Send TemplateId as:</span>
-                {([["internal", `Internal (${selectedDlt?.templateId || "—"})`], ["dlt", "DLT id"], ["none", "None"]] as [typeof tplIdMode, string][]).map(([m, label]) => (
-                  <button key={m} type="button" onClick={() => setTplIdMode(m)}
-                    className="rounded-full border px-2.5 py-0.5 text-[11px] font-semibold"
-                    style={{ background: tplIdMode === m ? "#EDE7F6" : "#fff", color: tplIdMode === m ? "#6A1B9A" : "#9E9E9E", borderColor: tplIdMode === m ? "#6A1B9A" : "#E0E0E0" }}>{label}</button>
-                ))}
-              </div>
 
               <div className="mt-3 text-[10px] font-bold uppercase text-[#9E9E9E]">Exactly what will be sent{showWs ? " · spaces shown as ␣" : ""}</div>
               <div className="mt-1 rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] px-3 py-2.5 text-[13px] leading-relaxed text-[#1A1C1A]" dir="auto" style={{ whiteSpace: "pre-wrap" }}>

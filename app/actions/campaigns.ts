@@ -14,7 +14,7 @@ import { getScope, canManage, getActor, farmerScopeWhere } from "@/lib/scope";
 import { getSession } from "@/lib/auth";
 import { cropLabel } from "@/lib/crops";
 import { buildWorkbookB64 } from "@/lib/xlsx-export";
-import { sendSms, zapConfig, listSmsTemplates, internalTemplateIdFor, type SmsTemplate } from "@/lib/zapsms";
+import { sendSms, zapConfig, listSmsTemplates, type SmsTemplate } from "@/lib/zapsms";
 import { sendWhatsApp, waConfig, waCreateTemplate } from "@/lib/whatsapp";
 import { SAMPLE_VARS, resolveVars, fillDltTemplate, fillWaTemplate, positionalParams, countDltVars, VAR_LABEL, type FarmerVarSource } from "@/lib/campaign-vars";
 
@@ -1063,8 +1063,7 @@ export async function sendCampaignSms(input: { memberId: number; commTemplateId?
 
     const actor = await getActor();
     const { cfg } = zapConfig();
-    const internalTpl = await internalTemplateIdFor(tpl?.dltTemplateId);
-    const res = await sendSms({ mobile, message, templateId: internalTpl ?? tpl?.dltTemplateId ?? null });
+    const res = await sendSms({ mobile, message, templateId: tpl?.dltTemplateId ?? null });
 
     await prisma.smsLog.create({
       data: {
