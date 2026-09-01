@@ -18,11 +18,12 @@ type WaMode = "text" | "template";
  * (free text, optionally loaded from a saved Comm Plan), and fire one SMS (ZapSMS) or WhatsApp
  * (Meta Cloud API). Admin-only (Settings is sysadmin); every send is logged.
  */
-export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMissing, waTemplates = [] }: {
+export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMissing, waTemplates = [], only }: {
   plans: Plan[]; smsReady: boolean; missing: string[]; senderId: string;
   waReady: boolean; waMissing: string[]; waTemplates?: WaTemplateOpt[];
+  only?: Channel; // lock to one channel + hide the toggle (SMS tab / WhatsApp tab)
 }) {
-  const [channel, setChannel] = useState<Channel>("sms");
+  const [channel, setChannel] = useState<Channel>(only ?? "sms");
   const [waMode, setWaMode] = useState<WaMode>("text");
   const [tplName, setTplName] = useState<string>("");
   const [tplParams, setTplParams] = useState<string[]>([]);
@@ -143,16 +144,18 @@ export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMis
       </div>
       <p className="mb-3 text-[12px] text-[#9E9E9E]">Send a one-off message to a farmer or any number to verify the gateway. Admin-only; every send is logged.</p>
 
-      {/* Channel toggle */}
-      <div className="mb-4 inline-flex rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] p-1">
-        {([["sms", "✉ SMS"], ["whatsapp", "⚡ WhatsApp"]] as [Channel, string][]).map(([c, label]) => (
-          <button key={c} type="button" onClick={() => { setChannel(c); setResult(null); }}
-            className="rounded-[8px] px-4 py-1.5 text-[12.5px] font-bold transition-colors"
-            style={{ background: channel === c ? "#fff" : "transparent", color: channel === c ? accent : "#9E9E9E", boxShadow: channel === c ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}>
-            {label}
-          </button>
-        ))}
-      </div>
+      {/* Channel toggle — hidden when the card is locked to one channel (SMS / WhatsApp tabs) */}
+      {!only && (
+        <div className="mb-4 inline-flex rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] p-1">
+          {([["sms", "✉ SMS"], ["whatsapp", "⚡ WhatsApp"]] as [Channel, string][]).map(([c, label]) => (
+            <button key={c} type="button" onClick={() => { setChannel(c); setResult(null); }}
+              className="rounded-[8px] px-4 py-1.5 text-[12.5px] font-bold transition-colors"
+              style={{ background: channel === c ? "#fff" : "transparent", color: channel === c ? accent : "#9E9E9E", boxShadow: channel === c ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Gateway status */}
       {ready ? (

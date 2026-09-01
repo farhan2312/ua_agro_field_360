@@ -128,23 +128,24 @@ export default async function SettingsPage() {
           ),
         },
         {
-          key: "templates",
-          label: "WhatsApp Templates",
-          icon: "💬",
+          key: "sms",
+          label: "SMS",
+          icon: "✉",
           content: (
-            <div className="mx-auto max-w-3xl">
-              <WhatsAppTemplatesCard initial={tplInit} />
+            <div className="mx-auto flex max-w-3xl flex-col gap-[18px]">
+              <SmsTestCard only="sms" plans={plans} smsReady={sms.ready} missing={sms.missing} senderId={sms.cfg.senderId} waReady={wa.ready} waMissing={wa.missing} />
             </div>
           ),
         },
         {
-          key: "messaging",
-          label: "Messaging & Opt-ins",
-          icon: "📣",
+          key: "whatsapp",
+          label: "WhatsApp",
+          icon: "⚡",
           content: (
             <div className="mx-auto flex max-w-3xl flex-col gap-[18px]">
-              <SmsTestCard plans={plans} smsReady={sms.ready} missing={sms.missing} senderId={sms.cfg.senderId} waReady={wa.ready} waMissing={wa.missing}
+              <SmsTestCard only="whatsapp" plans={plans} smsReady={sms.ready} missing={sms.missing} senderId={sms.cfg.senderId} waReady={wa.ready} waMissing={wa.missing}
                 waTemplates={tplInit.templates.filter((t) => t.status === "APPROVED").map((t) => ({ name: t.name, language: t.language, body: t.body, varCount: countVars(t.body) }))} />
+              <WhatsAppTemplatesCard initial={tplInit} />
               <WhatsAppOptInsCard initial={optIns} qrConfig={optInCfg} />
             </div>
           ),
