@@ -8,6 +8,8 @@ import { countDltVars } from "@/lib/campaign-vars";
 
 // Fill a DLT body by dropping each input value into its {#var#} position (fixed text stays intact).
 const fillDltValues = (body: string, values: string[]) => { let i = 0; return body.replace(/\{#var#\}/gi, () => values[i++] ?? ""); };
+// Collapse runs of spaces to one + trim each line (mirrors the server) — DLT wants single spaces.
+const collapseSpaces = (s: string) => s.split("\n").map((l) => l.replace(/[ \t]+/g, " ").replace(/^[ \t]+|[ \t]+$/g, "")).join("\n");
 import type { SmsBalance } from "@/lib/zapsms";
 import { fillPreview } from "@/lib/wa-template-presets";
 import type { FarmerPick } from "@/lib/action-constants";
@@ -92,8 +94,8 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
   const loadApproved = () => getSmsTemplates().then((r) => setTpls((r.templates ?? []).filter((t) => t.approved)));
   const selectedDlt = (tpls ?? []).find((t) => t.dltTemplateId === dltId) ?? null;
   const dltVarCount = countDltVars(smsText); // from the editable body, so it tracks edits
-  // Exactly what goes out: the (editable) body with each {#var#} replaced by its input value.
-  const smsBody = fillDltValues(smsText, smsParams);
+  // Exactly what goes out: the (editable) body with each {#var#} filled, spaces normalized to single.
+  const smsBody = collapseSpaces(fillDltValues(smsText, smsParams));
   const smsParamsFilled = smsParams.slice(0, dltVarCount).filter((s) => s.trim()).length === dltVarCount;
   // Which id to send as SendSMS TemplateId.
   const sendTemplateId = tplIdMode === "internal" ? (selectedDlt?.templateId ?? "") : tplIdMode === "dlt" ? dltId : "";
