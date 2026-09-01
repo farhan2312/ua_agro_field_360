@@ -535,7 +535,9 @@ export interface CampaignMemberVM {
   reachedBy: string | null; reachedByCode: string | null;
   response: string | null; responseCrop: string | null; // interest outcome + the crop when OTHER_CROP
 }
-export async function getCampaignMembers(campaignId: number, limit = 1000): Promise<CampaignMemberVM[]> {
+// Load the whole TEST group so the outreach counts (to-contact / reached / left) are accurate — the old
+// 1000 default capped a 2k+ campaign's list. Bounded to keep the payload sane; huge campaigns use the matrix.
+export async function getCampaignMembers(campaignId: number, limit = 25000): Promise<CampaignMemberVM[]> {
   const assigned = await campaignerAssignedIds();
   if (assigned && !assigned.includes(campaignId)) return []; // campaigner may only open assigned campaigns
   const scope = await memberScopeWhere();
