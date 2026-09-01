@@ -4,6 +4,10 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { searchFarmersForAction } from "@/app/actions/action-registry";
 import { sendTestSms, sendTestWhatsApp, getRecentSmsLogs, refreshSmsDeliveryStatus, smsBalance, type SmsLogRow } from "@/app/actions/test-messaging";
 import { getSmsTemplates, type SmsTemplateVM } from "@/app/actions/campaigns";
+import { countDltVars } from "@/lib/campaign-vars";
+
+// Fill a DLT body by dropping each input value into its {#var#} position (fixed text stays intact).
+const fillDltValues = (body: string, values: string[]) => { let i = 0; return body.replace(/\{#var#\}/gi, () => values[i++] ?? ""); };
 import type { SmsBalance } from "@/lib/zapsms";
 import { fillPreview } from "@/lib/wa-template-presets";
 import type { FarmerPick } from "@/lib/action-constants";
@@ -30,6 +34,7 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
   const [picked, setPicked] = useState<FarmerPick | null>(null);
   const [mobile, setMobile] = useState("");
   const [dltId, setDltId] = useState<string>(""); // selected approved DLT template id (SMS)
+  const [smsParams, setSmsParams] = useState<string[]>([]); // one value per {#var#} in the DLT template
   const [message, setMessage] = useState("");
   const [sending, startSend] = useTransition();
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
@@ -59,11 +64,11 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
   };
   const clearPick = () => { setPicked(null); setQ(""); };
 
-  // Pick an approved DLT template → load its content into the (editable) message + remember its id.
+  // Pick an approved DLT template → give one input box per {#var#}; the fixed text stays locked.
   const pickDlt = (id: string) => {
     setDltId(id);
     const t = (tpls ?? []).find((x) => x.dltTemplateId === id);
-    if (t) setMessage(t.content);
+    setSmsParams(t ? Array(countDltVars(t.content)).fill("") : []);
   };
 
   // SMS is India-only (10 digits, 6–9). WhatsApp test allows a full international number incl. country
@@ -79,17 +84,21 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
     setTplParams(t ? Array(t.varCount).fill("") : []);
   };
 
-  const canSend = ready && mobileValid && !sending && (
-    isTemplateMode ? !!selectedTpl && paramsFilled : message.trim().length > 0
-  );
-
-  const [bal, setBal] = useState<SmsBalance | null>(null);
-  const loadBalance = () => smsBalance().then((r) => setBal(r.ok && r.balance ? r.balance : null));
-
   // Approved DLT templates synced from ZapSMS — the SMS test bench sends via one of these.
   const [tpls, setTpls] = useState<SmsTemplateVM[] | null>(null);
   const loadApproved = () => getSmsTemplates().then((r) => setTpls((r.templates ?? []).filter((t) => t.approved)));
   const selectedDlt = (tpls ?? []).find((t) => t.dltTemplateId === dltId) ?? null;
+  const dltVarCount = selectedDlt ? countDltVars(selectedDlt.content) : 0;
+  // The exact message that goes out: the approved body with each {#var#} replaced by its input value.
+  const smsBody = selectedDlt ? fillDltValues(selectedDlt.content, smsParams) : message;
+  const smsParamsFilled = !selectedDlt || smsParams.slice(0, dltVarCount).filter((s) => s.trim()).length === dltVarCount;
+
+  const canSend = ready && mobileValid && !sending && (
+    isTemplateMode ? !!selectedTpl && paramsFilled : smsParamsFilled && smsBody.trim().length > 0
+  );
+
+  const [bal, setBal] = useState<SmsBalance | null>(null);
+  const loadBalance = () => smsBalance().then((r) => setBal(r.ok && r.balance ? r.balance : null));
   const [smsLogs, setSmsLogs] = useState<SmsLogRow[] | null>(null);
   const [refreshingSms, startRefreshSms] = useTransition();
   const loadSmsLogs = () => getRecentSmsLogs(10).then(setSmsLogs);
@@ -104,7 +113,7 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
               ? { mobile, templateName: selectedTpl.name, languageCode: selectedTpl.language, bodyParams: tplParams.slice(0, selectedTpl.varCount), farmerId: picked?.id ?? null }
               : { mobile, message, farmerId: picked?.id ?? null },
           )
-        : await sendTestSms({ mobile, message, dltTemplateId: dltId || null, farmerId: picked?.id ?? null });
+        : await sendTestSms({ mobile, message: smsBody, dltTemplateId: dltId || null, farmerId: picked?.id ?? null });
       setResult(r.ok
         ? {
             ok: true,
@@ -254,15 +263,38 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
             {(tpls ?? []).map((t) => <option key={t.dltTemplateId} value={t.dltTemplateId}>{t.name} · {t.dltTemplateId}</option>)}
           </select>
 
-          <label className="mt-3 block text-[11px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Message *</label>
-          <textarea className={`${inputCls} mt-1 resize-y`} rows={4} value={message} onChange={(e) => setMessage(e.target.value)}
-            placeholder="Pick a template above, or type a test message…" />
-          <div className="mt-1 flex items-center justify-between text-[11px] text-[#9E9E9E]">
-            <span>{selectedDlt ? "Loaded from an approved template — edit {#var#} to sample values for the test." : "Free text (no DLT id → carrier will reject it)."}</span>
-            <span>{message.length} chars</span>
-          </div>
-          {selectedDlt && (
-            <div className="mt-1.5 rounded-[8px] bg-[#E8F5E9] px-2.5 py-1.5 text-[11.5px] font-medium text-[#2E7D32]">DLT template {selectedDlt.dltTemplateId} — approved ✓</div>
+          {selectedDlt ? (
+            <>
+              {/* One input per {#var#} — the fixed text is locked, so the send matches the approved template. */}
+              {dltVarCount > 0 && (
+                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {Array.from({ length: dltVarCount }).map((_, i) => (
+                    <div key={i}>
+                      <label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Variable {i + 1} <span className="normal-case text-[#BDBDBD]">({`{#var#}`})</span></label>
+                      <input className={`${inputCls} mt-1`} value={smsParams[i] ?? ""}
+                        onChange={(e) => setSmsParams((p) => { const n = [...p]; n[i] = e.target.value; return n; })}
+                        placeholder={`Value for {#var#} #${i + 1}`} />
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="mt-3 text-[10px] font-bold uppercase text-[#9E9E9E]">Message preview <span className="normal-case text-[#BDBDBD]">· locked to the approved template</span></div>
+              <div className="mt-1 rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] px-3 py-2.5 text-[13px] leading-relaxed text-[#1A1C1A]" dir="auto" style={{ whiteSpace: "pre-wrap" }}>{smsBody}</div>
+              <div className="mt-1 flex items-center justify-between text-[11px] text-[#9E9E9E]">
+                <span>DLT template {selectedDlt.dltTemplateId} — approved ✓</span>
+                <span>{smsBody.length} chars</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <label className="mt-3 block text-[11px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Message *</label>
+              <textarea className={`${inputCls} mt-1 resize-y`} rows={4} value={message} onChange={(e) => setMessage(e.target.value)}
+                placeholder="Pick a template above, or type a test message…" />
+              <div className="mt-1 flex items-center justify-between text-[11px] text-[#9E9E9E]">
+                <span>Free text (no DLT template → carrier will reject it with code 129).</span>
+                <span>{message.length} chars</span>
+              </div>
+            </>
           )}
         </>
       )}
