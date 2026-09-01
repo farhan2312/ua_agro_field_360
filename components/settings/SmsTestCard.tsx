@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { searchFarmersForAction } from "@/app/actions/action-registry";
-import { sendTestSms, sendTestWhatsApp, getRecentSmsLogs, refreshSmsDeliveryStatus, smsBalance, debugSmsRequest, type SmsLogRow } from "@/app/actions/test-messaging";
+import { sendTestSms, sendTestWhatsApp, getRecentSmsLogs, refreshSmsDeliveryStatus, smsBalance, type SmsLogRow } from "@/app/actions/test-messaging";
 import { getSmsTemplates, type SmsTemplateVM } from "@/app/actions/campaigns";
 import { countDltVars } from "@/lib/campaign-vars";
 
@@ -34,9 +34,7 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
   const [picked, setPicked] = useState<FarmerPick | null>(null);
   const [mobile, setMobile] = useState("");
   const [dltId, setDltId] = useState<string>(""); // selected approved DLT template id (SMS)
-  const [smsText, setSmsText] = useState<string>(""); // editable body — make it byte-identical to the DLT registration
   const [smsParams, setSmsParams] = useState<string[]>([]); // one value per {#var#} in the DLT template
-  const [showWs, setShowWs] = useState(false); // reveal spaces (single vs double) in the preview
   const [sending, startSend] = useTransition();
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
   const lastQ = useRef("");
@@ -65,11 +63,10 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
   };
   const clearPick = () => { setPicked(null); setQ(""); };
 
-  // Pick an approved DLT template → prefill the editable body from the API + one input per {#var#}.
+  // Pick an approved DLT template → one input box per {#var#}; content stays locked to the template.
   const pickDlt = (id: string) => {
     setDltId(id);
     const t = (tpls ?? []).find((x) => x.dltTemplateId === id);
-    setSmsText(t?.content ?? "");
     setSmsParams(t ? Array(countDltVars(t.content)).fill("") : []);
   };
 
@@ -90,21 +87,18 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
   const [tpls, setTpls] = useState<SmsTemplateVM[] | null>(null);
   const loadApproved = () => getSmsTemplates().then((r) => setTpls((r.templates ?? []).filter((t) => t.approved)));
   const selectedDlt = (tpls ?? []).find((t) => t.dltTemplateId === dltId) ?? null;
-  const dltVarCount = countDltVars(smsText); // from the editable body, so it tracks edits
-  // Exactly what goes out: the (editable) body with each {#var#} filled. Sent EXACTLY (no space changes)
-  // with TemplateId = the 19-digit DLT id and no entity id — the combination proven to deliver.
-  const smsBody = fillDltValues(smsText, smsParams);
-  const smsParamsFilled = smsParams.slice(0, dltVarCount).filter((s) => s.trim()).length === dltVarCount;
+  const dltVarCount = selectedDlt ? countDltVars(selectedDlt.content) : 0;
+  // Exactly what goes out: the approved template content with each {#var#} filled. Sent verbatim
+  // (TemplateId = the 19-digit DLT id, no entity id — the combination proven to deliver).
+  const smsBody = selectedDlt ? fillDltValues(selectedDlt.content, smsParams) : "";
+  const smsParamsFilled = !!selectedDlt && smsParams.slice(0, dltVarCount).filter((s) => s.trim()).length === dltVarCount;
 
   const canSend = ready && mobileValid && !sending && (
-    isTemplateMode ? !!selectedTpl && paramsFilled : !!dltId && smsBody.trim().length > 0 && smsParamsFilled
+    isTemplateMode ? !!selectedTpl && paramsFilled : !!selectedDlt && smsBody.trim().length > 0 && smsParamsFilled
   );
 
   const [bal, setBal] = useState<SmsBalance | null>(null);
   const loadBalance = () => smsBalance().then((r) => setBal(r.ok && r.balance ? r.balance : null));
-  const [reqUrl, setReqUrl] = useState<string | null>(null);
-  const showRequest = () => debugSmsRequest({ mobile, message: smsBody, templateId: dltId || null })
-    .then((r) => setReqUrl(r.ok ? (r.url ?? "") : `Error: ${r.error ?? "failed"}`));
   const [smsLogs, setSmsLogs] = useState<SmsLogRow[] | null>(null);
   const [refreshingSms, startRefreshSms] = useTransition();
   const loadSmsLogs = () => getRecentSmsLogs(10).then(setSmsLogs);
@@ -265,22 +259,11 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
             {(tpls ?? []).map((t) => <option key={t.dltTemplateId} value={t.dltTemplateId}>{t.name} · {t.dltTemplateId}</option>)}
           </select>
 
-          {dltId ? (
+          {selectedDlt ? (
             <>
-              {/* Editable body, prefilled from the API. Make it byte-identical to the DLT registration —
-                  toggle "show spaces" to spot single vs double spaces; keep the {#var#} markers. */}
-              <div className="mt-3 flex items-end justify-between gap-2">
-                <label className="text-[11px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Template body <span className="normal-case text-[#BDBDBD]">— must match the DLT registration exactly</span></label>
-                <div className="flex items-center gap-3">
-                  <label className="flex cursor-pointer items-center gap-1 text-[11px] font-semibold text-[#6A1B9A]"><input type="checkbox" checked={showWs} onChange={(e) => setShowWs(e.target.checked)} /> show spaces</label>
-                  {selectedDlt && <button type="button" onClick={() => { setSmsText(selectedDlt.content); setSmsParams(Array(countDltVars(selectedDlt.content)).fill("")); }} className="text-[11px] font-semibold text-[#6A1B9A] hover:underline">Reset to synced</button>}
-                </div>
-              </div>
-              <textarea className={`${inputCls} mt-1 resize-y font-mono`} rows={5} value={smsText} dir="auto"
-                onChange={(e) => setSmsText(e.target.value)} placeholder="Paste the approved template (keep the {#var#} markers)…" />
-
+              {/* One input per {#var#} — the content is locked to the approved template. */}
               {dltVarCount > 0 && (
-                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {Array.from({ length: dltVarCount }).map((_, i) => (
                     <div key={i}>
                       <label className="text-[10px] font-bold uppercase text-[#9E9E9E]">Variable {i + 1} <span className="normal-case text-[#BDBDBD]">({`{#var#}`})</span></label>
@@ -291,13 +274,10 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
                   ))}
                 </div>
               )}
-
-              <div className="mt-3 text-[10px] font-bold uppercase text-[#9E9E9E]">Exactly what will be sent{showWs ? " · spaces shown as ␣" : ""}</div>
-              <div className="mt-1 rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] px-3 py-2.5 text-[13px] leading-relaxed text-[#1A1C1A]" dir="auto" style={{ whiteSpace: "pre-wrap" }}>
-                {showWs ? smsBody.replace(/ /g, "␣") : smsBody}
-              </div>
+              <div className="mt-3 text-[10px] font-bold uppercase text-[#9E9E9E]">Exactly what will be sent</div>
+              <div className="mt-1 rounded-[10px] border border-[#E0E0E0] bg-[#F5F7F5] px-3 py-2.5 text-[13px] leading-relaxed text-[#1A1C1A]" dir="auto" style={{ whiteSpace: "pre-wrap" }}>{smsBody}</div>
               <div className="mt-1 flex items-center justify-between text-[11px] text-[#9E9E9E]">
-                <span>DLT {dltId} · internal {selectedDlt?.templateId || "—"}{selectedDlt?.approved ? " · approved ✓" : ""}</span>
+                <span>DLT template {selectedDlt.dltTemplateId}{selectedDlt.approved ? " — approved ✓" : ""}</span>
                 <span>{smsBody.length} chars</span>
               </div>
             </>
@@ -315,27 +295,12 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
         </div>
       )}
 
-      <div className="mt-4 flex items-center justify-between gap-2">
-        {!isWa
-          ? <button type="button" onClick={showRequest} className="text-[11.5px] font-semibold text-[#6A1B9A] hover:underline">🔍 Show exact request</button>
-          : <span />}
+      <div className="mt-4 flex justify-end">
         <button type="button" onClick={send} disabled={!canSend}
           className="rounded-[10px] px-5 py-2.5 text-[13px] font-bold text-white disabled:opacity-50" style={{ background: accent }}>
           {sending ? "Sending…" : isWa ? "⚡ Send test WhatsApp" : "✉ Send test SMS"}
         </button>
       </div>
-
-      {/* Diagnostic: the exact SendSMS URL the app fires (keys masked) — diff vs a request that returned 0. */}
-      {!isWa && reqUrl != null && (
-        <div className="mt-3">
-          <div className="mb-1 flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase text-[#9E9E9E]">Exact request URL (ApiKey/ClientId masked)</span>
-            <button type="button" onClick={() => { navigator.clipboard?.writeText(reqUrl).catch(() => {}); }} className="text-[11px] font-semibold text-[#6A1B9A] hover:underline">Copy</button>
-          </div>
-          <pre className="max-h-[160px] overflow-auto rounded-[8px] border border-[#E0E0E0] bg-[#0B1021] px-3 py-2 text-[11px] leading-relaxed text-[#B9F6CA]" style={{ whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{reqUrl}</pre>
-          <div className="mt-1 text-[11px] text-[#9E9E9E]">Compare this to the request that returned code 0. In particular check <b>Message</b> (spaces are <code>%20</code>) and <b>TemplateId</b>.</div>
-        </div>
-      )}
 
       {/* SMS delivery reports — pulled on demand from the gateway (DLR). "Submitted" ≠ delivered. */}
       {!isWa && (
