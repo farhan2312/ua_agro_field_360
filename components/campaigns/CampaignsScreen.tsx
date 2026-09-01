@@ -198,8 +198,10 @@ function SmsPlanEditor({ draft, setDraft, inputCls }: { draft: CommTemplateVM; s
   const curId = (draft.dltTemplateId ?? "").trim();
   const approved = (tpls ?? []).filter((t) => t.approved);
   const selected = (tpls ?? []).find((t) => t.dltTemplateId === curId) ?? null;
-  const isLegacy = !!(draft.template && !selected); // has content but not tied to a synced template
-  const content = selected ? selected.content : draft.template;
+  // Legacy = a stored body/id not tied to a synced approved template. We no longer show or use that
+  // free-text body — the message can ONLY come from the picker.
+  const isLegacy = tpls != null && !selected && !!(draft.template || curId);
+  const content = selected ? selected.content : "";
   const positions = countDltVars(content);
 
   const pick = (id: string) => {
@@ -229,8 +231,8 @@ function SmsPlanEditor({ draft, setDraft, inputCls }: { draft: CommTemplateVM; s
       )}
 
       {isLegacy && (
-        <div className="mt-2 rounded-[8px] border border-[#FFE0B2] bg-[#FFFDF7] p-2.5 text-[11.5px] text-[#8D6E00]">
-          ⚠ Legacy free-text message (id {curId || "—"}). It still sends, but pick an approved template above to update it.
+        <div className="mt-2 rounded-[8px] border border-[#F2C4C4] bg-[#FDF3F3] p-2.5 text-[11.5px] font-medium text-[#B71C1C]">
+          ⚠ This plan isn’t linked to an approved DLT template{curId ? ` (old id ${curId})` : ""}. Pick one above — the carrier rejects any un-approved content (code 129).
         </div>
       )}
 
@@ -363,6 +365,10 @@ function CommPlanTab({ templates, templateVars }: { templates: CommTemplateVM[];
 
   const save = () => {
     if (!draft) return;
+    // Lock SMS/WhatsApp to a picked template — no plan can be saved without one.
+    const med = draft.medium || "WhatsApp";
+    if (med === "SMS" && !(draft.dltTemplateId ?? "").trim()) { setErr("Pick an approved DLT template for this SMS plan."); return; }
+    if (med === "WhatsApp" && !(draft.waTemplateName ?? "").trim()) { setErr("Pick an approved WhatsApp template for this plan."); return; }
     setErr(null);
     start(async () => {
       const patch = { name: draft.name, language: draft.language, promoType: draft.promoType, segments: draft.segments, medium: draft.medium, offer: draft.offer, timingLabel: draft.timingLabel, template: draft.template, dltTemplateId: (draft.dltTemplateId ?? "").trim() || null, waTemplateName: (draft.waTemplateName ?? "").trim() || null, waLanguage: (draft.waLanguage ?? "").trim() || null, waVariables: draft.waVariables ?? [], smsVariables: draft.smsVariables ?? [] };

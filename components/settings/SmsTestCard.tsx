@@ -35,7 +35,6 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
   const [mobile, setMobile] = useState("");
   const [dltId, setDltId] = useState<string>(""); // selected approved DLT template id (SMS)
   const [smsParams, setSmsParams] = useState<string[]>([]); // one value per {#var#} in the DLT template
-  const [message, setMessage] = useState("");
   const [sending, startSend] = useTransition();
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
   const lastQ = useRef("");
@@ -90,11 +89,11 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
   const selectedDlt = (tpls ?? []).find((t) => t.dltTemplateId === dltId) ?? null;
   const dltVarCount = selectedDlt ? countDltVars(selectedDlt.content) : 0;
   // The exact message that goes out: the approved body with each {#var#} replaced by its input value.
-  const smsBody = selectedDlt ? fillDltValues(selectedDlt.content, smsParams) : message;
-  const smsParamsFilled = !selectedDlt || smsParams.slice(0, dltVarCount).filter((s) => s.trim()).length === dltVarCount;
+  const smsBody = selectedDlt ? fillDltValues(selectedDlt.content, smsParams) : "";
+  const smsParamsFilled = !!selectedDlt && smsParams.slice(0, dltVarCount).filter((s) => s.trim()).length === dltVarCount;
 
   const canSend = ready && mobileValid && !sending && (
-    isTemplateMode ? !!selectedTpl && paramsFilled : smsParamsFilled && smsBody.trim().length > 0
+    isTemplateMode ? !!selectedTpl && paramsFilled : !!selectedDlt && smsParamsFilled && smsBody.trim().length > 0
   );
 
   const [bal, setBal] = useState<SmsBalance | null>(null);
@@ -108,11 +107,7 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
     setResult(null);
     startSend(async () => {
       const r = isWa
-        ? await sendTestWhatsApp(
-            isTemplateMode && selectedTpl
-              ? { mobile, templateName: selectedTpl.name, languageCode: selectedTpl.language, bodyParams: tplParams.slice(0, selectedTpl.varCount), farmerId: picked?.id ?? null }
-              : { mobile, message, farmerId: picked?.id ?? null },
-          )
+        ? await sendTestWhatsApp({ mobile, templateName: selectedTpl!.name, languageCode: selectedTpl!.language, bodyParams: tplParams.slice(0, selectedTpl!.varCount), farmerId: picked?.id ?? null })
         : await sendTestSms({ mobile, message: smsBody, dltTemplateId: dltId || null, farmerId: picked?.id ?? null });
       setResult(r.ok
         ? {
@@ -286,15 +281,9 @@ export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, w
               </div>
             </>
           ) : (
-            <>
-              <label className="mt-3 block text-[11px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Message *</label>
-              <textarea className={`${inputCls} mt-1 resize-y`} rows={4} value={message} onChange={(e) => setMessage(e.target.value)}
-                placeholder="Pick a template above, or type a test message…" />
-              <div className="mt-1 flex items-center justify-between text-[11px] text-[#9E9E9E]">
-                <span>Free text (no DLT template → carrier will reject it with code 129).</span>
-                <span>{message.length} chars</span>
-              </div>
-            </>
+            <div className="mt-3 rounded-[10px] bg-[#FFF8E1] px-3 py-2.5 text-[12px] text-[#8D6E00]">
+              Pick an approved DLT template above to compose the message. Free-typed SMS is rejected by the carrier (code 129), so it’s disabled.
+            </div>
           )}
         </>
       )}
