@@ -79,18 +79,9 @@ async function load(): Promise<LoadResult> {
 export default async function SettingsPage() {
   const { config, districtOptions } = await load();
 
-  // Test-messaging bench data: gateway status + saved comm plans to optionally load a message from.
+  // Test-messaging bench: gateway status only (SMS templates + WA templates are fetched client-side).
   const sms = zapConfig();
   const wa = waConfig();
-  let plans: { id: number; name: string; template: string; dltTemplateId: string | null; medium: string | null }[] = [];
-  try {
-    plans = await prisma.commTemplate.findMany({
-      select: { id: true, name: true, template: true, dltTemplateId: true, medium: true },
-      orderBy: [{ priority: "asc" }, { name: "asc" }],
-    });
-  } catch {
-    // DB unavailable — the test bench still renders with free text only.
-  }
 
   let optIns: { total: number; rows: OptInRow[] } = { total: 0, rows: [] };
   let optInCfg = { number: "", message: "" };
@@ -132,7 +123,7 @@ export default async function SettingsPage() {
           icon: "✉",
           content: (
             <div className="mx-auto flex max-w-3xl flex-col gap-[18px]">
-              <SmsTestCard only="sms" plans={plans} smsReady={sms.ready} missing={sms.missing} senderId={sms.cfg.senderId} waReady={wa.ready} waMissing={wa.missing} />
+              <SmsTestCard only="sms" smsReady={sms.ready} missing={sms.missing} senderId={sms.cfg.senderId} waReady={wa.ready} waMissing={wa.missing} />
             </div>
           ),
         },
@@ -142,7 +133,7 @@ export default async function SettingsPage() {
           icon: "⚡",
           content: (
             <WhatsAppSettingsTab
-              sms={{ plans, smsReady: sms.ready, missing: sms.missing, senderId: sms.cfg.senderId, waReady: wa.ready, waMissing: wa.missing,
+              sms={{ smsReady: sms.ready, missing: sms.missing, senderId: sms.cfg.senderId, waReady: wa.ready, waMissing: wa.missing,
                 waTemplates: tplInit.templates.filter((t) => t.status === "APPROVED").map((t) => ({ name: t.name, language: t.language, body: t.body, varCount: countVars(t.body) })) }}
               templates={tplInit}
               optIns={{ initial: optIns, qrConfig: optInCfg }}

@@ -3,12 +3,11 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { searchFarmersForAction } from "@/app/actions/action-registry";
 import { sendTestSms, sendTestWhatsApp, getRecentSmsLogs, refreshSmsDeliveryStatus, smsBalance, type SmsLogRow } from "@/app/actions/test-messaging";
-import { getSmsTemplates } from "@/app/actions/campaigns";
+import { getSmsTemplates, type SmsTemplateVM } from "@/app/actions/campaigns";
 import type { SmsBalance } from "@/lib/zapsms";
 import { fillPreview } from "@/lib/wa-template-presets";
 import type { FarmerPick } from "@/lib/action-constants";
 
-type Plan = { id: number; name: string; template: string; dltTemplateId: string | null; medium: string | null };
 type WaTemplateOpt = { name: string; language: string; body: string; varCount: number };
 type Channel = "sms" | "whatsapp";
 
@@ -17,8 +16,8 @@ type Channel = "sms" | "whatsapp";
  * (free text, optionally loaded from a saved Comm Plan), and fire one SMS (ZapSMS) or WhatsApp
  * (Meta Cloud API). Admin-only (Settings is sysadmin); every send is logged.
  */
-export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMissing, waTemplates = [], only, onSent }: {
-  plans: Plan[]; smsReady: boolean; missing: string[]; senderId: string;
+export function SmsTestCard({ smsReady, missing, senderId, waReady, waMissing, waTemplates = [], only, onSent }: {
+  smsReady: boolean; missing: string[]; senderId: string;
   waReady: boolean; waMissing: string[]; waTemplates?: WaTemplateOpt[];
   only?: Channel; // lock to one channel + hide the toggle (SMS tab / WhatsApp tab)
   onSent?: () => void; // fired after a WhatsApp send so a sibling delivery-status panel can refresh
@@ -30,7 +29,7 @@ export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMis
   const [results, setResults] = useState<FarmerPick[]>([]);
   const [picked, setPicked] = useState<FarmerPick | null>(null);
   const [mobile, setMobile] = useState("");
-  const [planId, setPlanId] = useState<number | null>(null);
+  const [dltId, setDltId] = useState<string>(""); // selected approved DLT template id (SMS)
   const [message, setMessage] = useState("");
   const [sending, startSend] = useTransition();
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
@@ -60,11 +59,11 @@ export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMis
   };
   const clearPick = () => { setPicked(null); setQ(""); };
 
-  const loadPlan = (id: number | null) => {
-    setPlanId(id);
-    if (id == null) return;
-    const p = plans.find((x) => x.id === id);
-    if (p) setMessage(p.template || "");
+  // Pick an approved DLT template → load its content into the (editable) message + remember its id.
+  const pickDlt = (id: string) => {
+    setDltId(id);
+    const t = (tpls ?? []).find((x) => x.dltTemplateId === id);
+    if (t) setMessage(t.content);
   };
 
   // SMS is India-only (10 digits, 6–9). WhatsApp test allows a full international number incl. country
@@ -87,19 +86,10 @@ export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMis
   const [bal, setBal] = useState<SmsBalance | null>(null);
   const loadBalance = () => smsBalance().then((r) => setBal(r.ok && r.balance ? r.balance : null));
 
-  // Only SMS-medium comm plans belong in the SMS test loader (WhatsApp/Call plans use {{n}} and no DLT).
-  const smsPlans = plans.filter((p) => (p.medium ?? "").toUpperCase().includes("SMS"));
-  // Approved DLT template ids synced from ZapSMS — used to mark which comm plans are actually send-ready.
-  const [approvedIds, setApprovedIds] = useState<Set<string> | null>(null);
-  const loadApproved = () => getSmsTemplates().then((r) => setApprovedIds(new Set((r.templates ?? []).filter((t) => t.approved).map((t) => t.dltTemplateId))));
-  // A comm plan's DLT readiness: no id / id-not-approved / approved / (approved-list not loaded yet).
-  const dltState = (p: Plan): "none" | "unapproved" | "approved" | "unknown" => {
-    const id = (p.dltTemplateId ?? "").trim();
-    if (!id) return "none";
-    if (approvedIds == null) return "unknown";
-    return approvedIds.has(id) ? "approved" : "unapproved";
-  };
-  const DLT_MARK: Record<ReturnType<typeof dltState>, string> = { approved: "✓ DLT approved", unapproved: "⚠ DLT not approved", none: "⚠ no DLT id", unknown: "• DLT set" };
+  // Approved DLT templates synced from ZapSMS — the SMS test bench sends via one of these.
+  const [tpls, setTpls] = useState<SmsTemplateVM[] | null>(null);
+  const loadApproved = () => getSmsTemplates().then((r) => setTpls((r.templates ?? []).filter((t) => t.approved)));
+  const selectedDlt = (tpls ?? []).find((t) => t.dltTemplateId === dltId) ?? null;
   const [smsLogs, setSmsLogs] = useState<SmsLogRow[] | null>(null);
   const [refreshingSms, startRefreshSms] = useTransition();
   const loadSmsLogs = () => getRecentSmsLogs(10).then(setSmsLogs);
@@ -114,7 +104,7 @@ export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMis
               ? { mobile, templateName: selectedTpl.name, languageCode: selectedTpl.language, bodyParams: tplParams.slice(0, selectedTpl.varCount), farmerId: picked?.id ?? null }
               : { mobile, message, farmerId: picked?.id ?? null },
           )
-        : await sendTestSms({ mobile, message, commTemplateId: planId, farmerId: picked?.id ?? null });
+        : await sendTestSms({ mobile, message, dltTemplateId: dltId || null, farmerId: picked?.id ?? null });
       setResult(r.ok
         ? {
             ok: true,
@@ -253,36 +243,27 @@ export function SmsTestCard({ plans, smsReady, missing, senderId, waReady, waMis
         </div>
       ) : (
         <>
-          {/* Message + optional plan loader (SMS comm plans only) */}
+          {/* Approved DLT template picker (SMS delivery needs an approved template id) */}
           <div className="mt-3 flex items-end justify-between gap-2">
-            <label className="text-[11px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Message *</label>
-            {smsPlans.length > 0 && (
-              <select value={planId ?? ""} onChange={(e) => loadPlan(e.target.value ? Number(e.target.value) : null)}
-                className="max-w-[260px] rounded-[8px] border border-[#E0E0E0] bg-white px-2 py-1 text-[11.5px] text-[#616161] outline-none focus:border-[#2E7D32]">
-                <option value="">Load from a Comm Plan…</option>
-                {smsPlans.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name.trim() || `Untitled plan #${p.id}`} · {DLT_MARK[dltState(p)]}</option>
-                ))}
-              </select>
-            )}
+            <label className="text-[11px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Approved DLT template <span className="normal-case text-[#BDBDBD]">(required for delivery)</span></label>
+            <button type="button" onClick={loadApproved} className="text-[11px] font-semibold text-[#6A1B9A] hover:underline">↻ Sync</button>
           </div>
+          <select value={dltId} onChange={(e) => pickDlt(e.target.value)}
+            className="mt-1 w-full rounded-[10px] border border-[#E0E0E0] bg-white px-3 py-2.5 text-[13px] text-[#424242] outline-none focus:border-[#2E7D32]">
+            <option value="">{tpls == null ? "Loading approved templates…" : tpls.length ? "— Pick an approved template —" : "No approved templates found"}</option>
+            {(tpls ?? []).map((t) => <option key={t.dltTemplateId} value={t.dltTemplateId}>{t.name} · {t.dltTemplateId}</option>)}
+          </select>
+
+          <label className="mt-3 block text-[11px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">Message *</label>
           <textarea className={`${inputCls} mt-1 resize-y`} rows={4} value={message} onChange={(e) => setMessage(e.target.value)}
-            placeholder="Type your test message…" />
+            placeholder="Pick a template above, or type a test message…" />
           <div className="mt-1 flex items-center justify-between text-[11px] text-[#9E9E9E]">
-            <span>{planId != null ? "Loaded from a Comm Plan — placeholders like [name] are sent as-is in a test." : "Free text."}</span>
+            <span>{selectedDlt ? "Loaded from an approved template — edit {#var#} to sample values for the test." : "Free text (no DLT id → carrier will reject it)."}</span>
             <span>{message.length} chars</span>
           </div>
-          {/* DLT status for the loaded plan */}
-          {planId != null && (() => {
-            const p = smsPlans.find((x) => x.id === planId); if (!p) return null;
-            const st = dltState(p); const id = (p.dltTemplateId ?? "").trim();
-            const tone = st === "approved" ? { bg: "#E8F5E9", fg: "#2E7D32" } : st === "unknown" ? { bg: "#EEF2F6", fg: "#546E7A" } : { bg: "#FDECEA", fg: "#C62828" };
-            const msg = st === "approved" ? `DLT template ${id} — approved ✓`
-              : st === "unapproved" ? `DLT id ${id} isn’t in your approved templates — carrier may reject it. Fix it in the Comm Plan.`
-              : st === "none" ? "This comm plan has no DLT template id — SMS will be rejected. Add one in the Comm Plan tab."
-              : `DLT id ${id} set (approved list not loaded).`;
-            return <div className="mt-1.5 rounded-[8px] px-2.5 py-1.5 text-[11.5px] font-medium" style={{ background: tone.bg, color: tone.fg }}>{msg}</div>;
-          })()}
+          {selectedDlt && (
+            <div className="mt-1.5 rounded-[8px] bg-[#E8F5E9] px-2.5 py-1.5 text-[11.5px] font-medium text-[#2E7D32]">DLT template {selectedDlt.dltTemplateId} — approved ✓</div>
+          )}
         </>
       )}
 

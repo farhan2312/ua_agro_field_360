@@ -92,7 +92,8 @@ export async function getRecentWhatsAppLogs(limit = 8): Promise<WaLogRow[]> {
 export async function sendTestSms(input: {
   mobile: string;
   message: string;
-  commTemplateId?: number | null;
+  dltTemplateId?: string | null; // preferred: a DLT template id picked directly (from the approved list)
+  commTemplateId?: number | null; // fallback: look the id up off a comm plan
   farmerId?: number | null;
 }): Promise<TestSmsResult> {
   if (!(await adminOnly())) return { ok: false, error: "Test SMS is available to admins only." };
@@ -106,16 +107,18 @@ export async function sendTestSms(input: {
   if (!ready) return { ok: false, error: `SMS gateway not configured — set ${missing.join(", ")} in the environment.` };
 
   try {
-    const tpl = input.commTemplateId
-      ? await prisma.commTemplate.findUnique({ where: { id: input.commTemplateId }, select: { dltTemplateId: true } })
-      : null;
+    // Prefer a directly-picked DLT template id; otherwise fall back to the comm plan's stored id.
+    const dltTemplateId = (input.dltTemplateId ?? "").trim()
+      || (input.commTemplateId
+        ? (await prisma.commTemplate.findUnique({ where: { id: input.commTemplateId }, select: { dltTemplateId: true } }))?.dltTemplateId ?? null
+        : null);
     const actor = await getActor();
-    const res = await sendSms({ mobile, message, dltTemplateId: tpl?.dltTemplateId ?? null });
+    const res = await sendSms({ mobile, message, dltTemplateId });
 
     await prisma.smsLog.create({
       data: {
         farmerId: input.farmerId ?? null, mobile,
-        senderId: cfg.senderId || null, dltTemplateId: tpl?.dltTemplateId ?? null, message,
+        senderId: cfg.senderId || null, dltTemplateId, message,
         ok: res.ok, providerId: res.providerId ?? null,
         status: res.status ? `TEST · ${res.status}` : "TEST", error: res.error ?? null,
         sentByName: actor.name, sentByCode: actor.code,
