@@ -2,7 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { getScope, canManage, getActor } from "@/lib/scope";
-import { zapConfig, sendSms, getSmsStatus, getSmsBalance, type SmsBalance } from "@/lib/zapsms";
+import { zapConfig, sendSms, getSmsStatus, getSmsBalance, smsRequestPreview, type SmsBalance } from "@/lib/zapsms";
 import { waConfig, sendWhatsApp } from "@/lib/whatsapp";
 
 /** Admins / super admins only (Central Admin + System Admin). */
@@ -29,6 +29,12 @@ const DLT_CODE_HINTS: Record<string, string> = {
   "013": "invalid mobile number",
   "13": "invalid mobile number",
 };
+
+/** Admin diagnostic: the exact SendSMS URL the app would fire (keys masked) — to diff vs a working request. */
+export async function debugSmsRequest(input: { mobile: string; message: string; templateId?: string | null; dltTemplateId?: string | null }): Promise<{ ok: boolean; url?: string; fields?: Record<string, string>; error?: string }> {
+  if (!(await adminOnly())) return { ok: false, error: "Admins only." };
+  return smsRequestPreview(input);
+}
 
 /** SMS credit balance for the Settings chip + pre-send checks. Admin-only. */
 export async function smsBalance(): Promise<{ ok: boolean; balance?: SmsBalance; error?: string }> {
