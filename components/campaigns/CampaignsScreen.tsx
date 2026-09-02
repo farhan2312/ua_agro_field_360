@@ -1600,6 +1600,31 @@ function TrackerBody({ t }: { t: CampaignTracker }) {
         )}
       </div>
 
+      {/* Outreach progress per store — individually reached / total (TEST group) */}
+      {t.reach.byStore.length > 0 && (
+        <div className={`${CARD} p-4`}>
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-[13px] font-bold text-[#1A1C1A]">Reached by store</div>
+            <span className="text-[11px] text-[#9E9E9E]">individually reached / total</span>
+          </div>
+          <div className="flex flex-col gap-2">
+            {t.reach.byStore.map((s) => {
+              const pct = s.total ? Math.round((s.reached / s.total) * 100) : 0;
+              return (
+                <div key={s.store} className="flex items-center gap-2.5 text-[12px]">
+                  <span className="w-[130px] shrink-0 truncate font-semibold text-[#424242]" title={s.store}>{s.store}</span>
+                  <div className="relative h-[16px] flex-1 overflow-hidden rounded-[6px] bg-[#F0F0F0]">
+                    <div className="absolute inset-y-0 left-0 rounded-[6px] bg-[#2E7D32]" style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className="w-[74px] shrink-0 text-right tabular-nums text-[#616161]"><b className="text-[#1A1C1A]">{n(s.reached)}</b> / {n(s.total)}</span>
+                  <span className="w-[64px] shrink-0 text-right text-[10.5px] text-[#6A1B9A]">{s.broadcast > 0 ? `📣 ${n(s.broadcast)}` : ""}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className={`${CARD} p-4`}>
         <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
           <div className="text-[13px] font-bold text-[#1A1C1A]">Attributed revenue</div>
@@ -1650,6 +1675,20 @@ function TrackerBody({ t }: { t: CampaignTracker }) {
               ); })}</tbody>
             </table></div>
           )}
+      </div>
+
+      {/* Broadcast reach — kept separate from individual outreach (mass-send DELIVERY, carrier-confirmed) */}
+      <div className={`${CARD} border-[#EDE7F6] p-4`} style={{ background: "#FCFAFF" }}>
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <div className="text-[13px] font-bold text-[#6A1B9A]">📣 Broadcast reach</div>
+          <span className="text-[11px] text-[#9E9E9E]">mass send · separate from individual reach</span>
+        </div>
+        <div className="mt-2 grid grid-cols-3 gap-3">
+          <Kpi label="Delivered to" value={n(t.reach.broadcastDelivered)} color="#6A1B9A" />
+          <Kpi label="via SMS" value={n(t.reach.byBroadcastChannel.SMS)} />
+          <Kpi label="via WhatsApp" value={n(t.reach.byBroadcastChannel.WHATSAPP)} />
+        </div>
+        <div className="mt-2 text-[11px] text-[#9E9E9E]">Farmers a mass send was <b>delivered</b> to (carrier-confirmed). They stay in the outreach list for individual follow-up and are <b>not</b> counted as “reached”. Sync delivery from a campaign's Broadcast history.</div>
       </div>
     </div>
   );

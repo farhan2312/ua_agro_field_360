@@ -831,6 +831,9 @@ export interface CampaignReach {
   byApproach: { CALL: number; WHATSAPP: number; SMS: number; IN_PERSON: number; unspecified: number };
   byResponse: { interested: number; notInterested: number; otherCrop: number; noResponse: number };
   otherCrops: { crop: string; count: number }[]; // crops requested via "interested in another crop"
+  byStore: { store: string; reached: number; total: number; broadcast: number }[]; // outreach progress per store (TEST group)
+  broadcastDelivered: number; // TEST members a mass send DELIVERED to (separate from individual `reached`)
+  byBroadcastChannel: { SMS: number; WHATSAPP: number };
 }
 export interface CampaignAttribution {
   basisLabel: string; crops: string[]; categories: string[]; all: boolean; noCatalogMatch: boolean;
@@ -874,7 +877,7 @@ export async function getCampaignTracker(campaignId: number): Promise<CampaignTr
   const start = camp.startDate;
   const end = new Date(camp.endDate); end.setDate(end.getDate() + 30); // +30-day grace tail
 
-  const members = await prisma.campaignMember.findMany({ where: { campaignId }, select: { farmerId: true, segment: true, valueSegment: true, lifecycleSegment: true, group: true, reached: true, mediums: true, response: true, responseCrop: true } });
+  const members = await prisma.campaignMember.findMany({ where: { campaignId }, select: { farmerId: true, segment: true, valueSegment: true, lifecycleSegment: true, group: true, reached: true, mediums: true, response: true, responseCrop: true, storeId: true, broadcastMediums: true } });
   const test = members.filter((m) => m.group === "TEST");
   const reachedMembers = test.filter((m) => m.reached);
   // Approaches are multi-select, so a farmer reached by Call AND WhatsApp counts under both:
@@ -896,6 +899,23 @@ export async function getCampaignTracker(campaignId: number): Promise<CampaignTr
     else byResponse.noResponse++;
   }
   const otherCrops = [...otherCropTally.entries()].sort((a, b) => b[1] - a[1]).map(([crop, count]) => ({ crop, count }));
+
+  // Per-store outreach progress + broadcast delivery (TEST group). Store names resolved from Store.
+  const storeIds = [...new Set(test.map((m) => m.storeId).filter((x): x is number => x != null))];
+  const storeNames = new Map((await prisma.store.findMany({ where: { id: { in: storeIds } }, select: { id: true, name: true } })).map((s) => [s.id, shortStoreName(s.name)]));
+  const storeAgg = new Map<string, { store: string; reached: number; total: number; broadcast: number }>();
+  const byBroadcastChannel = { SMS: 0, WHATSAPP: 0 };
+  let broadcastDelivered = 0;
+  for (const m of test) {
+    const store = m.storeId != null ? storeNames.get(m.storeId) ?? "—" : "— No store";
+    const a = storeAgg.get(store) ?? { store, reached: 0, total: 0, broadcast: 0 };
+    a.total++;
+    if (m.reached) a.reached++;
+    const bc = m.broadcastMediums ?? [];
+    if (bc.length) { a.broadcast++; broadcastDelivered++; if (bc.includes("SMS")) byBroadcastChannel.SMS++; if (bc.includes("WHATSAPP")) byBroadcastChannel.WHATSAPP++; }
+    storeAgg.set(store, a);
+  }
+  const byStore = [...storeAgg.values()].sort((a, b) => b.total - a.total || a.store.localeCompare(b.store));
 
   // Matched spend per farmer for ALL members (uplift needs the control baseline); total spend for reached test (context).
   const allIds = [...new Set(members.map((m) => m.farmerId))];
@@ -950,7 +970,7 @@ export async function getCampaignTracker(campaignId: number): Promise<CampaignTr
     : [pf.crops.length ? `Crop: ${pf.crops.map(cropLabel).join(", ")}` : "", pf.categories.length ? `Category: ${pf.categories.join(", ")}` : ""].filter(Boolean).join(" · ");
 
   return {
-    reach: { testTotal: test.length, reached: reachedMembers.length, byApproach, byResponse, otherCrops },
+    reach: { testTotal: test.length, reached: reachedMembers.length, byApproach, byResponse, otherCrops, byStore, broadcastDelivered, byBroadcastChannel },
     attribution: {
       basisLabel, crops: pf.crops, categories: pf.categories, all: pf.all, noCatalogMatch,
       windowStart: iso(start)!, windowEnd: iso(end)!,
