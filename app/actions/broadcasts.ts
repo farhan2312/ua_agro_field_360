@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getScope, canManage, getActor } from "@/lib/scope";
-import { sendSms, zapConfig } from "@/lib/zapsms";
+import { sendSms, zapConfig, getSmsDeliveryReport } from "@/lib/zapsms";
 import { sendWhatsApp, waConfig } from "@/lib/whatsapp";
 import { resolveVars, fillSmsTemplate, fillWaTemplate, positionalParams, type FarmerVarSource } from "@/lib/campaign-vars";
 
@@ -189,28 +189,22 @@ export async function runBroadcastBatch(input: { broadcastId: number; limit?: nu
         messageText = `[template ${tpl?.waTemplateName ?? ""}]`;
         const res = await sendWhatsApp({ mobile: r.mobile, templateName: tpl?.waTemplateName ?? null, languageCode: tpl?.waLanguage ?? null, bodyParams: positionalParams(tpl?.waVariables, vars) });
         ok = res.ok; providerId = res.providerId; error = res.error;
-        await prisma.whatsAppLog.create({ data: { farmerId: r.farmerId, campaignId: bc.campaignId, memberId: r.memberId, mobile: r.mobile, kind: "template", templateName: tpl?.waTemplateName ?? null, message: messageText, ok, providerId: providerId ?? null, status: res.status ?? null, error: error ?? null, sentByName: actor.name, sentByCode: actor.code } });
+        await prisma.whatsAppLog.create({ data: { farmerId: r.farmerId, campaignId: bc.campaignId, memberId: r.memberId, broadcastId: bc.id, mobile: r.mobile, kind: "template", templateName: tpl?.waTemplateName ?? null, message: messageText, ok, providerId: providerId ?? null, status: res.status ?? null, error: error ?? null, sentByName: actor.name, sentByCode: actor.code } });
       } else {
         messageText = fillSmsTemplate({ template: tpl?.template ?? "", smsVariables: tpl?.smsVariables }, vars);
         const res = await sendSms({ mobile: r.mobile, message: messageText, templateId: tpl?.dltTemplateId ?? null });
         ok = res.ok; providerId = res.providerId; error = res.error;
-        await prisma.smsLog.create({ data: { farmerId: r.farmerId, campaignId: bc.campaignId, memberId: r.memberId, mobile: r.mobile, senderId: zap.senderId || null, dltTemplateId: tpl?.dltTemplateId ?? null, message: messageText, ok, providerId: providerId ?? null, status: res.status ? `BROADCAST · ${res.status}` : "BROADCAST", error: error ?? null, sentByName: actor.name, sentByCode: actor.code } });
+        await prisma.smsLog.create({ data: { farmerId: r.farmerId, campaignId: bc.campaignId, memberId: r.memberId, broadcastId: bc.id, mobile: r.mobile, senderId: zap.senderId || null, dltTemplateId: tpl?.dltTemplateId ?? null, message: messageText, ok, providerId: providerId ?? null, status: res.status ? `BROADCAST · ${res.status}` : "BROADCAST", error: error ?? null, sentByName: actor.name, sentByCode: actor.code } });
       }
     } catch (e) {
       ok = false; error = e instanceof Error ? e.message : "Send failed.";
     }
 
     await prisma.broadcastRecipient.update({ where: { id: r.id }, data: { status: ok ? "sent" : "failed", providerId: providerId ?? null, error: error ?? null, sentAt: new Date() } });
-    if (ok) {
-      batchSent++;
-      if (r.memberId != null) {
-        const med = bc.channel; // CALL|WHATSAPP|SMS|IN_PERSON — here SMS or WHATSAPP
-        await prisma.campaignMember.update({
-          where: { id: r.memberId },
-          data: { reached: true, reachedAt: new Date(), reachedBy: actor.name, reachedByCode: actor.code, mediums: { push: med } },
-        }).catch(() => { /* member may have been removed */ });
-      }
-    } else batchFailed++;
+    // NOTE: a mass send does NOT mark the member "reached" — that's for deliberate 1-on-1 contacts only.
+    // The broadcast track (member.broadcastMediums) is set later, when delivery is CONFIRMED (SMS DLR /
+    // WA webhook), via markBroadcastDelivered(). Farmers stay pending for individual outreach.
+    if (ok) batchSent++; else batchFailed++;
   }
 
   const updated = await prisma.broadcast.update({
@@ -221,6 +215,56 @@ export async function runBroadcastBatch(input: { broadcastId: number; limit?: nu
   if (remaining === 0) await prisma.broadcast.update({ where: { id: bc.id }, data: { status: "done" } });
   revalidatePath("/campaigns");
   return { ok: true, done: remaining === 0, batchSent, batchFailed, sent: updated.sent, failed: updated.failed, total: updated.total, remaining };
+}
+
+const ymd = (d: Date) => d.toISOString().slice(0, 10);
+/** Add a delivered broadcast channel to the members' broadcast track (dedup; sets broadcastAt on first). */
+async function markMembersBroadcast(memberIds: (number | null)[], channel: "SMS" | "WHATSAPP"): Promise<number> {
+  const uniq = [...new Set(memberIds.filter((x): x is number => x != null))];
+  if (!uniq.length) return 0;
+  const members = await prisma.campaignMember.findMany({ where: { id: { in: uniq } }, select: { id: true, broadcastMediums: true } });
+  let n = 0;
+  for (const m of members) {
+    if (m.broadcastMediums.includes(channel)) continue;
+    await prisma.campaignMember.update({ where: { id: m.id }, data: { broadcastMediums: { push: channel }, ...(m.broadcastMediums.length ? {} : { broadcastAt: new Date() }) } }).catch(() => { /* member gone */ });
+    n++;
+  }
+  return n;
+}
+
+/**
+ * Pull delivery reports for a broadcast and mark DELIVERED farmers on the broadcast track. SMS uses the
+ * bulk GetSMS report (one paginated call); WhatsApp delivery arrives via the webhook, so here we just
+ * (re)apply member marks from already-delivered WA logs. Admin-only.
+ */
+export async function syncBroadcastDelivery(broadcastId: number): Promise<{ ok: boolean; delivered: number; checked: number; error?: string }> {
+  if (!(await adminOnly())) return { ok: false, delivered: 0, checked: 0, error: "Admins only." };
+  const bc = await prisma.broadcast.findUnique({ where: { id: broadcastId }, select: { id: true, channel: true, createdAt: true } });
+  if (!bc) return { ok: false, delivered: 0, checked: 0, error: "Broadcast not found." };
+  let delivered = 0, checked = 0;
+  if (bc.channel === "SMS") {
+    const logs = await prisma.smsLog.findMany({ where: { broadcastId: bc.id, ok: true, providerId: { not: null } }, select: { id: true, providerId: true, memberId: true, deliveryStatus: true } });
+    if (!logs.length) return { ok: true, delivered: 0, checked: 0 };
+    // Widen the window ±1 day to absorb any gateway timezone skew.
+    const report = await getSmsDeliveryReport(ymd(new Date(bc.createdAt.getTime() - 86400000)), ymd(new Date(Date.now() + 86400000)));
+    const deliveredMembers: number[] = [];
+    for (const l of logs) {
+      const r = l.providerId ? report.get(l.providerId) : undefined;
+      if (!r || r.status === "UNKNOWN") continue;
+      checked++;
+      if (r.status !== l.deliveryStatus) {
+        await prisma.smsLog.update({ where: { id: l.id }, data: { deliveryStatus: r.status, ...(r.status === "DELIVERED" ? { deliveredAt: new Date() } : {}), ...(r.status !== "DELIVERED" ? { error: [r.rawStatus, r.code ? `(code ${r.code})` : null].filter(Boolean).join(" ") || null } : {}) } }).catch(() => {});
+      }
+      if (r.status === "DELIVERED" && l.memberId != null) deliveredMembers.push(l.memberId);
+    }
+    delivered = await markMembersBroadcast(deliveredMembers, "SMS");
+  } else {
+    const logs = await prisma.whatsAppLog.findMany({ where: { broadcastId: bc.id, deliveredAt: { not: null } }, select: { memberId: true } });
+    checked = logs.length;
+    delivered = await markMembersBroadcast(logs.map((l) => l.memberId), "WHATSAPP");
+  }
+  revalidatePath("/campaigns");
+  return { ok: true, delivered, checked };
 }
 
 export interface BroadcastVM {

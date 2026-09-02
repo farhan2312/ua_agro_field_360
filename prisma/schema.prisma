@@ -433,6 +433,11 @@ model CampaignMember {
   mediums       String[]  @default([]) // outcome set: any of CALL|WHATSAPP|SMS|IN_PERSON (multi-select), or the single value UNREACHABLE
   reachedBy     String? // audit: ACTUAL logged-in user's name who recorded the outcome
   reachedByCode String? // audit: their User.employeeCode (e.g. "UA123")
+  // Broadcast (mass send) track — kept SEPARATE from `reached`/`mediums` (which are deliberate 1-on-1
+  // contacts). Set ONLY when a mass-send message is confirmed DELIVERED (SMS DLR / WA webhook), never
+  // on submit. A farmer here still stays "pending" for individual outreach — this is just a marker.
+  broadcastMediums String[]  @default([]) // channels DELIVERED via mass send: SMS | WHATSAPP
+  broadcastAt      DateTime? // first broadcast delivery timestamp
   comment       String? // optional free-text note from the officer/RM about the contact
   response      String? // interest outcome: INTERESTED | NOT_INTERESTED | OTHER_CROP (null = not asked). Any of these ⇒ reached.
   responseCrop  String? // crop key when response = OTHER_CROP (from the global crop list)
@@ -524,6 +529,7 @@ model SmsLog {
   farmerId      Int?
   campaignId    Int?
   memberId      Int?
+  broadcastId   Int? // set when this send came from a mass send (durable marker for the broadcast track)
   mobile        String
   senderId      String?
   dltTemplateId String?
@@ -550,6 +556,7 @@ model WhatsAppLog {
   farmerId     Int?
   campaignId   Int?
   memberId     Int?
+  broadcastId  Int? // set when this send came from a mass send (durable marker for the broadcast track)
   mobile       String
   kind         String   @default("text") // "text" | "template"
   templateName String? // WhatsApp template name, when sent as a template

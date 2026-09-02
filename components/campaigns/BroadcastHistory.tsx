@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { listBroadcasts, type BroadcastVM } from "@/app/actions/broadcasts";
+import { listBroadcasts, syncBroadcastDelivery, type BroadcastVM } from "@/app/actions/broadcasts";
 
 const n = (x: number) => x.toLocaleString("en-IN");
 const fmt = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? "" : d.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true }); };
@@ -19,6 +19,16 @@ export function BroadcastHistory({ campaignId, reloadKey = 0, defaultOpen = fals
 
   const load = () => start(async () => setRows(await listBroadcasts(campaignId)));
   useEffect(() => { if (open) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [open, campaignId, reloadKey]);
+
+  const [syncId, setSyncId] = useState<number | null>(null);
+  const [syncMsg, setSyncMsg] = useState<Record<number, string>>({});
+  const syncOne = (id: number) => {
+    setSyncId(id);
+    syncBroadcastDelivery(id).then((r) => {
+      setSyncMsg((m) => ({ ...m, [id]: r.ok ? `${r.delivered} newly delivered` : (r.error ?? "failed") }));
+      setSyncId(null);
+    });
+  };
 
   return (
     <div className="mb-3 rounded-[12px] border border-[#F0F0F0]">
@@ -41,7 +51,7 @@ export function BroadcastHistory({ campaignId, reloadKey = 0, defaultOpen = fals
             <div className="overflow-x-auto">
               <table className="w-full min-w-[560px] text-left text-[12px]">
                 <thead><tr className="border-b border-[#EEE] text-[10px] font-bold uppercase text-[#9E9E9E]">
-                  <th className="py-1.5">When</th><th>Channel</th><th>Template</th><th className="text-right">Sent</th><th className="text-right">Failed</th><th className="text-right">Left</th><th>Status</th><th>By</th>
+                  <th className="py-1.5">When</th><th>Channel</th><th>Template</th><th className="text-right">Sent</th><th className="text-right">Failed</th><th className="text-right">Left</th><th>Status</th><th>By</th><th>Delivery</th>
                 </tr></thead>
                 <tbody>
                   {rows.map((b) => {
@@ -56,6 +66,12 @@ export function BroadcastHistory({ campaignId, reloadKey = 0, defaultOpen = fals
                         <td className="text-right text-[#9E9E9E]">{n(b.remaining)}</td>
                         <td><span className="rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: st.bg, color: st.c }}>{st.label}</span></td>
                         <td className="text-[#616161]">{b.createdBy || "—"}</td>
+                        <td className="whitespace-nowrap">
+                          <button type="button" onClick={() => syncOne(b.id)} disabled={syncId === b.id}
+                            className="rounded-[8px] border border-[#CE93D8] px-2 py-0.5 text-[11px] font-semibold text-[#6A1B9A] hover:bg-[#F3E5F5] disabled:opacity-50">
+                            {syncId === b.id ? "Syncing…" : "↻ Delivery"}</button>
+                          {syncMsg[b.id] && <span className="ml-1.5 text-[10.5px] text-[#6A1B9A]">{syncMsg[b.id]}</span>}
+                        </td>
                       </tr>
                     );
                   })}

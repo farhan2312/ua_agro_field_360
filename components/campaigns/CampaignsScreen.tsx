@@ -1022,18 +1022,27 @@ export function ResponseBadge({ member }: { member: CampaignMemberVM }) {
   return <span className="rounded-full px-2.5 py-0.5 text-[10px] font-semibold" style={{ background: t.bg, color: t.color }}>{t.label}{suffix}</span>;
 }
 
+/** Separate 📣 broadcast marker — a mass send DELIVERED to this farmer (not the same as being reached). */
+export function BroadcastBadge({ member }: { member: CampaignMemberVM }) {
+  const meds = member.broadcastMediums ?? [];
+  if (meds.length === 0) return null;
+  const label = meds.map((m) => (m === "WHATSAPP" ? "WhatsApp" : m === "SMS" ? "SMS" : m)).join(" · ");
+  return <span title="Delivered via a mass send — not the same as an individual contact" className="rounded-full bg-[#F3E5F5] px-2.5 py-0.5 text-[10px] font-semibold text-[#6A1B9A]">📣 Broadcast · {label}</span>;
+}
+
 /** Reached (green) + unreachable (red) progress bar over the whole list. */
 export function OutreachProgress({ members }: { members: CampaignMemberVM[] }) {
   const total = members.length;
   const reached = members.filter((m) => m.reached).length;
   const unreachable = members.filter((m) => statusOf(m) === "unreachable").length;
   const left = total - reached - unreachable;
+  const broadcast = members.filter((m) => (m.broadcastMediums?.length ?? 0) > 0).length; // delivered via mass send (overlaps reached)
   const pct = (x: number) => (total ? (x / total) * 100 : 0);
   return (
     <div>
       <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2 text-[12.5px]">
         <span className="font-semibold text-[#1A1C1A]">{n(total)} to contact</span>
-        <span className="text-[#616161]"><b className="text-[#2E7D32]">{n(reached)} reached</b>{unreachable ? <> · <b className="text-[#C62828]">{n(unreachable)} unreachable</b></> : null} · {n(left)} left</span>
+        <span className="text-[#616161]"><b className="text-[#2E7D32]">{n(reached)} reached</b>{unreachable ? <> · <b className="text-[#C62828]">{n(unreachable)} unreachable</b></> : null} · {n(left)} left{broadcast ? <> · <b className="text-[#6A1B9A]">📣 {n(broadcast)} broadcast</b></> : null}</span>
       </div>
       <div className="flex h-3 w-full overflow-hidden rounded-full bg-[#EDEDED]">
         <div style={{ width: `${pct(reached)}%`, background: "#2E7D32" }} />
@@ -1199,6 +1208,7 @@ function MemberRow({ member, crops, onChange, commPlans, templates, canSms }: { 
         <span className="text-[16px] font-bold text-[#1A1C1A]">{member.name}</span>
         <span className="rounded-full px-2.5 py-0.5 text-[10px] font-semibold" style={{ background: segMeta(member.segment).bg, color: segMeta(member.segment).color }}>{segMeta(member.segment).label}</span>
         <StatusBadge member={member} />
+        <BroadcastBadge member={member} />
         <ResponseBadge member={member} />
         <span className="text-[12px] text-[#9E9E9E]">{member.village ?? "—"}{member.store ? ` · ${member.store}` : ""}</span>
       </div>
@@ -1275,6 +1285,7 @@ function FocusCard({ member, crops, onChange, onHandled, onSkip, onBack, remaini
         <span className="text-[22px] font-bold text-[#1A1C1A]">{member.name}</span>
         <span className="rounded-full px-2.5 py-0.5 text-[10.5px] font-semibold" style={{ background: segMeta(member.segment).bg, color: segMeta(member.segment).color }}>{segMeta(member.segment).label}</span>
         <StatusBadge member={member} />
+        <BroadcastBadge member={member} />
         <ResponseBadge member={member} />
         <span className="ml-auto rounded-full bg-[#F5F7F5] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#616161]">{remaining} left</span>
       </div>

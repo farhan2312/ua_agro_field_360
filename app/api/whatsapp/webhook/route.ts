@@ -78,6 +78,16 @@ export async function POST(req: NextRequest) {
             where: { waMessageId: wamid },
             data: { status: state, ...(state === "FAILED" ? { errorText: err } : {}) },
           });
+          // A DELIVERED broadcast message → mark that farmer on the campaign broadcast track (not "reached").
+          if (state === "DELIVERED" || state === "READ") {
+            const log = await prisma.whatsAppLog.findFirst({ where: { providerId: wamid, broadcastId: { not: null }, memberId: { not: null } }, select: { memberId: true } });
+            if (log?.memberId != null) {
+              const mem = await prisma.campaignMember.findUnique({ where: { id: log.memberId }, select: { broadcastMediums: true } });
+              if (mem && !mem.broadcastMediums.includes("WHATSAPP")) {
+                await prisma.campaignMember.update({ where: { id: log.memberId }, data: { broadcastMediums: { push: "WHATSAPP" }, ...(mem.broadcastMediums.length ? {} : { broadcastAt: at }) } }).catch(() => {});
+              }
+            }
+          }
         }
         // Map wa_id -> profile name for this batch.
         const nameByWaId = new Map<string, string>();
