@@ -30,6 +30,13 @@ export function OutreachMatrix({ campaign, initial, scripts = [], crops = [] }: 
   const p = Math.min(page, pages - 1);
   const slice = sorted.slice(p * PAGE, p * PAGE + PAGE);
 
+  // Windowed page numbers: always show first & last, current ±1, and collapse the rest to "…".
+  const pageNums: (number | "…")[] = [];
+  for (let i = 0; i < pages; i++) {
+    if (i === 0 || i === pages - 1 || (i >= p - 1 && i <= p + 1)) pageNums.push(i);
+    else if (pageNums[pageNums.length - 1] !== "…") pageNums.push("…");
+  }
+
   return (
     <div className="animate-[fadeUp_0.4s_ease-out]">
       {/* Back + campaign header */}
@@ -73,12 +80,32 @@ export function OutreachMatrix({ campaign, initial, scripts = [], crops = [] }: 
               </div>
             </div>
             {pages > 1 && (
-              <div className="flex items-center justify-center gap-3 border-t border-[#F5F5F5] px-4 py-3">
-                <button type="button" onClick={() => setPage(Math.max(0, p - 1))} disabled={p === 0}
-                  className="rounded-[8px] border border-[#E0E0E0] px-3 py-1.5 text-[12px] font-semibold text-[#616161] disabled:opacity-40">← Prev</button>
-                <span className="text-[12px] text-[#757575]">{p * PAGE + 1}–{Math.min((p + 1) * PAGE, sorted.length)} of {n(sorted.length)}</span>
-                <button type="button" onClick={() => setPage(Math.min(pages - 1, p + 1))} disabled={p >= pages - 1}
-                  className="rounded-[8px] border border-[#E0E0E0] px-3 py-1.5 text-[12px] font-semibold text-[#616161] disabled:opacity-40">Next →</button>
+              <div className="flex flex-col items-center gap-2 border-t border-[#F5F5F5] px-4 py-3">
+                <div className="flex flex-wrap items-center justify-center gap-1.5">
+                  <button type="button" onClick={() => setPage(0)} disabled={p === 0}
+                    className="rounded-[8px] border border-[#E0E0E0] px-2.5 py-1.5 text-[12px] font-semibold text-[#616161] disabled:opacity-40 hover:bg-[#F5F5F5]" aria-label="First page">« First</button>
+                  <button type="button" onClick={() => setPage(Math.max(0, p - 1))} disabled={p === 0}
+                    className="rounded-[8px] border border-[#E0E0E0] px-2.5 py-1.5 text-[12px] font-semibold text-[#616161] disabled:opacity-40 hover:bg-[#F5F5F5]">← Prev</button>
+                  {pageNums.map((it, i) =>
+                    it === "…" ? (
+                      <span key={`e${i}`} className="px-1.5 text-[12px] text-[#BDBDBD]">…</span>
+                    ) : (
+                      <button key={it} type="button" onClick={() => setPage(it)}
+                        aria-current={it === p ? "page" : undefined}
+                        className="min-w-[32px] rounded-[8px] border px-2 py-1.5 text-[12px] font-semibold"
+                        style={it === p
+                          ? { background: "#6A1B9A", borderColor: "#6A1B9A", color: "#fff" }
+                          : { background: "#fff", borderColor: "#E0E0E0", color: "#616161" }}>
+                        {it + 1}
+                      </button>
+                    ),
+                  )}
+                  <button type="button" onClick={() => setPage(Math.min(pages - 1, p + 1))} disabled={p >= pages - 1}
+                    className="rounded-[8px] border border-[#E0E0E0] px-2.5 py-1.5 text-[12px] font-semibold text-[#616161] disabled:opacity-40 hover:bg-[#F5F5F5]">Next →</button>
+                  <button type="button" onClick={() => setPage(pages - 1)} disabled={p >= pages - 1}
+                    className="rounded-[8px] border border-[#E0E0E0] px-2.5 py-1.5 text-[12px] font-semibold text-[#616161] disabled:opacity-40 hover:bg-[#F5F5F5]" aria-label="Last page">Last »</button>
+                </div>
+                <span className="text-[11.5px] text-[#757575]">Page {p + 1} of {n(pages)} · showing {p * PAGE + 1}–{Math.min((p + 1) * PAGE, sorted.length)} of {n(sorted.length)}</span>
               </div>
             )}
           </div>

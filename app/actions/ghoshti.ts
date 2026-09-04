@@ -56,6 +56,7 @@ export interface GhoshtiDetailVM {
   attendees: GhoshtiAttendeeVM[];
   canApprove: boolean;
   canEdit: boolean; // creator (while pending) or admin
+  canRecordAttendance: boolean; // creator/admin AND the Ghoshti is APPROVED (hard gate)
 }
 
 export interface GhoshtiStoreOption {
@@ -155,6 +156,8 @@ export async function addGhoshtiAttendees(input: {
   const scope = await getScope();
   const g = await ghoshtiForWrite(input.ghoshtiId, scope);
   if (!g) return { ok: false, error: "Ghoshti not found or not editable." };
+  // Hard gate (no exceptions): attendance can only be recorded once the Ghoshti is approved.
+  if (g.status !== "APPROVED") return { ok: false, error: "This Ghoshti must be approved before attendance can be recorded." };
 
   // Normalize + dedup within the payload.
   const clean = new Map<string, { mobile: string; name?: string; remarks?: string }>();
@@ -210,6 +213,7 @@ export async function removeGhoshtiAttendee(input: { ghoshtiId: number; attendee
   const scope = await getScope();
   const g = await ghoshtiForWrite(input.ghoshtiId, scope);
   if (!g) return { ok: false, error: "Ghoshti not found or not editable." };
+  if (g.status !== "APPROVED") return { ok: false, error: "This Ghoshti must be approved before attendance can be edited." };
   await prisma.ghoshtiAttendee.deleteMany({ where: { id: input.attendeeId, ghoshtiId: g.id } });
   revalidatePath(`/ghoshti/${g.id}`);
   return { ok: true };
@@ -331,6 +335,7 @@ export async function getGhoshti(id: number): Promise<GhoshtiDetailVM | null> {
     })),
     canApprove: g.status === "PENDING" && canApproveGhoshti(scope, g.createdByRole, g.zone) && !(!canManage(scope.role) && mine),
     canEdit: canManage(scope.role) || (mine && g.status !== "REJECTED"),
+    canRecordAttendance: g.status === "APPROVED" && (canManage(scope.role) || mine),
   };
 }
 

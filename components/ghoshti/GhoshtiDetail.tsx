@@ -110,11 +110,20 @@ export function GhoshtiDetail({ initial, role }: { initial: GhoshtiDetailVM; rol
             <span className="text-[14px] font-bold text-[#1A1C1A]">Attendees</span>
             <span className="ml-2 text-[12px] text-[#9E9E9E]">{g.attendees.length} total · {existingCount} existing farmer(s) · {g.attendees.length - existingCount} new</span>
           </div>
-          {g.canEdit && (
+          {g.canRecordAttendance ? (
             <button type="button" onClick={() => setAdding(true)}
               className="rounded-[10px] bg-[#2E7D32] px-3.5 py-1.5 text-[12px] font-semibold text-white hover:bg-[#1B5E20]">+ Add attendees</button>
-          )}
+          ) : g.status === "PENDING" && g.canEdit ? (
+            <span className="rounded-full bg-[#FFF3E0] px-3 py-1.5 text-[11.5px] font-semibold text-[#E65100]">🔒 Locked until approved</span>
+          ) : null}
         </div>
+
+        {/* Attendance is gated on approval — spell it out for the organiser. */}
+        {g.status === "PENDING" && g.canEdit && (
+          <div className="border-b border-[#F0F0F0] bg-[#FFFBF5] px-5 py-2.5 text-[12px] text-[#8D5A00]">
+            ⏳ Awaiting approval — attendance can be recorded only after this meetup is approved by the RM/BDM or central.
+          </div>
+        )}
 
         {g.attendees.length === 0 ? (
           <div className="px-6 py-12 text-center">
@@ -128,7 +137,7 @@ export function GhoshtiDetail({ initial, role }: { initial: GhoshtiDetailVM; rol
               <thead>
                 <tr className="border-b border-[#EEE] text-left text-[10.5px] font-bold uppercase tracking-[0.4px] text-[#9E9E9E]">
                   <th className="px-5 py-3">Mobile</th><th className="px-4 py-3">Name</th><th className="px-4 py-3">Type</th>
-                  <th className="px-4 py-3">Remarks</th>{g.canEdit && <th className="px-4 py-3 text-right">Action</th>}
+                  <th className="px-4 py-3">Remarks</th>{g.canRecordAttendance && <th className="px-4 py-3 text-right">Action</th>}
                 </tr>
               </thead>
               <tbody>
@@ -146,7 +155,7 @@ export function GhoshtiDetail({ initial, role }: { initial: GhoshtiDetailVM; rol
                         : <span className="rounded-full bg-[#FFF3E0] px-2 py-0.5 text-[10.5px] font-bold text-[#E65100]">New</span>}
                     </td>
                     <td className="px-4 py-3 text-[#9E9E9E]">{a.remarks || "—"}</td>
-                    {g.canEdit && (
+                    {g.canRecordAttendance && (
                       <td className="px-4 py-3 text-right">
                         <button type="button" onClick={() => removeAttendee(a.id, `${a.mobile}${a.name ? ` · ${a.name}` : ""}`)}
                           className="rounded-md bg-[#FDECEA] px-2 py-1 text-[11px] font-semibold text-[#C62828] hover:bg-[#FADBD8]">Remove</button>
