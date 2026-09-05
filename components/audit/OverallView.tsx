@@ -61,16 +61,6 @@ export function OverallView({ data, onTile }: { data: OverallData; onTile?: (k: 
 
   return (
     <div>
-      {/* Coverage — stated before the figures, louder than them */}
-      <div className="rounded-[14px] border border-orange-50 bg-orange-50/60 p-4">
-        <div className="flex items-center gap-2 text-[12px] font-bold uppercase tracking-[0.4px] text-orange">
-          <span>⚠︎ What this page can and cannot measure</span>
-        </div>
-        <ul className="mt-2 grid list-disc gap-1.5 pl-5 text-[11.5px] leading-[1.5] text-ink-700 sm:grid-cols-2">
-          {data.coverage.map((c, i) => <li key={i}>{c}</li>)}
-        </ul>
-      </div>
-
       {/* 1 · Adoption */}
       <Section title="Adoption" caption="Real accounts against activity in the selected window. “Records touched” is counted as write-events (creates + edits) in the audit trail. Every tile opens the list behind it.">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
