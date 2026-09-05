@@ -11,6 +11,7 @@ import {
   hasConditions, type ClusterCriteria,
 } from "@/lib/cluster-rules";
 import { getScope, canManage, getActor, farmerScopeWhere } from "@/lib/scope";
+import { logAudit } from "@/lib/audit";
 import { getSession } from "@/lib/auth";
 import { cropLabel } from "@/lib/crops";
 import { buildWorkbookB64 } from "@/lib/xlsx-export";
@@ -386,6 +387,7 @@ export async function createCampaign(input: CreateCampaignInput): Promise<{ ok: 
       const res = await prisma.campaignMember.createMany({ data: members, skipDuplicates: true });
       total += res.count;
     }
+    await logAudit("Campaign", "CREATE", `Created campaign "${camp.name}" — ${total} farmers enrolled${skipped ? `, ${skipped} skipped` : ""}`);
     revalidatePath("/campaigns");
     return { ok: true, id: camp.id, members: total, skipped };
   } catch (e) {
@@ -396,7 +398,7 @@ export async function createCampaign(input: CreateCampaignInput): Promise<{ ok: 
 /** Extend a campaign's end date (central only). Cannot exceed the project's end — extend the project first. */
 export async function extendCampaign(campaignId: number, newEndDate: string): Promise<{ ok: boolean; error?: string }> {
   const perm = await requireManager(); if (!perm.ok) return perm;
-  const camp = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { endDate: true, projectId: true } });
+  const camp = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { name: true, endDate: true, projectId: true } });
   if (!camp) return { ok: false, error: "Campaign not found." };
   const nd = new Date(newEndDate);
   if (!(nd > camp.endDate)) return { ok: false, error: `New end must be after the current end (${iso(camp.endDate)}).` };
@@ -406,6 +408,7 @@ export async function extendCampaign(campaignId: number, newEndDate: string): Pr
   }
   try {
     await prisma.campaign.update({ where: { id: campaignId }, data: { endDate: nd } });
+    await logAudit("Campaign", "UPDATE", `Extended campaign "${camp.name}" end date → ${iso(nd)}`);
     revalidatePath("/campaigns");
     return { ok: true };
   } catch (e) { return { ok: false, error: e instanceof Error ? e.message : "Extend failed" }; }
@@ -437,12 +440,13 @@ export async function submitCommPlanForApproval(id: number): Promise<{ ok: boole
 /** Add/remove the comm plans a campaign is tagged with (manager-only). Must keep at least one. */
 export async function updateCampaignCommPlans(campaignId: number, commPlans: string[]): Promise<{ ok: boolean; error?: string }> {
   const perm = await requireManager(); if (!perm.ok) return perm;
-  const camp = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { id: true } });
+  const camp = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { name: true } });
   if (!camp) return { ok: false, error: "Campaign not found." };
   const clean = [...new Set((commPlans ?? []).map((s) => s.trim()).filter(Boolean))];
   if (!clean.length) return { ok: false, error: "Tag at least one comm plan." };
   try {
     await prisma.campaign.update({ where: { id: campaignId }, data: { commPlans: clean } });
+    await logAudit("Campaign", "UPDATE", `Updated comm plans for "${camp.name}": ${clean.join(", ")}`);
     revalidatePath("/campaigns");
     return { ok: true };
   } catch (e) { return { ok: false, error: e instanceof Error ? e.message : "Update failed" }; }
@@ -455,12 +459,13 @@ export async function updateCampaignCommPlans(campaignId: number, commPlans: str
  */
 export async function deleteCampaign(campaignId: number): Promise<{ ok: boolean; error?: string }> {
   const perm = await requireManager(); if (!perm.ok) return perm;
-  const camp = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { id: true } });
+  const camp = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { name: true } });
   if (!camp) return { ok: false, error: "Campaign not found." };
   try {
     await prisma.broadcastRecipient.deleteMany({ where: { broadcast: { campaignId } } });
     await prisma.broadcast.deleteMany({ where: { campaignId } });
     await prisma.campaign.delete({ where: { id: campaignId } }); // cascades members/phases/advances/callers
+    await logAudit("Campaign", "DELETE", `Deleted campaign "${camp.name}"`);
     revalidatePath("/campaigns");
     return { ok: true };
   } catch (e) { return { ok: false, error: e instanceof Error ? e.message : "Delete failed" }; }
@@ -724,6 +729,8 @@ export async function markCampaignMember(
   let effMediums = member.mediums;
   let effResponse: string | null = member.response;
   let outcomeTouched = false;
+  let auditLine: string | null = null;
+  let auditActor: string | undefined;
 
   if (patch.mediums !== undefined) {
     // Normalise to a validated, de-duplicated set — the client may send anything.
@@ -767,10 +774,12 @@ export async function markCampaignMember(
     const actor = await getActor(); // audit: the ACTUAL logged-in user, never the impersonated persona
     data.reachedBy = recorded ? actor.name : null;
     data.reachedByCode = recorded ? actor.code : null;
+    if (recorded) { auditActor = actor.name; auditLine = `Recorded campaign outreach: ${effMediums.join(", ") || "—"}${effResponse ? ` · ${effResponse}` : ""}`; }
   }
   if (patch.comment !== undefined) data.comment = patch.comment?.trim() ? patch.comment.trim().slice(0, 500) : null;
   try {
     await prisma.campaignMember.update({ where: { id: memberId }, data });
+    if (auditLine) await logAudit("Campaign", "UPDATE", auditLine, auditActor);
     revalidatePath("/campaigns");
     return { ok: true };
   } catch (e) {
@@ -1104,6 +1113,7 @@ export async function sendCampaignSms(input: { memberId: number; commTemplateId?
         where: { id: member.id },
         data: { reached: true, reachedAt: new Date(), mediums, reachedBy: actor.name, reachedByCode: actor.code },
       });
+      await logAudit("SMS", "SEND", `Sent campaign SMS to ${mobile}`, actor.name);
       revalidatePath("/campaigns");
     }
     return { ok: res.ok, error: res.error, providerId: res.providerId };
@@ -1202,6 +1212,7 @@ export async function sendCampaignWhatsApp(input: { memberId: number; commTempla
         where: { id: member.id },
         data: { reached: true, reachedAt: new Date(), mediums, reachedBy: actor.name, reachedByCode: actor.code },
       });
+      await logAudit("WhatsApp", "SEND", `Sent campaign WhatsApp ${useTemplate ? "template" : "message"} to ${mobile}`, actor.name);
       revalidatePath("/campaigns");
     }
     return { ok: res.ok, error: res.error, providerId: res.providerId };

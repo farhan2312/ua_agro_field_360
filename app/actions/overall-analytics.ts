@@ -185,7 +185,7 @@ export async function getOverallAnalytics(f: OverallFilters): Promise<OverallDat
   const dayMap = new Map<string, { c: number; u: number }>();
   const heat: number[][] = Array.from({ length: 7 }, () => new Array(24).fill(0));
   const shapeMap = new Map<string, number>();
-  let auditVisitEvents = 0;
+  const entityMap = new Map<string, number>();
   let minMs = since ? since.getTime() : Infinity;
   for (const a of audit) {
     const ist = new Date(a.createdAt.getTime() + IST);
@@ -195,7 +195,7 @@ export async function getOverallAnalytics(f: OverallFilters): Promise<OverallDat
     dayMap.set(dk, d);
     heat[ist.getUTCDay()][ist.getUTCHours()]++;
     shapeMap.set(a.action, (shapeMap.get(a.action) ?? 0) + 1);
-    if (a.entity === "Visit") auditVisitEvents++;
+    entityMap.set(a.entity ?? "Other", (entityMap.get(a.entity ?? "Other") ?? 0) + 1);
     writesByName.set(key(a.actor), (writesByName.get(key(a.actor)) ?? 0) + 1);
     if (a.createdAt.getTime() < minMs) minMs = a.createdAt.getTime();
   }
@@ -214,16 +214,13 @@ export async function getOverallAnalytics(f: OverallFilters): Promise<OverallDat
   }
   const heatmapMax = Math.max(1, ...heat.flat());
 
-  // shape of writing (create/update present; delete/export never instrumented → show as N/A)
-  const SHAPE_DEFS: [string, string][] = [["CREATE", "Create"], ["UPDATE", "Update"], ["IMPORT", "Import"], ["DELETE", "Delete"], ["EXPORT", "Export"]];
-  const shape = SHAPE_DEFS.map(([k, label]) => ({ key: k, label, value: shapeMap.get(k) ?? 0, instrumented: k === "CREATE" || k === "UPDATE" || k === "IMPORT" }));
+  // shape of writing — every action verb present in the trail (sums to the write-event total).
+  const SHAPE_LABEL: Record<string, string> = { CREATE: "Create", UPDATE: "Update", DELETE: "Delete", SEND: "Send", IMPORT: "Import", CONFIG: "Config", EXPORT: "Export" };
+  const shape = [...shapeMap.entries()].map(([k, v]) => ({ key: k, label: SHAPE_LABEL[k] ?? k, value: v, instrumented: true })).sort((a, b) => b.value - a.value);
 
-  // areas of work (mixed sources — labelled; does NOT sum to the audit total)
-  const areas = [
-    { area: "Field visits", events: auditVisitEvents, source: "audit trail" },
-    { area: "Ghoshti meetups", events: ghoshtiCount + attNew + attExisting, source: "domain tables" },
-    { area: "Follow-up actions", events: actCreated + actDoneCount, source: "domain tables" },
-  ];
+  // areas of work — audit entity breakdown (sums to the write-event total).
+  const AREA_LABEL: Record<string, string> = { Visit: "Field visits", Farmer: "Farmer records", Campaign: "Campaigns", SMS: "SMS sends", WhatsApp: "WhatsApp sends", Broadcast: "Mass sends", Sale: "Sales imports", Setting: "Settings", Other: "Other" };
+  const areas = [...entityMap.entries()].map(([k, v]) => ({ area: AREA_LABEL[k] ?? k, events: v, source: "audit trail" })).sort((a, b) => b.events - a.events);
 
   // ── per-person rows ──
   const now = Date.now();

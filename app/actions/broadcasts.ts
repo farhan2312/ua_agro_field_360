@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getScope, canManage, getActor } from "@/lib/scope";
+import { logAudit } from "@/lib/audit";
 import { sendSms, zapConfig, getSmsDeliveryReport } from "@/lib/zapsms";
 import { sendWhatsApp, waConfig } from "@/lib/whatsapp";
 import { resolveVars, fillSmsTemplate, fillWaTemplate, positionalParams, type FarmerVarSource } from "@/lib/campaign-vars";
@@ -134,6 +135,7 @@ export async function createBroadcast(input: {
       })),
     });
   }
+  await logAudit("Broadcast", "SEND", `Mass ${channel === "WHATSAPP" ? "WhatsApp" : "SMS"} to ${eligible.length} farmers via ${label}`, actor.name);
   return { ok: true, broadcastId: bc.id, total: eligible.length };
 }
 

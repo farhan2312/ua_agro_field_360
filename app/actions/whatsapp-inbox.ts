@@ -5,6 +5,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getRole } from "@/lib/session";
 import { getActor } from "@/lib/scope";
+import { logAudit } from "@/lib/audit";
 import { sendWhatsApp, waListTemplates } from "@/lib/whatsapp";
 import { countVars } from "@/lib/wa-template-presets";
 import { resolveVarLabels } from "@/lib/wa-template-vars";
@@ -126,6 +127,7 @@ async function logOutbound(mobile: string, type: string, text: string, farmerId:
     },
   });
   await prisma.whatsAppOptIn.update({ where: { mobile }, data: { lastMessage: text, lastMessageAt: now, lastDirection: "OUT" } }).catch(() => null);
+  if (res.ok) await logAudit("WhatsApp", "SEND", `Inbox ${type} reply to ${mobile}`, actor.name);
   revalidatePath("/whatsapp");
 }
 

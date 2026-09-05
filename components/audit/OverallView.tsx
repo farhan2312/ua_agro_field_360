@@ -137,37 +137,39 @@ export function OverallView({ data, onTile }: { data: OverallData; onTile?: (k: 
 
       {/* 4 · What the time goes on */}
       <Section title="What the work goes on"
-        caption="Areas of work by write-events. The audit trail instruments field visits; ghoshti and follow-ups are counted from their own tables (labelled), so areas do not sum to the write-event total. Beside it: the shape of writing.">
+        caption="Areas of work by audit entity (visits, farmer records, campaigns, SMS/WhatsApp sends, mass sends…) and the shape of writing (create / update / delete / send). Both break down the same write-events and each sums to the total.">
         <div className="grid gap-3 lg:grid-cols-2">
           <div className="rounded-[14px] border border-line bg-white p-4 shadow-card">
             <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.4px] text-ink-muted">Areas of work</div>
-            <div className="flex flex-col gap-3">
-              {data.areas.map((a, i) => (
-                <div key={a.area}>
-                  <div className="mb-1 flex items-baseline justify-between text-[12px]">
-                    <span className="font-semibold text-ink">{a.area} <span className="ml-1 rounded-full bg-surface-150 px-1.5 py-px text-[9.5px] font-medium text-ink-muted">{a.source}</span></span>
-                    <span className="tabular-nums font-bold text-ink">{n(a.events)}</span>
+            {data.areas.length === 0 ? <div className="py-6 text-center text-[12px] text-ink-muted">No write-events in this window.</div> : (
+              <div className="flex flex-col gap-3">
+                {data.areas.map((a, i) => (
+                  <div key={a.area}>
+                    <div className="mb-1 flex items-baseline justify-between text-[12px]">
+                      <span className="font-semibold text-ink">{a.area}</span>
+                      <span className="tabular-nums font-bold text-ink">{n(a.events)}</span>
+                    </div>
+                    <div className="h-2.5 w-full overflow-hidden rounded-full bg-surface-200">
+                      <div className={`h-full rounded-full ${AREA_FILL[i % AREA_FILL.length].replace("fill-", "bg-")}`} style={{ width: `${Math.max(2, (a.events / areaMax) * 100)}%` }} />
+                    </div>
                   </div>
-                  <div className="h-2.5 w-full overflow-hidden rounded-full bg-surface-200">
-                    <div className={`h-full rounded-full ${AREA_FILL[i % AREA_FILL.length].replace("fill-", "bg-")}`} style={{ width: `${Math.max(2, (a.events / areaMax) * 100)}%` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
           <div className="rounded-[14px] border border-line bg-white p-4 shadow-card">
             <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.4px] text-ink-muted">Shape of writing</div>
-            <div className="flex flex-col gap-2">
-              {data.shape.map((s) => (
-                <div key={s.key} className="flex items-center justify-between rounded-[8px] px-2.5 py-1.5" style={{}}>
-                  <span className={`text-[12px] font-semibold ${s.instrumented ? "text-ink" : "text-ink-400"}`}>{s.label}</span>
-                  {s.instrumented
-                    ? <span className="tabular-nums text-[13px] font-bold text-ink">{n(s.value)}</span>
-                    : <span className="text-[10.5px] font-medium text-ink-400">n/a — not instrumented</span>}
-                </div>
-              ))}
-              <p className="mt-1 text-[10.5px] leading-[1.4] text-ink-muted">Delete / export are distinct from “zero” — the app does not record them in the audit trail at all.</p>
-            </div>
+            {data.shape.length === 0 ? <div className="py-6 text-center text-[12px] text-ink-muted">No write-events in this window.</div> : (
+              <div className="flex flex-col gap-1.5">
+                {data.shape.map((s) => (
+                  <div key={s.key} className="flex items-center justify-between rounded-[8px] px-2.5 py-1.5 odd:bg-surface-50">
+                    <span className="text-[12px] font-semibold text-ink">{s.label}</span>
+                    <span className="tabular-nums text-[13px] font-bold text-ink">{n(s.value)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="mt-2 text-[10.5px] leading-[1.4] text-ink-muted">Only verbs the app records appear here. An absent verb (e.g. export) is not instrumented — a different finding from a count of zero.</p>
           </div>
         </div>
       </Section>

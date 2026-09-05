@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { cleanCrop, cleanPest } from "@/lib/crop-clean";
 import { getPersona } from "@/lib/session";
 import { getActor, getScope } from "@/lib/scope";
+import { logAudit } from "@/lib/audit";
 import { STATS_TAG } from "@/lib/stats";
 import {
   LEAD_LABEL_TO_ENUM,
@@ -177,6 +178,7 @@ export async function submitVisitAction(
       });
       farmerId = updated.id;
       if (officerStore == null) visitStoreId = updated.storeId; // old client sent no store → fall back
+      await logAudit("Farmer", "UPDATE", `Edited farmer profile: ${updated.name}`, actor.name);
     } else if (mobile.length > 0) {
       const existing = await prisma.farmer.findFirst({ where: { mobile } });
       if (existing) {
@@ -208,6 +210,7 @@ export async function submitVisitAction(
         });
         farmerId = created.id;
         visitStoreId = officerStore?.id ?? null;
+        await logAudit("Farmer", "CREATE", `New farmer captured: ${created.name}`, actor.name);
       }
     }
 

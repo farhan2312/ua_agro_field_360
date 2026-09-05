@@ -2,6 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { getScope, canManage, getActor } from "@/lib/scope";
+import { logAudit } from "@/lib/audit";
 import { zapConfig, sendSms, getSmsStatus, getSmsBalance, smsRequestPreview, type SmsBalance } from "@/lib/zapsms";
 import { waConfig, sendWhatsApp } from "@/lib/whatsapp";
 
@@ -143,6 +144,7 @@ export async function sendTestSms(input: {
         sentByName: actor.name, sentByCode: actor.code,
       },
     });
+    if (res.ok) await logAudit("SMS", "SEND", `Test SMS to ${mobile}`, actor.name);
     return { ok: res.ok, error: res.error, providerId: res.providerId, status: res.status };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Send failed." };
@@ -196,6 +198,7 @@ export async function sendTestWhatsApp(input: {
         sentByName: actor.name, sentByCode: actor.code,
       },
     });
+    if (res.ok) await logAudit("WhatsApp", "SEND", `Test WhatsApp ${isTemplate ? "template" : "message"} to ${mobile}`, actor.name);
     return { ok: res.ok, error: res.error, providerId: res.providerId, status: res.status };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Send failed." };
