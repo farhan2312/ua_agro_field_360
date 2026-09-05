@@ -93,8 +93,10 @@ async function chunk<T>(items: T[], size: number, fn: (slice: T[]) => Promise<nu
   return n;
 }
 
-/** Import a parsed sales matrix (header row + line-items). Throws on a bad file shape. */
-export async function importSalesMatrix(rows: string[][], _uploadedBy: string): Promise<ImportSummary> {
+/** Import a parsed sales matrix (header row + line-items). Throws on a bad file shape.
+ *  `importId` (the SalesImport batch id) is stamped on every Sale + new Farmer so the import can be
+ *  cleanly deleted later. */
+export async function importSalesMatrix(rows: string[][], _uploadedBy: string, importId?: number): Promise<ImportSummary> {
   if (!rows.length) throw new Error("The file is empty.");
   const header = rows[0].map((h) => String(h ?? "").trim().replace(/^﻿/, ""));
   const col = (name: string) => header.findIndex((h) => h.toLowerCase() === name.toLowerCase());
@@ -170,6 +172,7 @@ export async function importSalesMatrix(rows: string[][], _uploadedBy: string): 
       zone: st?.zone || null,
       storeId: st?.id ?? null,
       storeCode: st?.code ?? null,
+      importId: importId ?? null,
       source: "REAL" as const,
     };
   });
@@ -224,6 +227,7 @@ export async function importSalesMatrix(rows: string[][], _uploadedBy: string): 
       amountNum: Math.round(b.total),
       store: b.store || null,
       financialYear: fyLabel(b.fy),
+      importId: importId ?? null,
       source: "REAL" as const,
     });
   }

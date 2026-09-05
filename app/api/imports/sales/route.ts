@@ -18,6 +18,7 @@ export async function POST(req: Request) {
   let filename = "upload";
   let fileType: "csv" | "xlsx" = "csv";
   let fileSizeKb: number | null = null;
+  let importId: number | null = null;
   try {
     const form = await req.formData();
     const file = form.get("file");
@@ -44,11 +45,19 @@ export async function POST(req: Request) {
       rows = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, raw: false, defval: "" });
     }
 
-    const summary = await importSalesMatrix(rows, uploadedBy);
+    // Create the import record FIRST so its id can be stamped onto every Sale + new Farmer it creates
+    // (that stamp is what lets the row's "Delete" button remove exactly this batch later).
+    const imp = await prisma.salesImport.create({
+      data: { filename, fileType, fileSizeKb, uploadedBy, status: "RUNNING" },
+    });
+    importId = imp.id;
 
-    await prisma.salesImport.create({
+    const summary = await importSalesMatrix(rows, uploadedBy, imp.id);
+
+    await prisma.salesImport.update({
+      where: { id: imp.id },
       data: {
-        filename, fileType, fileSizeKb, uploadedBy, status: "SUCCESS",
+        status: "SUCCESS",
         lineItems: summary.lineItems, bills: summary.bills,
         newCustomers: summary.newCustomers, salesInserted: summary.salesInserted,
         skipped: summary.skipped, rangeStart: summary.rangeStart, rangeEnd: summary.rangeEnd,
@@ -64,9 +73,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, summary });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Import failed.";
-    await prisma.salesImport.create({
-      data: { filename, fileType, fileSizeKb, uploadedBy, status: "FAILED", error: message.slice(0, 500) },
-    }).catch(() => {});
+    if (importId != null) {
+      await prisma.salesImport.update({ where: { id: importId }, data: { status: "FAILED", error: message.slice(0, 500) } }).catch(() => {});
+    } else {
+      await prisma.salesImport.create({
+        data: { filename, fileType, fileSizeKb, uploadedBy, status: "FAILED", error: message.slice(0, 500) },
+      }).catch(() => {});
+    }
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

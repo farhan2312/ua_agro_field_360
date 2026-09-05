@@ -1,8 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { ImportSummary } from "@/lib/sales-import";
+import { useConfirm } from "@/components/ConfirmDialog";
+import { deleteSalesImport, previewSalesImportDeletion } from "@/app/actions/imports";
 
 export interface ImportRow {
   id: number;
@@ -69,8 +71,43 @@ export function SalesImportScreen({ history }: { history: ImportRow[] }) {
     if (f) void upload(f);
   }
 
+  const { confirm, dialog } = useConfirm();
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [, startDel] = useTransition();
+
+  async function onDelete(h: ImportRow) {
+    setDeletingId(h.id);
+    try {
+      const preview = await previewSalesImportDeletion(h.id);
+      const counts = preview.ok
+        ? `${(preview.sales ?? 0).toLocaleString("en-IN")} sales record(s)${preview.farmers ? ` and ${(preview.farmers).toLocaleString("en-IN")} new-customer farmer(s)` : ""}`
+        : "its sales records";
+      const ok = await confirm({
+        title: "Delete this import?",
+        message: (
+          <span>
+            Permanently delete <b>{h.filename}</b> and <b>{counts}</b> it added.
+            <br />This cannot be undone.
+          </span>
+        ),
+        confirmLabel: "Delete import",
+      });
+      if (!ok) { setDeletingId(null); return; }
+      startDel(async () => {
+        const res = await deleteSalesImport(h.id);
+        setDeletingId(null);
+        if (!res.ok) { setError(res.error ?? "Delete failed."); return; }
+        router.refresh();
+      });
+    } catch {
+      setDeletingId(null);
+      setError("Delete failed.");
+    }
+  }
+
   return (
     <div className="animate-[fadeUp_0.4s_ease-out]">
+      {dialog}
       <div className="grid grid-cols-1 gap-[18px] lg:grid-cols-[1.4fr_1fr]">
         {/* ── Dropzone ── */}
         <div className={`${CARD} p-[22px]`}>
@@ -178,13 +215,13 @@ export function SalesImportScreen({ history }: { history: ImportRow[] }) {
         ) : (
           <div className="overflow-x-auto">
             <div className="min-w-[820px] lg:min-w-0">
-              <div className="grid grid-cols-[1.6fr_1fr_0.9fr_1.1fr_0.7fr_0.8fr_0.8fr_0.7fr] border-b border-[#F0F0F0] bg-[#FAFAFA] px-[22px] py-2.5 text-[10.5px] font-semibold uppercase tracking-[0.5px] text-[#9E9E9E]">
+              <div className="grid grid-cols-[1.6fr_1fr_0.9fr_1.1fr_0.7fr_0.8fr_0.8fr_0.7fr_auto] border-b border-[#F0F0F0] bg-[#FAFAFA] px-[22px] py-2.5 text-[10.5px] font-semibold uppercase tracking-[0.5px] text-[#9E9E9E]">
                 <div>File</div><div>When</div><div>By</div><div>Range</div>
                 <div className="text-right">Bills</div><div className="text-right">New cust.</div>
-                <div className="text-right">Sales added</div><div>Status</div>
+                <div className="text-right">Sales added</div><div>Status</div><div />
               </div>
               {history.map((h) => (
-                <div key={h.id} className="grid grid-cols-[1.6fr_1fr_0.9fr_1.1fr_0.7fr_0.8fr_0.8fr_0.7fr] items-center border-b border-[#F8F8F8] px-[22px] py-3 text-[12px]">
+                <div key={h.id} className="grid grid-cols-[1.6fr_1fr_0.9fr_1.1fr_0.7fr_0.8fr_0.8fr_0.7fr_auto] items-center border-b border-[#F8F8F8] px-[22px] py-3 text-[12px]">
                   <div className="min-w-0">
                     <div className="truncate font-semibold text-[#1A1C1A]" title={h.filename}>{h.filename}</div>
                     {h.error && <div className="truncate text-[10.5px] text-[#C62828]" title={h.error}>{h.error}</div>}
@@ -207,6 +244,22 @@ export function SalesImportScreen({ history }: { history: ImportRow[] }) {
                     >
                       {h.status === "SUCCESS" ? "Success" : "Failed"}
                     </span>
+                  </div>
+                  <div className="pl-3 text-right">
+                    <button
+                      type="button"
+                      onClick={() => onDelete(h)}
+                      disabled={deletingId === h.id}
+                      title="Delete this import and the sales it added"
+                      className="inline-flex items-center gap-1 rounded-[8px] border border-[#F5C6C6] px-2.5 py-1 text-[11px] font-semibold text-[#C62828] hover:bg-[#FDECEA] disabled:opacity-50"
+                    >
+                      {deletingId === h.id ? "Deleting…" : (
+                        <>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m2 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6" /></svg>
+                          Delete
+                        </>
+                      )}
+                    </button>
                   </div>
                 </div>
               ))}

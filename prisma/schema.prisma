@@ -198,6 +198,7 @@ model Farmer {
   // records a purchase. Powers the "leads converted" analytics stat. Once true, never unset.
   wasLead           Boolean   @default(false)
   leadConvertedAt   DateTime? // when they first crossed from lead → customer (their first purchase date)
+  importId          Int? // set when this farmer was created as a new customer by a SalesImport (enables clean rollback)
 
   sales     Sale[]
   saleLines SaleLine[]
@@ -239,6 +240,7 @@ model Sale {
   amountNum     Int? // numeric total (rupees) for analytics/LTV
   store         String? // retailer / store name
   financialYear String? // e.g. "FY 24-25"
+  importId      Int? // the SalesImport batch that created this row — enables exact per-import deletion
   source        DataSource @default(REAL)
   createdAt     DateTime   @default(now())
 
@@ -248,6 +250,7 @@ model Sale {
   @@index([source])
   @@index([soldAt]) // date-sorted analytics/history
   @@index([invoice]) // Order No lookup during master backfill / line linking
+  @@index([importId]) // delete-an-import
 }
 
 // ─────────────────────────── Product catalog + line-item transactions ───────────────────────────
@@ -349,6 +352,7 @@ model SaleLine {
   @@index([productId, soldAt])
   @@index([cropTag])
   @@index([source])
+  @@index([saleId]) // FK lookup — needed so deleting a Sale (onDelete: SetNull) doesn't seq-scan
 }
 
 /// Log of monthly sales-invoice uploads (admin Sales Import page).
