@@ -37,7 +37,7 @@ function parseSegList(raw: string | undefined, allowed: readonly string[]): stri
 
 /** Short month-day label from a Date, e.g. "Jun 18". */
 function shortDate(d: Date): string {
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "Asia/Kolkata" });
 }
 
 export default async function FarmersPage({

@@ -14,6 +14,7 @@ export async function addProjectUpdate(projectId: number, text: string) {
   const date = new Date().toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
+    timeZone: "Asia/Kolkata",
   });
 
   try {

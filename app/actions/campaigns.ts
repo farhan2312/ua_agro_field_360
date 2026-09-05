@@ -1050,7 +1050,7 @@ export async function prepareCampaignSms(input: { memberId: number; commTemplate
       (async () => { const s = await getSession(); return s ? prisma.user.findUnique({ where: { id: s.userId }, select: { mobile: true } }) : null; })(),
     ]);
     const store = farmer?.store?.name ? shortStoreName(farmer.store.name) : "";
-    const dateStr = member.campaign?.endDate ? new Date(member.campaign.endDate).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "";
+    const dateStr = member.campaign?.endDate ? new Date(member.campaign.endDate).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" }) : "";
 
     // DLT model: locked template with {#var#} positions mapped in smsVariables. Legacy plans: named [slots].
     const isDlt = (tpl.smsVariables?.length ?? 0) > 0 || /\{#var#\}/i.test(tpl.template);

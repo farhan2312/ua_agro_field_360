@@ -101,6 +101,7 @@ function displayDate(dateStr: string | null, visitedAt: Date | null): string {
       day: "numeric",
       month: "short",
       year: "numeric",
+      timeZone: "Asia/Kolkata",
     });
   return "";
 }
@@ -284,7 +285,7 @@ export default async function VisitDetailPage({
   const actor = await getActor();
   const canReview = canReviewVisit(scope, actor.code, { storeId: visit.storeId ?? visit.store?.id ?? null, byCode: visit.recordedByCode });
   const reviewedBy = visit.reviewedByName
-    ? `${visit.reviewedByName}${visit.reviewedByCode ? ` (${visit.reviewedByCode})` : ""}${visit.reviewedByRole ? ` · ${roleLabel(visit.reviewedByRole as never)}` : ""}${visit.reviewedAt ? ` · ${visit.reviewedAt.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}` : ""}`
+    ? `${visit.reviewedByName}${visit.reviewedByCode ? ` (${visit.reviewedByCode})` : ""}${visit.reviewedByRole ? ` · ${roleLabel(visit.reviewedByRole as never)}` : ""}${visit.reviewedAt ? ` · ${visit.reviewedAt.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" })}` : ""}`
     : "";
 
   const data: VisitDetailData = {
@@ -296,14 +297,14 @@ export default async function VisitDetailPage({
     canReview,
     date: displayDate(visit.date, visit.visitedAt),
     followUpDate: visit.followUpDate
-      ? (() => { const d = new Date(`${visit.followUpDate}T00:00:00`); return Number.isNaN(d.getTime()) ? visit.followUpDate! : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); })()
+      ? (() => { const d = new Date(`${visit.followUpDate}T00:00:00`); return Number.isNaN(d.getTime()) ? visit.followUpDate! : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }); })()
       : "",
     purpose: visit.purpose ?? "",
     notes: visit.notes ?? "",
     officer: visit.officerName ?? "",
     // Audit: the actual logged-in user who filled the form + the fill timestamp.
     recordedBy: visit.recordedBy
-      ? `${visit.recordedBy}${visit.recordedByCode ? ` (${visit.recordedByCode})` : ""} · ${visit.createdAt.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true })}`
+      ? `${visit.recordedBy}${visit.recordedByCode ? ` (${visit.recordedByCode})` : ""} · ${visit.createdAt.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" })}`
       : "",
     village: visit.farmer?.village ?? "",
     district: visit.farmer?.district ?? "",
@@ -314,7 +315,7 @@ export default async function VisitDetailPage({
     typeColor: visitTypeColor(visit.purpose),
     storeColor: visit.store ? storeColor(visit.store.id) : "#9E9E9E",
     followup: visit.followUpDate
-      ? (() => { const d = new Date(`${visit.followUpDate}T00:00:00`); return Number.isNaN(d.getTime()) ? visit.followUpDate! : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); })()
+      ? (() => { const d = new Date(`${visit.followUpDate}T00:00:00`); return Number.isNaN(d.getTime()) ? visit.followUpDate! : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }); })()
       : needsFollowup ? "Needed" : "None",
     followupBg: needsFollowup ? "#FFF3E0" : "#E8F5E9",
     followupColor: needsFollowup ? "#E65100" : "#2E7D32",

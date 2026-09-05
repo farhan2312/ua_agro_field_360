@@ -26,8 +26,10 @@ export default async function SalesImportPage() {
       rangeStart: r.rangeStart,
       rangeEnd: r.rangeEnd,
       error: r.error,
+      // Force IST (server runs in UTC), so the shown time matches when the admin actually uploaded.
       when: r.createdAt.toLocaleString("en-GB", {
         day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+        timeZone: "Asia/Kolkata",
       }),
     }));
   } catch {

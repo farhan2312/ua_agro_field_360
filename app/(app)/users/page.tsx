@@ -54,7 +54,7 @@ function relTime(d: Date | null | undefined): string {
   const days = Math.floor(h / 24);
   if (days < 7) return `${days} day${days > 1 ? "s" : ""} ago`;
   return d.toLocaleDateString("en-GB", {
-    day: "numeric", month: "short",
+    day: "numeric", month: "short", timeZone: "Asia/Kolkata",
     ...(d.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}),
   });
 }

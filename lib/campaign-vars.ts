@@ -50,7 +50,7 @@ export function resolveVars(f: FarmerVarSource, endDate?: Date | null, extra?: {
     village: (f.village ?? "").trim(),
     gap: f.hniGap != null && f.hniGap > 0 ? Math.round(f.hniGap).toLocaleString("en-IN") : "",
     mobile: (f.mobile ?? "").trim(),
-    date: endDate ? new Date(endDate).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "",
+    date: endDate ? new Date(endDate).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" }) : "",
     coupon: (extra?.coupon ?? "").trim(),
   };
 }

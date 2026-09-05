@@ -225,6 +225,7 @@ export async function submitVisitAction(
           day: "numeric",
           month: "short",
           year: "numeric",
+          timeZone: "Asia/Kolkata",
         }),
         followUpDate: form.followUpDate || null, // next-visit date the officer set on Review & Submit
         followUpReason: form.followUpReason || null,

@@ -329,7 +329,7 @@ const relDay = (d: Date | null) => {
   const days = Math.floor((Date.now() - d.getTime()) / DAY);
   return days <= 0 ? "today" : days === 1 ? "yesterday" : days < 30 ? `${days}d ago` : days < 365 ? `${Math.floor(days / 30)}mo ago` : `${Math.floor(days / 365)}y ago`;
 };
-const fmtDate = (d: Date | null) => (d ? d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—");
+const fmtDate = (d: Date | null) => (d ? d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }) : "—");
 const fmtDt = (d: Date | null) => (d ? new Date(d.getTime() + IST).toISOString().slice(0, 16).replace("T", " ") + " IST" : "—");
 
 /** Rows behind a tile — built from the SAME clauses the tile used, so the list can never disagree. */

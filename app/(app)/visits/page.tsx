@@ -193,7 +193,7 @@ export default async function VisitRepoPage({
           reviewed: v.reviewedAt != null,
           needsFollowup: !!v.followUpDate,
           followUp: v.followUpDate
-            ? (() => { const d = new Date(`${v.followUpDate}T00:00:00`); return Number.isNaN(d.getTime()) ? v.followUpDate! : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); })()
+            ? (() => { const d = new Date(`${v.followUpDate}T00:00:00`); return Number.isNaN(d.getTime()) ? v.followUpDate! : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }); })()
             : "",
         };
       });
