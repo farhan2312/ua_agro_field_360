@@ -14,6 +14,7 @@ export interface ImportSummary {
   bills: number;
   newCustomers: number;
   salesInserted: number;
+  linesInserted: number; // SaleLine rows written (feeds the line-based analytics)
   skipped: number; // bills dropped for missing/invalid mobile
   rangeStart: string | null;
   rangeEnd: string | null;
@@ -80,8 +81,8 @@ interface Bill {
   order: string; total: number; itemNames: string[]; itemCodes: string[]; category: string | null;
   dateIso: string | null; dateStr: string; mobile: string | null;
   store: string; name: string; village: string; fy: string;
-  // Per-line crop context: AE "Crops" cell cleaned (null if blank/0/N/A) + the line's item code.
-  lines: { code: string; crop: string | null }[];
+  // Per-line detail — drives the SaleLine rows so line-based analytics (crop trend) sees this upload.
+  lines: { code: string; item: string; total: number; crop: string | null }[];
 }
 
 const q = (s: string) => `'${String(s).replace(/'/g, "''")}'`;
@@ -131,14 +132,15 @@ export async function importSalesMatrix(rows: string[][], _uploadedBy: string, i
       };
       bills.set(order, b);
     }
-    b.total += parseFloat(String(row[iTotal] ?? "0").replace(/[^0-9.\-]/g, "")) || 0;
+    const lineTotal = parseFloat(String(row[iTotal] ?? "0").replace(/[^0-9.\-]/g, "")) || 0;
+    b.total += lineTotal;
     const item = String(row[iItem] ?? "").trim();
     if (item) b.itemNames.push(item);
     const code = iCode >= 0 ? String(row[iCode] ?? "").trim() : "";
     if (code) b.itemCodes.push(code);
     // Per-line crop: AE "Crops" cell (cleaned to a canonical key, null if blank/0/junk).
     const crop = iCrops >= 0 ? cleanCrop(String(row[iCrops] ?? "")) : null;
-    if (code || crop) b.lines.push({ code, crop });
+    b.lines.push({ code, item, total: lineTotal, crop });
   }
   const billArr = [...bills.values()];
   if (!billArr.length) throw new Error("No invoice rows found (is the 'Order No' column populated?).");
@@ -235,6 +237,57 @@ export async function importSalesMatrix(rows: string[][], _uploadedBy: string, i
     prisma.sale.createMany({ data: s as never, skipDuplicates: true }).then((r) => r.count),
   );
 
+  // ── Sale-line detail — so line-based analytics (crop trend, FY dropdown, product mix) reflect this
+  // upload. Resolve each line to a catalogue Product by Item Code (the master keys on itemCode); create
+  // the few missing. The lean upload has no tax split, so `basic` ≈ the line total (analytics ₹ runs a
+  // touch gross for admin-uploaded months). Idempotent: replace this file's own lines, scoped to the
+  // file's date range so a re-upload can never collaterally delete older lines with a colliding order no.
+  let linesInserted = 0;
+  {
+    const codesForLines = [...new Set(billArr.flatMap((b) => b.lines.map((l) => l.code).filter(Boolean)))];
+    const prodByCode = new Map<string, number>();
+    if (codesForLines.length) {
+      const prods = await prisma.product.findMany({ where: { itemCode: { in: codesForLines } }, select: { id: true, itemCode: true } });
+      for (const p of prods) if (p.itemCode) prodByCode.set(p.itemCode, p.id);
+      const missingCodes = codesForLines.filter((c) => !prodByCode.has(c));
+      if (missingCodes.length) {
+        const nameByCode = new Map<string, string>();
+        for (const b of billArr) for (const l of b.lines) if (l.code && l.item && !nameByCode.has(l.code)) nameByCode.set(l.code, l.item);
+        await chunk(missingCodes, 1000, (s) => prisma.product.createMany({ data: s.map((c) => ({ itemCode: c, rawName: nameByCode.get(c) ?? c, name: nameByCode.get(c) ?? c })) as never, skipDuplicates: true }).then((r) => r.count));
+        const reload = await prisma.product.findMany({ where: { itemCode: { in: missingCodes } }, select: { id: true, itemCode: true } });
+        for (const p of reload) if (p.itemCode) prodByCode.set(p.itemCode, p.id);
+      }
+    }
+    // Replace this file's own lines (idempotent re-upload), scoped to the file's date window.
+    if (minIso && maxIso) {
+      const from = new Date(`${minIso}T00:00:00Z`), to = new Date(`${maxIso}T23:59:59Z`);
+      await chunk(orders, 5000, (s) => prisma.saleLine.deleteMany({ where: { source: "REAL", orderNo: { in: s }, soldAt: { gte: from, lte: to } } }).then((r) => r.count));
+    }
+    const lineData: Record<string, unknown>[] = [];
+    for (const b of billArr) {
+      const farmerId = b.mobile ? mobileToId.get(b.mobile) ?? null : null;
+      const soldAt = b.dateIso ? new Date(`${b.dateIso}T00:00:00Z`) : null;
+      const storeId = storeByName.get(normName(b.store))?.id ?? null;
+      for (const l of b.lines) {
+        const productId = l.code ? prodByCode.get(l.code) : undefined;
+        if (!productId) continue; // uncatalogued line — the bill is still recorded, just no line detail
+        lineData.push({
+          orderNo: b.order, productId, itemRaw: l.item || l.code,
+          store: b.store || null, storeId, farmerId,
+          totalPrice: l.total, basic: l.total,
+          soldAt, financialYear: fyLabel(b.fy),
+          mainCategory: b.category, custName: b.name || null, custPhone: b.mobile,
+          cropTag: l.crop, source: "REAL" as const,
+        });
+      }
+    }
+    linesInserted = await chunk(lineData, 5000, (s) => prisma.saleLine.createMany({ data: s as never }).then((r) => r.count));
+    // Link each new line to its Sale bill (the `saleId IS NULL` guard confines this to the just-inserted lines).
+    if (linesInserted) {
+      await prisma.$executeRaw`UPDATE "SaleLine" sl SET "saleId" = s."id" FROM "Sale" s WHERE s."invoice" = sl."orderNo" AND sl."saleId" IS NULL AND sl."orderNo" = ANY(${orders})`;
+    }
+  }
+
   // ── Enrich each farmer's crop + pest tags from what they bought ──
   // CROPS are AE-first: a sale line's "Crops" cell (col AE) wins; lines without one fall back to the
   // line's Product.targetCrops (inventory-master catalogue). PESTS always come from the catalogue
@@ -282,6 +335,7 @@ export async function importSalesMatrix(rows: string[][], _uploadedBy: string, i
     bills: billArr.length,
     newCustomers: newFarmerData.length,
     salesInserted,
+    linesInserted,
     skipped,
     rangeStart: minIso ? displayDate(minIso) : null,
     rangeEnd: maxIso ? displayDate(maxIso) : null,

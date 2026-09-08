@@ -163,6 +163,7 @@ export function SalesImportScreen({ history }: { history: ImportRow[] }) {
                 <div>Sales added: <b>{num(result.salesInserted)}</b></div>
                 <div>New customers: <b>{num(result.newCustomers)}</b></div>
                 <div>Line-items: <b>{num(result.lineItems)}</b></div>
+                <div>Sale lines: <b>{num(result.linesInserted)}</b></div>
                 <div>Skipped (no mobile): <b>{num(result.skipped)}</b></div>
                 {result.rangeStart && <div>Range: <b>{result.rangeStart} – {result.rangeEnd}</b></div>}
                 {result.itemCodesSeen != null && result.itemCodesSeen > 0 && (
