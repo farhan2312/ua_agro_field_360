@@ -8,6 +8,7 @@
  */
 import { prisma } from "@/lib/prisma";
 import { cleanCrop } from "@/scripts/crop-lib";
+import { recomputeSegments } from "@/lib/segment-engine";
 
 export interface ImportSummary {
   lineItems: number;
@@ -196,12 +197,14 @@ export async function importSalesMatrix(rows: string[][], _uploadedBy: string, i
   const codesByFarmer = new Map<number, Set<string>>();       // farmerId → all item codes purchased (pests + crop fallback)
   const directCropsByFarmer = new Map<number, Set<string>>(); // farmerId → AE crops (a line's Crops cell)
   const fallbackCodesByFarmer = new Map<number, Set<string>>(); // farmerId → codes of lines with no AE crop (catalogue fallback)
+  const affectedFarmerIds = new Set<number>();                // farmers this upload touched → scoped segment recompute
   const addTo = (m: Map<number, Set<string>>, id: number, v: string) => (m.get(id) ?? m.set(id, new Set()).get(id)!).add(v);
   for (const b of billArr) {
     if (!b.mobile) { skipped++; continue; }
     const farmerId = mobileToId.get(b.mobile);
     if (!farmerId) { skipped++; continue; }
     matched++;
+    affectedFarmerIds.add(farmerId);
     if (b.itemCodes.length) {
       const set = codesByFarmer.get(farmerId) ?? codesByFarmer.set(farmerId, new Set()).get(farmerId)!;
       for (const c of b.itemCodes) set.add(c);
@@ -328,6 +331,13 @@ export async function importSalesMatrix(rows: string[][], _uploadedBy: string, i
          "salesCropTags" = ARRAY(SELECT DISTINCT e FROM unnest(f."salesCropTags" || v.crops) e ORDER BY e),
          "pestTags"      = ARRAY(SELECT DISTINCT e FROM unnest(f."pestTags"      || v.pests) e ORDER BY e)
        FROM (VALUES ${slice.join(",")}) AS v(id, crops, pests) WHERE f.id = v.id`);
+  }
+
+  // ── Refresh CRM segments for the farmers this upload touched (value/lifecycle/LTV/spend + lead
+  // conversions), scoped so it stays fast — no full 141k-farmer sweep. Best-effort: a segment failure
+  // must never fail the import (the monthly job reconciles everything).
+  if (affectedFarmerIds.size) {
+    try { await recomputeSegments({ farmerIds: [...affectedFarmerIds] }); } catch { /* ignore — monthly job reconciles */ }
   }
 
   return {
