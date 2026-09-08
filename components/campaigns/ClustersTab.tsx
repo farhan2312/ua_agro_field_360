@@ -292,7 +292,7 @@ function MembersModal({ cluster, onClose }: { cluster: ClusterVM; onClose: () =>
   };
 
   return (
-    <Modal open onClose={onClose} className="max-w-[720px]">
+    <Modal open onClose={onClose} className="max-w-[900px]">
       <ModalHeader eyebrow={cluster.description} eyebrowColor="#2E7D32" title={cluster.name}
         subtitle={`${n(cluster.count)} farmers · live${cluster.createdBy ? ` · created by ${cluster.createdBy}${cluster.createdByCode ? ` (${cluster.createdByCode})` : ""}` : ""}${cluster.createdAt ? ` · ${fmtDate(cluster.createdAt)}` : ""}`}
         onClose={onClose} />
@@ -318,7 +318,16 @@ function MembersModal({ cluster, onClose }: { cluster: ClusterVM; onClose: () =>
                   <td className="py-2 font-semibold text-[#1A1C1A]">{f.name}</td>
                   <td className="text-[#1565C0]">{f.store}</td>
                   <td className="text-[#616161]">{f.village}</td>
-                  <td className="text-[#616161]">{f.crop}</td>
+                  <td className="max-w-[240px] text-[#616161]">
+                    {f.crops.length === 0 ? "—" : (
+                      <span title={f.crops.join(", ")} className="cursor-default">
+                        {f.crops.slice(0, 3).join(", ")}
+                        {f.crops.length > 3 && (
+                          <span className="ml-1 inline-block whitespace-nowrap rounded bg-[#EEF3EE] px-1.5 py-0.5 text-[10.5px] font-semibold text-[#2E7D32]">+{f.crops.length - 3} more</span>
+                        )}
+                      </span>
+                    )}
+                  </td>
                   <td className="text-[#616161]"><InfoTip term={f.segment}>{f.segment}</InfoTip></td>
                   <td className="text-[#616161]"><InfoTip term={f.lifecycle}>{f.lifecycle}</InfoTip></td>
                   <td className="text-right font-semibold text-[#1A1C1A]">{f.ltv}</td>

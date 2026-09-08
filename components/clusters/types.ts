@@ -48,7 +48,8 @@ export interface ClusterMemberRow {
   id: number;
   name: string;
   village: string;
-  crop: string;
+  crop: string; // crops joined (legacy consumers)
+  crops: string[]; // crop labels ordered by the farmer's spend on each (most → least)
   land: number;
   segment: string; // value tier label (HNI/Potential HNI/Regular) or "—"
   lifecycle: string; // lifecycle label (New/At Risk/Lapsed) or "—"

@@ -226,24 +226,53 @@ export async function getClusterFarmers(
     }
     const byId = new Map(farmers.map((f) => [f.id, f]));
 
+    // Per-farmer crop order = the crops they spent most on first (from SaleLine.basic per cropTag).
+    const cropOrder = new Map<number, string[]>();
+    {
+      const grp = await prisma.saleLine.groupBy({
+        by: ["farmerId", "cropTag"],
+        where: { farmerId: { in: pageIds }, source: "REAL", cropTag: { not: null }, ...(selectedCrops.length ? { cropTag: { in: selectedCrops } } : {}) },
+        _sum: { basic: true },
+      });
+      const byFarmer = new Map<number, { crop: string; spend: number }[]>();
+      for (const r of grp) {
+        if (r.farmerId == null || !r.cropTag) continue;
+        (byFarmer.get(r.farmerId) ?? byFarmer.set(r.farmerId, []).get(r.farmerId)!).push({ crop: r.cropTag, spend: r._sum.basic ?? 0 });
+      }
+      for (const [fid, arr] of byFarmer) {
+        arr.sort((a, b) => b.spend - a.spend);
+        cropOrder.set(fid, arr.map((x) => x.crop));
+      }
+    }
+    // Ordered crop keys for a farmer: spend-ranked first, then any remaining sales crops (scope-filtered).
+    const cropsFor = (f: { id: number; salesCropTags: string[] }): string[] => {
+      const ranked = (cropOrder.get(f.id) ?? []);
+      const tags = (f.salesCropTags ?? []).filter((c) => !selectedCrops.length || selectedCrops.includes(c));
+      const keys = [...ranked, ...tags.filter((c) => !ranked.includes(c))];
+      const labels = keys.map(cropLabel);
+      return labels.length ? labels : (selectedCrops.length ? selectedCrops.map(cropLabel) : []);
+    };
+
     // Preserve the stored id order.
     const rows = pageIds
       .map((id) => byId.get(id))
       .filter((f): f is NonNullable<typeof f> => Boolean(f))
-      .map((f) => ({
+      .map((f) => {
+        const crops = cropsFor(f);
+        return {
         id: f.id,
         name: f.name,
         village: f.village ?? "—",
-        crop: selectedCrops.length
-          ? ((f.salesCropTags ?? []).filter((c) => selectedCrops.includes(c)).map(cropLabel).join(", ") || selectedCrops.map(cropLabel).join(", "))
-          : ((f.salesCropTags ?? []).length ? f.salesCropTags.map(cropLabel).join(", ") : "—"),
+        crops,
+        crop: crops.length ? crops.join(", ") : "—",
         land: f.land ?? 0,
         segment: f.valueSegment ? segMeta(f.valueSegment).label : "—",
         lifecycle: f.lifecycleSegment ? segMeta(f.lifecycleSegment).label : "—",
         lastVisit: f.visits[0]?.date ?? "—",
         ltv: ltvById.get(f.id) ? inr(ltvById.get(f.id)!) : "—",
         store: shortStoreName(f.store?.name) || "—",
-      }));
+        };
+      });
 
     // When crop-scoped, the spend column is that crop's spend only (not the farmer's overall LTV),
     // so the header must say so — the value/segment tier is still the farmer's OVERALL tier.
