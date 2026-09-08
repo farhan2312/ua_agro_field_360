@@ -10,6 +10,7 @@ import { cropLabel } from "@/lib/crops";
 import { inr } from "@/lib/format";
 import { shortStoreName } from "@/lib/store-utils";
 import { getScope, farmerScopeWhere, getActor } from "@/lib/scope";
+import { buildWorkbookB64 } from "@/lib/xlsx-export";
 import { CLUSTER_PAGE_SIZE, type ClusterMembersResult } from "@/components/clusters/types";
 import { parseCriteria, scopedCriteriaWhere } from "@/lib/cluster-rules";
 
@@ -180,7 +181,9 @@ export async function getClusterFarmers(
         prisma.farmer.count({ where }),
         prisma.farmer.findMany({
           where,
-          orderBy: { p12mSpend: "desc" },
+          // NULLS LAST — Postgres sorts NULLs first on DESC, which would surface no-spend
+          // registered farmers (blank crop/segment/LTV) at the top. Real buyers should lead.
+          orderBy: { p12mSpend: { sort: "desc", nulls: "last" } },
           skip: (page - 1) * CLUSTER_PAGE_SIZE,
           take: CLUSTER_PAGE_SIZE,
           select: { id: true },
@@ -248,5 +251,59 @@ export async function getClusterFarmers(
     return { rows, total, page, pageSize: CLUSTER_PAGE_SIZE, ltvLabel };
   } catch {
     return { rows: [], total: 0, page, pageSize: CLUSTER_PAGE_SIZE, ltvLabel: "LTV" };
+  }
+}
+
+/** Export ALL of a cluster's members (scope-respecting) to a single-sheet .xlsx — same columns as the modal. */
+export async function exportClusterFarmersXlsx(clusterId: number): Promise<{ ok: boolean; filename?: string; b64?: string; error?: string }> {
+  try {
+    const cluster = await prisma.cluster.findUnique({ where: { id: clusterId }, select: { name: true, farmerIds: true, criteria: true, mode: true } });
+    if (!cluster) return { ok: false, error: "Cluster not found." };
+    const fScope = farmerScopeWhere(await getScope());
+    if (fScope === "none") return { ok: false, error: "This cluster has no members in your scope." };
+
+    const crit = cluster.mode === "dynamic" ? parseCriteria(cluster.criteria) : null;
+    const cCrit = parseCriteria(cluster.criteria);
+    const selectedCrops = [...new Set([...(cCrit?.salesCrops ?? []), ...(cCrit?.cropTags ?? []), ...(cCrit?.visitCrops ?? []), ...(cCrit?.crop ? [cCrit.crop] : [])])];
+    const base: Prisma.FarmerWhereInput = crit ? scopedCriteriaWhere(crit) : { source: "REAL", id: { in: cluster.farmerIds } };
+    const where: Prisma.FarmerWhereInput = fScope ? { AND: [base, fScope] } : base;
+
+    const farmers = await prisma.farmer.findMany({
+      where,
+      orderBy: { p12mSpend: { sort: "desc", nulls: "last" } },
+      take: 100_000,
+      select: { id: true, name: true, village: true, salesCropTags: true, valueSegment: true, lifecycleSegment: true, lifetimeSpend: true, store: { select: { name: true } } },
+    });
+    if (!farmers.length) return { ok: false, error: "No members to export." };
+
+    // Crop-scoped spend (from SaleLine.basic) only when the cluster has a crop filter; else all-time base LTV.
+    const ltvById = new Map<number, number>();
+    if (selectedCrops.length) {
+      const ids = farmers.map((f) => f.id);
+      for (let i = 0; i < ids.length; i += 10_000) {
+        const rows = await prisma.saleLine.groupBy({ by: ["farmerId"], where: { farmerId: { in: ids.slice(i, i + 10_000) }, source: "REAL", cropTag: { in: selectedCrops } }, _sum: { basic: true } });
+        for (const r of rows) if (r.farmerId != null) ltvById.set(r.farmerId, Math.round(r._sum.basic ?? 0));
+      }
+    }
+
+    const ltvLabel = selectedCrops.length ? `${selectedCrops.map(cropLabel).join(" + ")} spend (₹)` : "LTV (₹)";
+    const header = ["Farmer", "Store", "Village", "Crop", "Value segment", "Lifecycle", ltvLabel];
+    const rows: (string | number)[][] = farmers.map((f) => [
+      f.name,
+      shortStoreName(f.store?.name) || "—",
+      f.village ?? "—",
+      selectedCrops.length
+        ? ((f.salesCropTags ?? []).filter((c) => selectedCrops.includes(c)).map(cropLabel).join(", ") || selectedCrops.map(cropLabel).join(", "))
+        : ((f.salesCropTags ?? []).length ? f.salesCropTags.map(cropLabel).join(", ") : "—"),
+      f.valueSegment ? segMeta(f.valueSegment).label : "—",
+      f.lifecycleSegment ? segMeta(f.lifecycleSegment).label : "—",
+      selectedCrops.length ? (ltvById.get(f.id) ?? 0) : (f.lifetimeSpend ?? 0),
+    ]);
+
+    const safe = (cluster.name || "cluster").replace(/[\\/?*[\]:]/g, " ").trim().slice(0, 60) || "cluster";
+    const b64 = buildWorkbookB64([{ name: "Farmers", rows: [header, ...rows] }]);
+    return { ok: true, filename: `${safe} - farmers.xlsx`, b64 };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Export failed" };
   }
 }

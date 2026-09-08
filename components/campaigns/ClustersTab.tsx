@@ -15,8 +15,9 @@ import {
 import { createClusterFromCriteria } from "@/app/actions/cluster-builder";
 import { ChainNext } from "@/components/ChainNext";
 import { useConfirm } from "@/components/ConfirmDialog";
-import { getClusterFarmers } from "@/app/actions/clusters";
+import { getClusterFarmers, exportClusterFarmersXlsx } from "@/app/actions/clusters";
 import type { ClusterMembersResult } from "@/components/clusters/types";
+import { downloadB64 } from "@/lib/download";
 
 const CARD = "rounded-[14px] border border-black/[0.04] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]";
 const n = (x: number) => x.toLocaleString("en-IN");
@@ -276,12 +277,36 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
 /* ── Members viewer ── */
 function MembersModal({ cluster, onClose }: { cluster: ClusterVM; onClose: () => void }) {
   const [data, setData] = useState<ClusterMembersResult | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportErr, setExportErr] = useState<string | null>(null);
   useEffect(() => { getClusterFarmers(cluster.id, 1).then(setData); }, [cluster.id]);
+
+  const doExport = async () => {
+    setExporting(true); setExportErr(null);
+    try {
+      const res = await exportClusterFarmersXlsx(cluster.id);
+      if (res.ok && res.b64 && res.filename) downloadB64(res.b64, res.filename);
+      else setExportErr(res.error ?? "Export failed.");
+    } catch { setExportErr("Export failed."); }
+    finally { setExporting(false); }
+  };
+
   return (
     <Modal open onClose={onClose} className="max-w-[720px]">
       <ModalHeader eyebrow={cluster.description} eyebrowColor="#2E7D32" title={cluster.name}
         subtitle={`${n(cluster.count)} farmers · live${cluster.createdBy ? ` · created by ${cluster.createdBy}${cluster.createdByCode ? ` (${cluster.createdByCode})` : ""}` : ""}${cluster.createdAt ? ` · ${fmtDate(cluster.createdAt)}` : ""}`}
         onClose={onClose} />
+      <div className="flex items-center justify-between gap-2 border-b border-[#F0F0F0] px-5 py-2.5">
+        <span className="text-[11.5px] text-[#9E9E9E]">Ranked by past-12-month spend</span>
+        <div className="flex items-center gap-2">
+          {exportErr && <span className="text-[11px] font-semibold text-[#C62828]">{exportErr}</span>}
+          <button type="button" onClick={doExport} disabled={exporting || !data}
+            className="inline-flex items-center gap-1.5 rounded-[9px] bg-[#1B5E20] px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-[#2E7D32] disabled:opacity-50">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14" /></svg>
+            {exporting ? "Exporting…" : "Export Excel"}
+          </button>
+        </div>
+      </div>
       <div className="max-h-[64vh] overflow-y-auto px-5 py-4">
         {!data ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">Loading…</div>
           : data.rows.length === 0 ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">No members.</div>

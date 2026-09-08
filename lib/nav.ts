@@ -28,9 +28,11 @@ export const MAIN_NAV: NavItem[] = [
   { id: "ghoshti", label: "Ghoshti", href: "/ghoshti" },
 ];
 
+// Hidden from the sidebar for now (the whole SALES group disappears when empty). The /products and
+// /movement pages still exist and work by URL — restore these two entries to bring the menu back.
 export const SALES_NAV: NavItem[] = [
-  { id: "products", label: "Product Catalog", href: "/products" },
-  { id: "movement", label: "Stock / Movement", href: "/movement" },
+  // { id: "products", label: "Product Catalog", href: "/products" },
+  // { id: "movement", label: "Stock / Movement", href: "/movement" },
 ];
 
 export const ADMIN_NAV: NavItem[] = [
