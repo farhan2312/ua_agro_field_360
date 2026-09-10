@@ -21,6 +21,11 @@ export async function middleware(req: NextRequest) {
   const session = token ? await verifySession(token) : null;
   const isPublic = PUBLIC_PATHS.has(pathname);
 
+  // Activity heartbeat — reachable by any signed-in user (incl. campaigners), never redirected.
+  if (pathname === "/api/heartbeat") {
+    return session ? NextResponse.next() : new NextResponse(null, { status: 401 });
+  }
+
   // Not signed in and requesting a protected page → send to login.
   if (!session && !isPublic) {
     const url = req.nextUrl.clone();

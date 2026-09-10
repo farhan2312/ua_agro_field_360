@@ -46,7 +46,7 @@ export async function getEmployeeActivity(fromDate?: string, toDate?: string): P
   // Real employee accounts (DEMO seed rows excluded).
   const users = await prisma.user.findMany({
     where: { source: "REAL" },
-    select: { id: true, name: true, roleLabel: true, role: true, employeeCode: true, mobile: true, storeId: true, zone: true, territory: true, active: true, lastLoginAt: true, createdAt: true },
+    select: { id: true, name: true, roleLabel: true, role: true, employeeCode: true, mobile: true, storeId: true, zone: true, territory: true, active: true, lastLoginAt: true, lastSeenAt: true, createdAt: true },
     orderBy: { name: "asc" },
   });
 
@@ -69,8 +69,9 @@ export async function getEmployeeActivity(fromDate?: string, toDate?: string): P
   const rows: EmployeeRow[] = users.map((u) => {
     const p = periodByName.get(key(u.name)) ?? { n: 0, last: null as Date | null };
     const t = totalByName.get(key(u.name)) ?? { n: 0, last: null as Date | null };
-    const loggedInPeriod = !!(u.lastLoginAt && (!from || u.lastLoginAt >= from) && (!toExcl || u.lastLoginAt < toExcl));
-    const lastActive = [t.last, u.lastLoginAt].filter(Boolean).sort((a, b) => (b as Date).getTime() - (a as Date).getTime())[0] as Date | undefined;
+    const inWin = (d: Date | null) => !!(d && (!from || d >= from) && (!toExcl || d < toExcl));
+    const loggedInPeriod = inWin(u.lastLoginAt) || inWin(u.lastSeenAt);
+    const lastActive = [t.last, u.lastLoginAt, u.lastSeenAt].filter(Boolean).sort((a, b) => (b as Date).getTime() - (a as Date).getTime())[0] as Date | undefined;
     return {
       id: u.id, name: u.name, code: u.employeeCode, mobile: u.mobile,
       role: u.roleLabel || u.role,

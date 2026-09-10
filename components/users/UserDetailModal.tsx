@@ -51,7 +51,7 @@ export function UserDetailModal({ user, onClose }: { user: UserRow; onClose: () 
             <div className="py-6 text-center text-[12.5px] text-[#9E9E9E]">Loading…</div>
           ) : activity.length === 0 ? (
             <div className="rounded-[10px] border border-dashed border-[#E0E0E0] bg-[#FAFAFA] px-4 py-6 text-center text-[12.5px] text-[#9E9E9E]">
-              No recorded activity yet for this employee. (The audit log captures data changes, config edits, and exports; detailed sign-in history is not tracked.)
+              No recorded data-change events for this employee yet. (The audit log captures creates, edits, deletes, sends, config changes and exports. “Last active” above reflects their most recent app usage.)
             </div>
           ) : (
             <div className="overflow-hidden rounded-[10px] border border-[#F0F0F0]">

@@ -77,9 +77,9 @@ async function loadUsers(): Promise<UserRow[]> {
     );
     return dbUsers
       .map((u) => {
-        // "Last active" = most recent of a real sign-in and their last recorded visit.
+        // "Last active" = most recent of a live activity heartbeat, a real sign-in, and their last visit.
         const lastVisit = visitByName.get(u.name.trim().toUpperCase()) ?? null;
-        const activeAt = [u.lastLoginAt, lastVisit]
+        const activeAt = [u.lastSeenAt, u.lastLoginAt, lastVisit]
           .filter((d): d is Date => d != null)
           .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
         return {

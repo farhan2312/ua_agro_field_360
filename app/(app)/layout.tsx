@@ -7,6 +7,7 @@ import { pendingReviewCount } from "@/app/actions/visit-review";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { MobileNav } from "@/components/shell/MobileNav";
 import { Header } from "@/components/shell/Header";
+import { Heartbeat } from "@/components/shell/Heartbeat";
 import type { RoleKey } from "@/lib/roles";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +30,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="flex min-h-screen bg-canvas">
+      <Heartbeat />
       <Sidebar
         role={role}
         persona={persona}

@@ -129,6 +129,7 @@ model User {
   territory      String?
   lastActive     String? // LEGACY seeded label (unused for display; superseded by lastLoginAt + last visit)
   lastLoginAt    DateTime? // real last sign-in timestamp (stamped by loginAction)
+  lastSeenAt     DateTime? // real last-activity heartbeat (bumped while the user has the app open)
   visitsMtd      String?
   active         Boolean        @default(true)
   source         DataSource     @default(DEMO)
