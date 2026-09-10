@@ -241,10 +241,10 @@ export async function importSalesMatrix(rows: string[][], _uploadedBy: string, i
   );
 
   // ── Sale-line detail — so line-based analytics (crop trend, FY dropdown, product mix) reflect this
-  // upload. Resolve each line to a catalogue Product by Item Code (the master keys on itemCode); create
-  // the few missing. The lean upload has no tax split, so `basic` ≈ the line total (analytics ₹ runs a
-  // touch gross for admin-uploaded months). Idempotent: replace this file's own lines, scoped to the
-  // file's date range so a re-upload can never collaterally delete older lines with a colliding order no.
+  // upload. Resolve each line to a catalogue Product by Item Code, falling back to Item Name when the
+  // file omits codes; create the few missing. The lean upload has no tax split, so `basic` ≈ the line
+  // total (analytics ₹ runs a touch gross for admin-uploaded months). Idempotent: replace this file's
+  // own lines, scoped to the file's date range so a re-upload can't collaterally delete older lines.
   let linesInserted = 0;
   {
     const codesForLines = [...new Set(billArr.flatMap((b) => b.lines.map((l) => l.code).filter(Boolean)))];
@@ -261,6 +261,20 @@ export async function importSalesMatrix(rows: string[][], _uploadedBy: string, i
         for (const p of reload) if (p.itemCode) prodByCode.set(p.itemCode, p.id);
       }
     }
+    // Fallback resolution by Item NAME for lines with no Item Code (leaner exports omit the code column),
+    // so those files still produce sale lines. Create the few names not already in the catalogue.
+    const namesForLines = [...new Set(billArr.flatMap((b) => b.lines.filter((l) => !l.code && l.item).map((l) => l.item)))];
+    const prodByName = new Map<string, number>();
+    if (namesForLines.length) {
+      const prods = await prisma.product.findMany({ where: { rawName: { in: namesForLines } }, select: { id: true, rawName: true } });
+      for (const p of prods) prodByName.set(p.rawName, p.id);
+      const missingNames = namesForLines.filter((n) => !prodByName.has(n));
+      if (missingNames.length) {
+        await chunk(missingNames, 1000, (s) => prisma.product.createMany({ data: s.map((n) => ({ rawName: n, name: n })) as never, skipDuplicates: true }).then((r) => r.count));
+        const reload = await prisma.product.findMany({ where: { rawName: { in: missingNames } }, select: { id: true, rawName: true } });
+        for (const p of reload) prodByName.set(p.rawName, p.id);
+      }
+    }
     // Replace this file's own lines (idempotent re-upload), scoped to the file's date window.
     if (minIso && maxIso) {
       const from = new Date(`${minIso}T00:00:00Z`), to = new Date(`${maxIso}T23:59:59Z`);
@@ -272,8 +286,8 @@ export async function importSalesMatrix(rows: string[][], _uploadedBy: string, i
       const soldAt = b.dateIso ? new Date(`${b.dateIso}T00:00:00Z`) : null;
       const storeId = storeByName.get(normName(b.store))?.id ?? null;
       for (const l of b.lines) {
-        const productId = l.code ? prodByCode.get(l.code) : undefined;
-        if (!productId) continue; // uncatalogued line — the bill is still recorded, just no line detail
+        const productId = (l.code && prodByCode.get(l.code)) || (l.item ? prodByName.get(l.item) : undefined);
+        if (!productId) continue; // unresolvable line — the bill is still recorded, just no line detail
         lineData.push({
           orderNo: b.order, productId, itemRaw: l.item || l.code,
           store: b.store || null, storeId, farmerId,
