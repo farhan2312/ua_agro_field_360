@@ -66,6 +66,15 @@ export function LeadConversionsCard() {
       </div>
       <p className="mb-3 text-[12px] text-[#9E9E9E]">Farmers first registered as leads (no purchase) who have since bought. Rate = converted ÷ everyone ever registered as a lead. Counts from when tracking began.</p>
 
+      {data != null && (
+        <div className="mb-3 flex flex-wrap items-center gap-x-6 gap-y-1.5 rounded-[10px] border border-[#EEF3EE] bg-[#FAFDFA] px-4 py-2.5 text-[12.5px]">
+          <span title="Everyone ever registered as a lead (converted + still open)"><span className="text-[#9E9E9E]">Total leads</span> <b className="ml-1 text-[15px] tabular-nums text-[#1A1C1A]">{n(denom)}</b></span>
+          <span title="Leads who have since made a purchase"><span className="text-[#9E9E9E]">Converted</span> <b className="ml-1 text-[15px] tabular-nums text-[#2E7D32]">{n(data.total)}</b></span>
+          <span title="Leads with no purchase yet"><span className="text-[#9E9E9E]">Still open</span> <b className="ml-1 text-[15px] tabular-nums text-[#616161]">{n(data.currentLeads)}</b></span>
+          <span className="sm:ml-auto"><span className="text-[#9E9E9E]">Conversion rate</span> <b className="ml-1 text-[15px] tabular-nums text-[#1565C0]">{rate.toFixed(1)}%</b></span>
+        </div>
+      )}
+
       {data == null ? (
         <div className="py-6 text-center text-[12.5px] text-[#9E9E9E]">Loading…</div>
       ) : data.total === 0 ? (

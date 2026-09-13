@@ -6,6 +6,11 @@ import { runErpSyncNow, type ErpRunVM } from "@/app/actions/erp-sync";
 
 const CARD = "rounded-[14px] border border-black/[0.04] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]";
 const num = (n: number | null | undefined) => (n == null ? "—" : n.toLocaleString("en-IN"));
+// "2026-09-07" → "07-Sep-2026" (calendar date, formatted in UTC so it never shifts a day).
+const fmtDay = (s: string) => {
+  const d = new Date(`${s}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) ? s : d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }).replace(/ /g, "-");
+};
 const INPUT = "rounded-[8px] border border-[#E0E0E0] px-2.5 py-1.5 text-[13px] outline-none focus:border-[#2E7D32]";
 
 const STATUS_STYLE: Record<string, { bg: string; c: string }> = {
@@ -90,7 +95,7 @@ export function ErpSyncCard({ initialRuns, defaultDate }: { initialRuns: ErpRunV
                   return (
                     <tr key={r.id} className="border-b border-[#F6F6F6] last:border-0">
                       <td className="px-3 py-2 text-[#616161]">{r.when}</td>
-                      <td className="text-[#616161]">{r.fromDate === r.toDate ? r.fromDate : `${r.fromDate} → ${r.toDate}`}</td>
+                      <td className="whitespace-nowrap text-[#616161]">{r.fromDate === r.toDate ? fmtDay(r.fromDate) : `${fmtDay(r.fromDate)} – ${fmtDay(r.toDate)}`}</td>
                       <td className="max-w-[130px] truncate text-[#9E9E9E]" title={r.triggeredBy ?? ""}>{(r.triggeredBy ?? "").replace("manual:", "")}</td>
                       <td className="text-right tabular-nums">{num(r.rows)}</td>
                       <td className="text-right tabular-nums">{num(r.bills)}</td>
