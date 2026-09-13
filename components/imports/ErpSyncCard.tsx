@@ -23,6 +23,7 @@ export function ErpSyncCard({ initialRuns, defaultDate }: { initialRuns: ErpRunV
   const router = useRouter();
   const [from, setFrom] = useState(defaultDate);
   const [to, setTo] = useState(defaultDate);
+  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -30,9 +31,9 @@ export function ErpSyncCard({ initialRuns, defaultDate }: { initialRuns: ErpRunV
   const sync = async () => {
     setBusy(true); setError(null); setResult(null);
     try {
-      const r = await runErpSyncNow({ from, to });
+      const r = await runErpSyncNow({ from, to, password });
       if (!r.ok) { setError(r.error ?? "Sync failed."); }
-      else { setResult({ rows: r.rows, bills: r.bills, newCustomers: r.newCustomers, linesInserted: r.linesInserted, stores: r.stores }); }
+      else { setResult({ rows: r.rows, bills: r.bills, newCustomers: r.newCustomers, linesInserted: r.linesInserted, stores: r.stores }); setPassword(""); }
       router.refresh(); // refresh the recent-runs table
     } catch (e) { setError(e instanceof Error ? e.message : "Sync failed."); }
     finally { setBusy(false); }
@@ -59,7 +60,14 @@ export function ErpSyncCard({ initialRuns, defaultDate }: { initialRuns: ErpRunV
           <label className="mb-1 block text-[10.5px] font-semibold uppercase tracking-[0.4px] text-[#9E9E9E]">To</label>
           <input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} className={INPUT} />
         </div>
-        <button type="button" onClick={sync} disabled={busy || !from || !to}
+        <div>
+          <label className="mb-1 block text-[10.5px] font-semibold uppercase tracking-[0.4px] text-[#9E9E9E]">Sync password</label>
+          <input type="password" value={password} autoComplete="off" placeholder="Required"
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && from && to && password && !busy) sync(); }}
+            className={`${INPUT} w-[140px]`} />
+        </div>
+        <button type="button" onClick={sync} disabled={busy || !from || !to || !password}
           className="inline-flex items-center gap-2 rounded-[10px] bg-[#1B5E20] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#2E7D32] disabled:opacity-50">
           {busy ? (<><span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />Syncing…</>) : (<><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 11-3-6.7L21 8M21 3v5h-5" /></svg>Sync now</>)}
         </button>

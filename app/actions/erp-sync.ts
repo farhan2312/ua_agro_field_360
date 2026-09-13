@@ -16,9 +16,15 @@ export interface ErpRunVM {
   triggeredBy: string | null; error: string | null; durationMs: number | null; when: string;
 }
 
-/** Run an ERP sales sync on demand (sysadmin). Defaults to yesterday; keep custom ranges small. */
-export async function runErpSyncNow(input?: { from?: string; to?: string }): Promise<{ ok: boolean; runId?: number; rows?: number; bills?: number; newCustomers?: number; linesInserted?: number; stores?: number; error?: string }> {
+/** Run an ERP sales sync on demand (sysadmin). Defaults to yesterday; keep custom ranges small.
+ *  Gated behind a static password (env ERP_SYNC_PASSWORD) so sysadmins can't fire it casually — the
+ *  check is here on the server so calling the action directly can't bypass the UI prompt. The daily
+ *  cron does not use this; it authenticates with CRON_SECRET. */
+export async function runErpSyncNow(input?: { from?: string; to?: string; password?: string }): Promise<{ ok: boolean; runId?: number; rows?: number; bills?: number; newCustomers?: number; linesInserted?: number; stores?: number; error?: string }> {
   if ((await getRole()) !== "sysadmin") return { ok: false, error: "System admins only." };
+  const required = (process.env.ERP_SYNC_PASSWORD || "").trim();
+  if (!required) return { ok: false, error: "Manual sync is locked: set the ERP_SYNC_PASSWORD env var to enable it." };
+  if ((input?.password || "").trim() !== required) return { ok: false, error: "Incorrect sync password." };
   const to = (input?.to || "").trim() || yesterdayIST();
   const from = (input?.from || "").trim() || to;
   if (!isYmd(from) || !isYmd(to)) return { ok: false, error: "Dates must be YYYY-MM-DD." };
