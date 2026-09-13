@@ -572,6 +572,120 @@ export async function getCampaignMembers(campaignId: number, limit = 25000): Pro
   });
 }
 
+/**
+ * Export the full per-farmer outreach log for a campaign (manager-only) — one row per enrolled farmer
+ * with everything done to them: channels (call/SMS/WhatsApp/in-person), interest response, mass-send
+ * delivery, actual SMS/WhatsApp send counts, who reached them + when, and the working comment.
+ */
+export async function exportCampaignTrackerXlsx(campaignId: number, campaignName: string): Promise<{ ok: boolean; filename?: string; b64?: string; error?: string }> {
+  const perm = await requireManager(); if (!perm.ok) return perm;
+  const members = await prisma.campaignMember.findMany({
+    where: { campaignId },
+    orderBy: [{ group: "asc" }, { id: "asc" }],
+    select: { id: true, farmerId: true, group: true, segment: true, valueSegment: true, lifecycleSegment: true, storeId: true, reached: true, mediums: true, response: true, responseCrop: true, comment: true, reachedBy: true, reachedByCode: true, reachedAt: true, broadcastMediums: true },
+    take: 100000,
+  });
+  if (!members.length) return { ok: false, error: "No enrolled farmers to export." };
+
+  const [farmers, stores, phases, smsLogs, waLogs] = await Promise.all([
+    prisma.farmer.findMany({ where: { id: { in: members.map((m) => m.farmerId) } }, select: { id: true, name: true, mobile: true, village: true } }),
+    prisma.store.findMany({ select: { id: true, name: true } }),
+    prisma.campaignPhase.findMany({ where: { campaignId }, orderBy: { ordinal: "asc" }, select: { ordinal: true, name: true, type: true, defaultStart: true, defaultEnd: true } }),
+    prisma.smsLog.findMany({ where: { campaignId, memberId: { not: null } }, select: { memberId: true, createdAt: true } }),
+    prisma.whatsAppLog.findMany({ where: { campaignId, memberId: { not: null } }, select: { memberId: true, createdAt: true } }),
+  ]);
+  const fMap = new Map(farmers.map((f) => [f.id, f]));
+  const sMap = new Map(stores.map((s) => [s.id, shortStoreName(s.name) || s.name]));
+
+  const MED: Record<string, string> = { CALL: "Call", WHATSAPP: "WhatsApp", SMS: "SMS", IN_PERSON: "In-person", UNREACHABLE: "Unreachable" };
+  const RESP: Record<string, string> = { INTERESTED: "Interested", NOT_INTERESTED: "Not interested", OTHER_CROP: "Other crop" };
+  const fmtTs = (d: Date | null) => (d ? new Date(d.getTime() + 330 * 60_000).toISOString().slice(0, 16).replace("T", " ") : "");
+  const fmtDay = (d: Date) => new Date(d.getTime() + 330 * 60_000).toISOString().slice(0, 10);
+  const store = (id: number | null) => (id != null ? sMap.get(id) ?? "" : "");
+
+  // Round attribution for timestamped sends: which phase window contains a send/date.
+  const roundOf = (d: Date): number | null => phases.find((p) => d >= p.defaultStart && d <= p.defaultEnd)?.ordinal ?? null;
+  const smsTotal = new Map<number, number>(), waTotal = new Map<number, number>();
+  const smsByRound = new Map<string, number>(), waByRound = new Map<string, number>(); // key `${memberId}:${ordinal}`
+  for (const l of smsLogs) { if (l.memberId == null) continue; smsTotal.set(l.memberId, (smsTotal.get(l.memberId) ?? 0) + 1); const o = roundOf(l.createdAt); if (o != null) { const k = `${l.memberId}:${o}`; smsByRound.set(k, (smsByRound.get(k) ?? 0) + 1); } }
+  for (const l of waLogs) { if (l.memberId == null) continue; waTotal.set(l.memberId, (waTotal.get(l.memberId) ?? 0) + 1); const o = roundOf(l.createdAt); if (o != null) { const k = `${l.memberId}:${o}`; waByRound.set(k, (waByRound.get(k) ?? 0) + 1); } }
+
+  const test = members.filter((m) => m.group === "TEST");
+  const count = (pred: (m: typeof members[number]) => boolean) => test.filter(pred).length;
+
+  // ── Overview sheet ──
+  const overview: (string | number)[][] = [
+    ["Campaign", campaignName],
+    ["Enrolled (total)", members.length],
+    ["  Test", test.length],
+    ["  Control", members.length - test.length],
+    ["Reached (test)", count((m) => m.reached)],
+    [""],
+    ["Reach by channel (test group)", ""],
+    ...(["CALL", "WHATSAPP", "SMS", "IN_PERSON", "UNREACHABLE"] as const).map((c) => [MED[c], count((m) => (m.mediums ?? []).includes(c))] as (string | number)[]),
+    [""],
+    ["Interest response (test group)", ""],
+    ...(["INTERESTED", "NOT_INTERESTED", "OTHER_CROP"] as const).map((r) => [RESP[r], count((m) => m.response === r)] as (string | number)[]),
+    [""],
+    ["Broadcast delivered (test group)", count((m) => (m.broadcastMediums ?? []).length > 0)],
+    ["  via SMS", count((m) => (m.broadcastMediums ?? []).includes("SMS"))],
+    ["  via WhatsApp", count((m) => (m.broadcastMediums ?? []).includes("WHATSAPP"))],
+    [""],
+    ["Rounds", ""],
+    ["Round", "Window", "SMS sent", "WhatsApp sent", "Farmers reached in window"],
+    ...phases.map((p) => {
+      const sms = [...smsByRound].filter(([k]) => k.endsWith(`:${p.ordinal}`)).reduce((s, [, v]) => s + v, 0);
+      const wa = [...waByRound].filter(([k]) => k.endsWith(`:${p.ordinal}`)).reduce((s, [, v]) => s + v, 0);
+      const reached = test.filter((m) => m.reachedAt && roundOf(m.reachedAt) === p.ordinal).length;
+      return [`${p.ordinal}. ${p.name}`, `${fmtDay(p.defaultStart)} → ${fmtDay(p.defaultEnd)}`, sms, wa, reached] as (string | number)[];
+    }),
+    [""],
+    ["Note", "Call / in-person / comments are not timestamped per round — the per-round sheets show only the message sends (SMS/WhatsApp) that fall in each round's window plus who was reached in it. The full current outreach state per farmer is in the 'All farmers' sheet."],
+  ];
+
+  // ── All farmers sheet (full current outreach state) ──
+  const allHeader = ["Group", "Farmer", "Mobile", "Village", "Store", "Value segment", "Lifecycle", "Reached", "Channels", "Response", "Response crop", "Broadcast delivered", "SMS sent", "WhatsApp sent", "Recorded by", "Recorded at (IST)", "Comment"];
+  const allRows: (string | number)[][] = members.map((m) => {
+    const f = fMap.get(m.farmerId);
+    return [
+      m.group ?? "", f?.name ?? `Farmer #${m.farmerId}`, f?.mobile ?? "", f?.village ?? "", store(m.storeId),
+      m.valueSegment ? segMeta(m.valueSegment).label : (m.segment ? segMeta(m.segment).label : ""),
+      m.lifecycleSegment ? segMeta(m.lifecycleSegment).label : "",
+      m.reached ? "Yes" : "No",
+      (m.mediums ?? []).map((x) => MED[x] ?? x).join(", "),
+      m.response ? RESP[m.response] ?? m.response : "", m.responseCrop ? cropLabel(m.responseCrop) : "",
+      (m.broadcastMediums ?? []).map((x) => MED[x] ?? x).join(", "),
+      smsTotal.get(m.id) ?? 0, waTotal.get(m.id) ?? 0,
+      m.reachedBy ? `${m.reachedBy}${m.reachedByCode ? ` (${m.reachedByCode})` : ""}` : "", fmtTs(m.reachedAt), m.comment ?? "",
+    ];
+  });
+
+  const sheets: { name: string; rows: (string | number)[][] }[] = [
+    { name: "Overview", rows: overview },
+    { name: "All farmers", rows: [allHeader, ...allRows] },
+  ];
+
+  // ── One sheet per round — message sends in that round's window + who was reached in it ──
+  const roundHeader = ["Farmer", "Mobile", "Store", "SMS sent (round)", "WhatsApp sent (round)", "Reached in round", "Response (current)", "Comment (current)", "Recorded by", "Recorded at (IST)"];
+  for (const p of phases) {
+    const rrows: (string | number)[][] = [];
+    for (const m of members) {
+      const sms = smsByRound.get(`${m.id}:${p.ordinal}`) ?? 0;
+      const wa = waByRound.get(`${m.id}:${p.ordinal}`) ?? 0;
+      const reachedIn = !!(m.reachedAt && roundOf(m.reachedAt) === p.ordinal);
+      if (!sms && !wa && !reachedIn) continue; // only farmers with activity in this round
+      const f = fMap.get(m.farmerId);
+      rrows.push([f?.name ?? `Farmer #${m.farmerId}`, f?.mobile ?? "", store(m.storeId), sms, wa, reachedIn ? "Yes" : "", m.response ? RESP[m.response] ?? m.response : "", reachedIn ? (m.comment ?? "") : "", reachedIn && m.reachedBy ? `${m.reachedBy}${m.reachedByCode ? ` (${m.reachedByCode})` : ""}` : "", reachedIn ? fmtTs(m.reachedAt) : ""]);
+    }
+    const nm = `R${p.ordinal} ${p.name}`.replace(/[\\/?*[\]:]/g, " ").slice(0, 31); // Excel sheet-name limit
+    sheets.push({ name: nm || `Round ${p.ordinal}`, rows: rrows.length ? [roundHeader, ...rrows] : [["No message sends or reaches recorded in this round's window."]] });
+  }
+
+  const safe = (campaignName || "campaign").replace(/[\\/?*[\]:]/g, " ").trim().slice(0, 60) || "campaign";
+  const b64 = buildWorkbookB64(sheets);
+  return { ok: true, filename: `${safe} - outreach log.xlsx`, b64 };
+}
+
 /* ── Campaign audience analytics: composition breakdowns + Segment × Store matrix ── */
 export interface SegCol { key: string; label: string; color: string; bg: string }
 export interface CampaignAnalytics {

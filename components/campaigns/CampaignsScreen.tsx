@@ -17,7 +17,7 @@ import { useConfirm } from "@/components/ConfirmDialog";
 import { cropLabel } from "@/lib/crops";
 import { inr } from "@/lib/format";
 import {
-  saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, getCampaignTracker, extendCampaign, updateCampaignCommPlans, deleteCampaign, getCampaignMembers, markCampaignMember, getCampaignAnalytics, exportCampaignAudienceXlsx, getSmsTemplates,
+  saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, getCampaignTracker, extendCampaign, updateCampaignCommPlans, deleteCampaign, getCampaignMembers, markCampaignMember, getCampaignAnalytics, exportCampaignAudienceXlsx, exportCampaignTrackerXlsx, getSmsTemplates,
   type CampaignListItem, type CampaignTracker, type ProjectVM, type CampaignMemberVM, type CampaignAnalytics, type SmsTemplateVM,
 } from "@/app/actions/campaigns";
 import { downloadB64 } from "@/lib/download";
@@ -511,6 +511,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
   const [msg, setMsg] = useState<string | null>(null);
   const [trackerOf, setTrackerOf] = useState<CampaignListItem | null>(null);
   const [tracker, setTracker] = useState<CampaignTracker | null>(null);
+  const [trackerExporting, setTrackerExporting] = useState(false);
   const [analyticsOf, setAnalyticsOf] = useState<CampaignListItem | null>(null);
   const [analytics, setAnalytics] = useState<CampaignAnalytics | null>(null);
   const [membersOf, setMembersOf] = useState<CampaignListItem | null>(null);
@@ -736,6 +737,18 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
           <>
             <ModalHeader eyebrow="Campaign Tracker" eyebrowColor="#2E7D32" title={trackerOf.name} subtitle="Outreach reach · real attributed revenue · test vs control uplift" onClose={() => setTrackerOf(null)} />
             <div className="max-h-[72vh] overflow-y-auto px-5 py-4">
+              <div className="mb-3 flex justify-end">
+                <button type="button" disabled={trackerExporting}
+                  onClick={async () => {
+                    setTrackerExporting(true);
+                    try { const r = await exportCampaignTrackerXlsx(trackerOf.id, trackerOf.name); if (r.ok && r.b64 && r.filename) downloadB64(r.b64, r.filename); else alert(r.error ?? "Export failed."); }
+                    finally { setTrackerExporting(false); }
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-[9px] bg-[#1B5E20] px-3.5 py-1.5 text-[12px] font-semibold text-white hover:bg-[#2E7D32] disabled:opacity-50">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14" /></svg>
+                  {trackerExporting ? "Exporting…" : "Export Excel"}
+                </button>
+              </div>
               {tracker == null ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">Loading…</div> : <TrackerBody t={tracker} />}
             </div>
           </>
