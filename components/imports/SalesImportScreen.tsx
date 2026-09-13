@@ -25,6 +25,8 @@ export interface ImportRow {
   when: string;
 }
 
+// Excel/CSV upload retired — sales sync from the ERP now. Flip to false to bring the file importer back.
+const EXCEL_DISABLED = true;
 const TEMPLATE_HREF = "/templates/UA-Agro-Monthly-Sales-Template.xlsx";
 const CARD =
   "rounded-[14px] border border-black/[0.04] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]";
@@ -111,6 +113,16 @@ export function SalesImportScreen({ history, erpRuns = [], erpDefaultDate = "" }
     <div className="animate-[fadeUp_0.4s_ease-out]">
       {dialog}
       <div className="mb-[18px]"><ErpSyncCard initialRuns={erpRuns} defaultDate={erpDefaultDate} /></div>
+      {EXCEL_DISABLED ? (
+        <div className={`${CARD} mb-[18px] p-[22px]`}>
+          <div className="mb-1 text-[15px] font-bold text-[#1A1C1A]">Excel import retired</div>
+          <div className="text-[12.5px] leading-[1.7] text-[#757575]">
+            Monthly file uploads have been turned off — sales now sync <b>automatically from the ERP</b>. The
+            daily job pulls the previous day (all stores), and you can run it on demand from <b>ERP Sales Sync</b> above.
+            The import history below is kept for reference.
+          </div>
+        </div>
+      ) : (
       <div className="grid grid-cols-1 gap-[18px] lg:grid-cols-[1.4fr_1fr]">
         {/* ── Dropzone ── */}
         <div className={`${CARD} p-[22px]`}>
@@ -206,6 +218,7 @@ export function SalesImportScreen({ history, erpRuns = [], erpDefaultDate = "" }
           </div>
         </div>
       </div>
+      )}
 
       {/* ── Previous imports ── */}
       <div className={`${CARD} mt-[18px] overflow-hidden`}>

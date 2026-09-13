@@ -8,10 +8,17 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // large monthly files can take a while (platform permitting)
 
+// Excel/CSV upload is retired — sales now sync automatically from the ERP (see /api/erp/sync + the
+// ERP Sales Sync card on /imports). Flip this to false to re-enable the manual file importer.
+const EXCEL_IMPORT_DISABLED = true;
+
 export async function POST(req: Request) {
   const session = await getSession();
   if (!session?.isAdmin) {
     return NextResponse.json({ error: "Not authorized." }, { status: 403 });
+  }
+  if (EXCEL_IMPORT_DISABLED) {
+    return NextResponse.json({ error: "Excel import is disabled — sales now sync automatically from the ERP." }, { status: 403 });
   }
   const uploadedBy = session.name || "Admin";
 
