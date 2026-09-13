@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import type { ImportSummary } from "@/lib/sales-import";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { deleteSalesImport, previewSalesImportDeletion } from "@/app/actions/imports";
+import { ErpSyncCard } from "./ErpSyncCard";
+import type { ErpRunVM } from "@/app/actions/erp-sync";
 
 export interface ImportRow {
   id: number;
@@ -37,7 +39,7 @@ function UploadIcon() {
   );
 }
 
-export function SalesImportScreen({ history }: { history: ImportRow[] }) {
+export function SalesImportScreen({ history, erpRuns = [], erpDefaultDate = "" }: { history: ImportRow[]; erpRuns?: ErpRunVM[]; erpDefaultDate?: string }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -108,6 +110,7 @@ export function SalesImportScreen({ history }: { history: ImportRow[] }) {
   return (
     <div className="animate-[fadeUp_0.4s_ease-out]">
       {dialog}
+      <div className="mb-[18px]"><ErpSyncCard initialRuns={erpRuns} defaultDate={erpDefaultDate} /></div>
       <div className="grid grid-cols-1 gap-[18px] lg:grid-cols-[1.4fr_1fr]">
         {/* ── Dropzone ── */}
         <div className={`${CARD} p-[22px]`}>

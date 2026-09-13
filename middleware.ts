@@ -6,7 +6,8 @@ const PUBLIC_PATHS = new Set(["/login", "/register"]);
 const CHANGE_PW = "/change-password";
 
 // Public API endpoints that external services (e.g. the Meta WhatsApp webhook) call without a session.
-const PUBLIC_PREFIXES = ["/api/whatsapp/webhook"];
+// Endpoints that authenticate themselves (webhook signature / cron secret) — not via the session cookie.
+const PUBLIC_PREFIXES = ["/api/whatsapp/webhook", "/api/erp/sync"];
 
 // Campaigners (part-time call team) are locked to the Campaigns page + the Training help + the forced
 // password change. Every other route redirects them to Campaigns.
