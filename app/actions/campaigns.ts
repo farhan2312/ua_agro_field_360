@@ -997,12 +997,16 @@ async function matchedSpendByFarmer(pf: ProductFilter, farmerIds: number[], star
   return out;
 }
 
-/** SaleLine `where` for lines that redeemed any of `codes` (item OR invoice coupon) in [start,end]. */
+/** SaleLine `where` for lines that redeemed any of `codes` (item OR invoice coupon) in [start,end].
+ *  Matches by PREFIX: the ERP appends a unique per-redemption suffix to each code
+ *  (ALOO150 → ALOO15049P5ME3), so a round code credits every sale whose coupon starts with it.
+ *  Codes are pre-normalised to upper-case by the callers; stored coupon values are upper-case too. */
 function couponLineWhere(codes: string[], start: Date, end: Date, farmerIds?: number[]): Prisma.SaleLineWhereInput {
+  if (!codes.length) return { id: -1 }; // never matches — guards an empty-OR
   return {
     source: "REAL", soldAt: { gte: start, lte: end },
     ...(farmerIds ? { farmerId: { in: farmerIds } } : {}),
-    OR: [{ itemCouponCode: { in: codes } }, { invoiceCouponCode: { in: codes } }],
+    OR: codes.flatMap((c) => [{ itemCouponCode: { startsWith: c } }, { invoiceCouponCode: { startsWith: c } }]),
   };
 }
 
