@@ -241,6 +241,7 @@ model Sale {
   amountNum     Int? // numeric total (rupees) for analytics/LTV
   store         String? // retailer / store name
   financialYear String? // e.g. "FY 24-25"
+  invoiceCouponCode String? // ERP invoice_coupon_code — whole-bill campaign offer redeemed (null = none / "0")
   importId      Int? // the SalesImport batch that created this row — enables exact per-import deletion
   source        DataSource @default(REAL)
   createdAt     DateTime   @default(now())
@@ -251,6 +252,7 @@ model Sale {
   @@index([source])
   @@index([soldAt]) // date-sorted analytics/history
   @@index([invoice]) // Order No lookup during master backfill / line linking
+  @@index([invoiceCouponCode]) // campaign coupon-redemption attribution
   @@index([importId]) // delete-an-import
 }
 
@@ -341,7 +343,10 @@ model SaleLine {
   custName      String?
   custPhone     String? // normalized
   b2b           Boolean   @default(false)
-  cropTag       String? // crop this sale was for — cleaned per-line from the master file's Crops column (campaign attribution)
+  cropTag       String? // crop this line was for — from ERP UsedInCrop (cleaned), falling back to seed-name; campaign crop attribution
+  usedInCrop    String? // raw ERP UsedInCrop value (traceability; dirty free-text before cleaning)
+  itemCouponCode    String? // ERP item_coupon_code — line-level campaign offer redeemed (null = none / "0")
+  invoiceCouponCode String? // ERP invoice_coupon_code — bill-level offer (denormalized onto the line for attribution without a join)
   source        DataSource @default(REAL)
   createdAt     DateTime  @default(now())
 
@@ -352,6 +357,8 @@ model SaleLine {
   @@index([storeId, soldAt])
   @@index([productId, soldAt])
   @@index([cropTag])
+  @@index([itemCouponCode]) // campaign coupon-redemption attribution (line level)
+  @@index([invoiceCouponCode]) // campaign coupon-redemption attribution (bill level, denormalized)
   @@index([source])
   @@index([saleId]) // FK lookup — needed so deleting a Sale (onDelete: SetNull) doesn't seq-scan
 }

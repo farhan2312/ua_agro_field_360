@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { cropFromItem } from "@/lib/crop-clean";
+import { cropFromItem, cleanCrop } from "@/lib/crop-clean";
 import { recomputeSegments } from "@/lib/segment-engine";
 
 /**
@@ -10,8 +10,10 @@ import { recomputeSegments } from "@/lib/segment-engine";
  *   importErpRows(rows,from,to)      — normalise → bills + lines + farmers, idempotent by date window
  *   syncErpSales({from,to,by})       — fetch + import + scoped segment recompute + ErpSyncRun log
  *
- * Notes: no Crops column yet (crop tags = seed-name via cropFromItem until the ERP adds one); no master
- * Item Code (products resolved by name); ReturnQty is stored but NOT netted (gross counted, per spec).
+ * Notes: crop tags come from the ERP UsedInCrop column (cleaned via cleanCrop), falling back to
+ * seed-name via cropFromItem; no master Item Code (products resolved by name); ReturnQty is stored
+ * but NOT netted (gross counted, per spec). Coupon codes (item_coupon_code / invoice_coupon_code)
+ * are captured for campaign coupon-redemption attribution; "0"/empty means no coupon.
  */
 
 const API_URL = process.env.ERP_API_URL || "http://uaagrostore.com/APPs/api.php";
@@ -24,9 +26,12 @@ export interface ErpRow {
   ItemDiscountAmount?: number; InvoiceDiscountAmount?: number; BatchNo?: string; ExpiryDate?: string;
   HSNCODE?: string; UOM?: string; FinancialYear?: string; BillDate?: string; PaymentType?: string;
   CusName?: string; CusAddress?: string; CusMobile?: string; CusVillage?: string; ReturnQty?: string | number;
+  item_coupon_code?: string; invoice_coupon_code?: string; UsedInCrop?: string;
 }
 
 const num = (v: unknown) => { const n = parseFloat(String(v ?? "0").replace(/[^0-9.\-]/g, "")); return Number.isFinite(n) ? n : 0; };
+/** Normalise an ERP coupon code: the feed sends "0" (and occasionally "") for "no coupon". */
+const normCoupon = (v: unknown): string | null => { const s = String(v ?? "").trim().toUpperCase(); return s && s !== "0" ? s : null; };
 const normMobile = (v: unknown): string | null => { let s = String(v ?? "").replace(/\D/g, ""); if (s.length > 10) s = s.slice(-10); return s.length === 10 && "6789".includes(s[0]) ? s : null; };
 const normName = (s: string) => (s || "").toUpperCase().replace(/\s+/g, " ").trim();
 const fyLabel = (fy: string) => (/^\d{4}$/.test(fy) ? `FY ${fy.slice(0, 2)}-${fy.slice(2)}` : fy || null);
@@ -108,14 +113,15 @@ export async function importErpRows(rows: ErpRow[], from: string, to: string): P
   }
 
   // ── Aggregate lines → bills ──
-  interface Bill { order: string; total: number; items: string[]; category: string | null; date: Date | null; mobile: string | null; store: string; name: string; fy: string | null }
+  interface Bill { order: string; total: number; items: string[]; category: string | null; date: Date | null; mobile: string | null; store: string; name: string; fy: string | null; coupon: string | null }
   const bills = new Map<string, Bill>();
   for (const r of rows) {
     const order = (r.OrderNo ?? "").trim(); if (!order) continue;
     let b = bills.get(order);
-    if (!b) { b = { order, total: 0, items: [], category: r.MainCategory || null, date: parseDate(r.BillDate), mobile: normMobile(r.CusMobile), store: r.RetailerName || "", name: r.CusName || "", fy: r.FinancialYear || null }; bills.set(order, b); }
+    if (!b) { b = { order, total: 0, items: [], category: r.MainCategory || null, date: parseDate(r.BillDate), mobile: normMobile(r.CusMobile), store: r.RetailerName || "", name: r.CusName || "", fy: r.FinancialYear || null, coupon: null }; bills.set(order, b); }
     b.total += num(r.Total);
     if (r.ItemName) b.items.push(r.ItemName.trim());
+    if (!b.coupon) b.coupon = normCoupon(r.invoice_coupon_code); // invoice coupon repeats on every line; take the first non-empty
   }
 
   // ── Idempotent replace: clear the window's REAL sales + lines, then insert ──
@@ -131,7 +137,7 @@ export async function importErpRows(rows: ErpRow[], from: string, to: string): P
       date: b.date ? b.date.toISOString().slice(0, 10) : null, soldAt: b.date,
       items: b.items.length > 1 ? `${first} · +${b.items.length - 1} more` : first, itemCount: b.items.length || null,
       category: b.category, amount: inr(b.total), amountNum: Math.round(b.total),
-      store: b.store || null, financialYear: fyLabel(b.fy ?? ""), source: "REAL" as const,
+      store: b.store || null, financialYear: fyLabel(b.fy ?? ""), invoiceCouponCode: b.coupon, source: "REAL" as const,
     };
   });
   for (let i = 0; i < saleData.length; i += 5000) await prisma.sale.createMany({ data: saleData.slice(i, i + 5000) as never, skipDuplicates: true });
@@ -161,7 +167,11 @@ export async function importErpRows(rows: ErpRow[], from: string, to: string): P
       discount: num(r.ItemDiscountAmount) + num(r.InvoiceDiscountAmount), batchNo: r.BatchNo || null,
       soldAt: parseDate(r.BillDate), financialYear: fyLabel(r.FinancialYear ?? ""),
       mainCategory: r.MainCategory || null, subCategory: r.SubCategory || null,
-      custName: r.CusName || null, custPhone: mobile, cropTag: cropFromItem(item), source: "REAL" as const,
+      custName: r.CusName || null, custPhone: mobile,
+      // Crop: ERP UsedInCrop (cleaned) is authoritative; fall back to seed-name derivation for junk/empty.
+      usedInCrop: (r.UsedInCrop ?? "").trim() || null, cropTag: cleanCrop(r.UsedInCrop) ?? cropFromItem(item),
+      itemCouponCode: normCoupon(r.item_coupon_code), invoiceCouponCode: normCoupon(r.invoice_coupon_code),
+      source: "REAL" as const,
     });
   }
   let linesInserted = 0;
