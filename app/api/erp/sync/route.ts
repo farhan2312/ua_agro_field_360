@@ -31,8 +31,8 @@ export async function GET(req: Request) {
   if (cfgMap.get("erp.schedule.paused") === "1") {
     return NextResponse.json({ ok: true, skipped: true, reason: "Schedule is paused." });
   }
-  const lookRaw = Number.parseInt(cfgMap.get("erp.schedule.lookbackDays") ?? "1", 10);
-  const lookback = Number.isFinite(lookRaw) && lookRaw >= 1 ? Math.min(lookRaw, 30) : 1;
+  const lookRaw = Number.parseInt(cfgMap.get("erp.schedule.lookbackDays") ?? "3", 10);
+  const lookback = Number.isFinite(lookRaw) && lookRaw >= 1 ? Math.min(lookRaw, 30) : 3;
 
   const url = new URL(req.url);
   const to = url.searchParams.get("to") || dateIST(1); // yesterday

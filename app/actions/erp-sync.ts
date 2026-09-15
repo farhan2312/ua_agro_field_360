@@ -105,8 +105,8 @@ export interface ErpSchedule { paused: boolean; lookbackDays: number }
 export async function getErpSchedule(): Promise<ErpSchedule> {
   const rows = await prisma.setting.findMany({ where: { key: { in: [K_PAUSED, K_LOOKBACK] } } });
   const map = new Map(rows.map((r) => [r.key, r.value]));
-  const lookback = Number.parseInt(map.get(K_LOOKBACK) ?? "1", 10);
-  return { paused: map.get(K_PAUSED) === "1", lookbackDays: Number.isFinite(lookback) && lookback >= 1 ? Math.min(lookback, 30) : 1 };
+  const lookback = Number.parseInt(map.get(K_LOOKBACK) ?? "3", 10); // default: catch bills posted up to 3 days late
+  return { paused: map.get(K_PAUSED) === "1", lookbackDays: Number.isFinite(lookback) && lookback >= 1 ? Math.min(lookback, 30) : 3 };
 }
 
 export async function setErpSchedulePaused(paused: boolean): Promise<{ ok: boolean; error?: string }> {
