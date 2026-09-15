@@ -199,7 +199,7 @@ export function viewTitle(
     case "users":
       return ["User Management", "4 active users · Role-based access"];
     case "salesImport":
-      return ["Sales Import", "Upload monthly invoice data"];
+      return ["Sales Sync", "ERP sales feed — daily schedule, on-demand runs & history"];
     case "settings":
       return ["System Settings", "Configuration & master data"];
     case "audit":

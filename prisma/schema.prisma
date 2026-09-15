@@ -951,13 +951,14 @@ model ErpSyncRun {
   id            Int      @id @default(autoincrement())
   fromDate      String // "YYYY-MM-DD" window start
   toDate        String // window end
-  status        String   @default("RUNNING") // RUNNING | SUCCESS | FAILED
+  status        String   @default("RUNNING") // RUNNING | SUCCESS | FAILED | ROLLED_BACK
   rows          Int? // line rows fetched from the API
   bills         Int? // distinct OrderNos
   newCustomers  Int? // farmers created
   linesInserted Int? // SaleLine rows written
+  skipped       Int? // bills skipped (no resolvable mobile)
   stores        Int? // distinct stores seen
-  triggeredBy   String? // "schedule" | "manual:<name>"
+  triggeredBy   String? // "<type>:<by>" — type = schedule | manual | backfill; by = actor / "CLI" / "Scheduler"
   error         String?
   durationMs    Int?
   createdAt     DateTime @default(now())

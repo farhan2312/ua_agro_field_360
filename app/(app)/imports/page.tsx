@@ -2,12 +2,13 @@ import { notFound } from "next/navigation";
 import { getRole } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { SalesImportScreen, type ImportRow } from "@/components/imports/SalesImportScreen";
-import { listErpSyncRuns, type ErpRunVM } from "@/app/actions/erp-sync";
+import { getErpDashboard, type ErpDashboard } from "@/app/actions/erp-sync";
 
 export const dynamic = "force-dynamic";
 
 const DAY = 86_400_000, IST = 330 * 60_000;
 const yesterdayIST = () => new Date(Date.now() + IST - DAY).toISOString().slice(0, 10);
+const todayIST = () => new Date(Date.now() + IST).toISOString().slice(0, 10);
 
 export default async function SalesImportPage() {
   // Sysadmin-only — enforce at the route, not just the nav link.
@@ -40,8 +41,8 @@ export default async function SalesImportPage() {
     // DB not reachable yet — render the empty layout.
   }
 
-  let erpRuns: ErpRunVM[] = [];
-  try { erpRuns = await listErpSyncRuns(15); } catch { /* table may not exist pre-migrate */ }
+  let dash: ErpDashboard | null = null;
+  try { dash = await getErpDashboard(); } catch { /* table may not exist pre-migrate */ }
 
-  return <SalesImportScreen history={history} erpRuns={erpRuns} erpDefaultDate={yesterdayIST()} />;
+  return <SalesImportScreen history={history} dash={dash} erpDefaultDate={yesterdayIST()} todayIST={todayIST()} />;
 }

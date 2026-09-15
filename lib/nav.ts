@@ -39,7 +39,7 @@ export const SALES_NAV: NavItem[] = [
 export const ADMIN_NAV: NavItem[] = [
   { id: "whatsappInbox", label: "WhatsApp Inbox", href: "/whatsapp" },
   { id: "users", label: "Users", href: "/users" },
-  { id: "salesImport", label: "Sales Import", href: "/imports" },
+  { id: "salesImport", label: "Sales Sync", href: "/imports" },
   { id: "settings", label: "Settings", href: "/settings" },
   { id: "audit", label: "Audit Log", href: "/audit" },
   { id: "bugs", label: "Bug Tracker", href: "/bugs" },

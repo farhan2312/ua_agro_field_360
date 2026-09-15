@@ -9,6 +9,7 @@
 import "dotenv/config";
 import { fetchErpSales, importErpRows } from "../lib/erp-sales";
 import { recomputeSegments } from "../lib/segment-engine";
+import { prisma } from "../lib/prisma";
 
 const IST = 330 * 60_000;
 const todayIST = () => new Date(Date.now() + IST).toISOString().slice(0, 10);
@@ -35,20 +36,30 @@ async function main() {
   const wins = monthWindows(start, end);
   console.log(`ERP backfill ${start} → ${end}  (${wins.length} month windows)\n`);
 
-  let totalRows = 0, totalBills = 0, totalLines = 0, totalNew = 0;
+  // Log the whole backfill as a single ErpSyncRun so it appears in the Sales Sync run log.
+  const t0all = Date.now();
+  const run = await prisma.erpSyncRun.create({ data: { fromDate: start, toDate: end, status: "RUNNING", triggeredBy: `backfill:${process.env.SYNC_BY || "CLI"}` } });
+
+  let totalRows = 0, totalBills = 0, totalLines = 0, totalNew = 0, totalSkipped = 0, maxStores = 0;
   const affected = new Set<number>();
-  for (const [from, to] of wins) {
-    const t0 = Date.now();
-    process.stdout.write(`  ${from} → ${to} … fetching`);
-    const rows = await fetchErpSales(from, to);
-    process.stdout.write(` ${rows.length} rows … importing`);
-    const r = await importErpRows(rows, from, to);
-    r.affectedFarmerIds.forEach((id) => affected.add(id));
-    totalRows += r.rows; totalBills += r.bills; totalLines += r.linesInserted; totalNew += r.newCustomers;
-    console.log(`  →  bills=${r.bills} lines=${r.linesInserted} newCust=${r.newCustomers} stores=${r.stores}  (${Date.now() - t0}ms)`);
+  try {
+    for (const [from, to] of wins) {
+      const t0 = Date.now();
+      process.stdout.write(`  ${from} → ${to} … fetching`);
+      const rows = await fetchErpSales(from, to);
+      process.stdout.write(` ${rows.length} rows … importing`);
+      const r = await importErpRows(rows, from, to);
+      r.affectedFarmerIds.forEach((id) => affected.add(id));
+      totalRows += r.rows; totalBills += r.bills; totalLines += r.linesInserted; totalNew += r.newCustomers; totalSkipped += r.skipped; maxStores = Math.max(maxStores, r.stores);
+      console.log(`  →  bills=${r.bills} lines=${r.linesInserted} newCust=${r.newCustomers} skipped=${r.skipped} stores=${r.stores}  (${Date.now() - t0}ms)`);
+    }
+    await prisma.erpSyncRun.update({ where: { id: run.id }, data: { status: "SUCCESS", rows: totalRows, bills: totalBills, linesInserted: totalLines, newCustomers: totalNew, skipped: totalSkipped, stores: maxStores, durationMs: Date.now() - t0all } });
+  } catch (e) {
+    await prisma.erpSyncRun.update({ where: { id: run.id }, data: { status: "FAILED", error: (e instanceof Error ? e.message : String(e)).slice(0, 500), durationMs: Date.now() - t0all } }).catch(() => {});
+    throw e;
   }
 
-  console.log(`\nTOTAL: rows=${totalRows} bills=${totalBills} lines=${totalLines} newCustomers=${totalNew} affectedFarmers=${affected.size}`);
+  console.log(`\nTOTAL: rows=${totalRows} bills=${totalBills} lines=${totalLines} newCustomers=${totalNew} skipped=${totalSkipped} affectedFarmers=${affected.size}`);
   console.log("Recomputing segments (full)…");
   const seg = await recomputeSegments({ onProgress: (m) => process.stdout.write(m) });
   console.log(`\nSegments: value=${JSON.stringify(seg.value)} lifecycle=${JSON.stringify(seg.lifecycle)} leads=${seg.leads} converted=${seg.converted}`);

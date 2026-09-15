@@ -58,7 +58,7 @@ export async function fetchErpSales(from: string, to: string, storeId?: string):
   return Array.isArray(j.response) ? (j.response as ErpRow[]) : [];
 }
 
-export interface ErpImportResult { rows: number; bills: number; newCustomers: number; linesInserted: number; stores: number; affectedFarmerIds: number[] }
+export interface ErpImportResult { rows: number; bills: number; newCustomers: number; linesInserted: number; skipped: number; stores: number; affectedFarmerIds: number[] }
 
 /**
  * Normalise ERP rows into Sale bills + SaleLine rows. Idempotent: replaces all REAL sales in the
@@ -177,7 +177,8 @@ export async function importErpRows(rows: ErpRow[], from: string, to: string): P
   let linesInserted = 0;
   for (let i = 0; i < lineData.length; i += 5000) linesInserted += (await prisma.saleLine.createMany({ data: lineData.slice(i, i + 5000) as never })).count;
 
-  return { rows: rows.length, bills: bills.size, newCustomers, linesInserted, stores: new Set(rows.map((r) => r.RetailerName)).size, affectedFarmerIds: [...affected] };
+  const skipped = bills.size - saleData.length; // bills dropped for no resolvable customer mobile
+  return { rows: rows.length, bills: bills.size, newCustomers, linesInserted, skipped, stores: new Set(rows.map((r) => r.RetailerName)).size, affectedFarmerIds: [...affected] };
 }
 
 export interface ErpSyncResult extends ErpImportResult { ok: boolean; runId: number; error?: string; durationMs: number }
@@ -191,12 +192,12 @@ export async function syncErpSales(opts: { from: string; to: string; triggeredBy
     const r = await importErpRows(rows, opts.from, opts.to);
     if (r.affectedFarmerIds.length) { try { await recomputeSegments({ farmerIds: r.affectedFarmerIds }); } catch { /* best-effort */ } }
     const durationMs = Date.now() - t0;
-    await prisma.erpSyncRun.update({ where: { id: run.id }, data: { status: "SUCCESS", rows: r.rows, bills: r.bills, newCustomers: r.newCustomers, linesInserted: r.linesInserted, stores: r.stores, durationMs } });
+    await prisma.erpSyncRun.update({ where: { id: run.id }, data: { status: "SUCCESS", rows: r.rows, bills: r.bills, newCustomers: r.newCustomers, linesInserted: r.linesInserted, skipped: r.skipped, stores: r.stores, durationMs } });
     return { ok: true, runId: run.id, durationMs, ...r };
   } catch (e) {
     const durationMs = Date.now() - t0;
     const error = e instanceof Error ? e.message : "Sync failed.";
     await prisma.erpSyncRun.update({ where: { id: run.id }, data: { status: "FAILED", error: error.slice(0, 500), durationMs } }).catch(() => {});
-    return { ok: false, runId: run.id, durationMs, error, rows: 0, bills: 0, newCustomers: 0, linesInserted: 0, stores: 0, affectedFarmerIds: [] };
+    return { ok: false, runId: run.id, durationMs, error, rows: 0, bills: 0, newCustomers: 0, linesInserted: 0, skipped: 0, stores: 0, affectedFarmerIds: [] };
   }
 }
