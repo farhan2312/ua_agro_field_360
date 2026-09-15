@@ -591,7 +591,7 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
   const [farmers, stores, phases, smsLogs, waLogs] = await Promise.all([
     prisma.farmer.findMany({ where: { id: { in: members.map((m) => m.farmerId) } }, select: { id: true, name: true, mobile: true, village: true } }),
     prisma.store.findMany({ select: { id: true, name: true } }),
-    prisma.campaignPhase.findMany({ where: { campaignId }, orderBy: { ordinal: "asc" }, select: { ordinal: true, name: true, type: true, defaultStart: true, defaultEnd: true } }),
+    prisma.campaignPhase.findMany({ where: { campaignId }, orderBy: { ordinal: "asc" }, select: { ordinal: true, name: true, type: true, defaultStart: true, defaultEnd: true, coupons: true } }),
     prisma.smsLog.findMany({ where: { campaignId, memberId: { not: null } }, select: { memberId: true, createdAt: true } }),
     prisma.whatsAppLog.findMany({ where: { campaignId, memberId: { not: null } }, select: { memberId: true, createdAt: true } }),
   ]);
@@ -614,6 +614,31 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
   const test = members.filter((m) => m.group === "TEST");
   const count = (pred: (m: typeof members[number]) => boolean) => test.filter(pred).length;
 
+  // ── Per-round coupon redemption (same basis as the tracker) ──
+  // A round with a coupon code is scored on hard redemptions; matching rides on item OR invoice coupon,
+  // over the round window + 30-day tail. byFarmer covers ALL enrolled farmers (for the data-dump sheets);
+  // the overview headline uses the reached-TEST subset to mirror the tracker.
+  const memberFarmerIds = [...new Set(members.map((m) => m.farmerId))];
+  const reachedTestFarmerIds = new Set(test.filter((m) => m.reached).map((m) => m.farmerId));
+  const roundCoupon = new Map<number, { codes: string[]; byFarmer: Map<number, number> }>();
+  for (const p of phases) {
+    const codes = [...new Set(asCoupons(p.coupons).map((c) => c.code.trim().toUpperCase()).filter(Boolean))];
+    if (!codes.length) { roundCoupon.set(p.ordinal, { codes: [], byFarmer: new Map() }); continue; }
+    const rEnd = new Date(p.defaultEnd); rEnd.setDate(rEnd.getDate() + 30);
+    roundCoupon.set(p.ordinal, { codes, byFarmer: await couponSpendByFarmer(codes, memberFarmerIds, p.defaultStart, rEnd) });
+  }
+  const anyCoupons = [...roundCoupon.values()].some((r) => r.codes.length > 0);
+  // Per-farmer rollup across all rounds → codes redeemed + total coupon revenue (All-farmers sheet).
+  const couponByFarmer = new Map<number, { codes: Set<string>; revenue: number }>();
+  for (const rc of roundCoupon.values()) {
+    for (const [fid, rev] of rc.byFarmer) {
+      if (rev <= 0) continue;
+      const e = couponByFarmer.get(fid) ?? { codes: new Set<string>(), revenue: 0 };
+      rc.codes.forEach((c) => e.codes.add(c)); e.revenue += rev;
+      couponByFarmer.set(fid, e);
+    }
+  }
+
   // ── Overview sheet ──
   const overview: (string | number)[][] = [
     ["Campaign", campaignName],
@@ -633,21 +658,32 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
     ["  via WhatsApp", count((m) => (m.broadcastMediums ?? []).includes("WHATSAPP"))],
     [""],
     ["Rounds", ""],
-    ["Round", "Window", "SMS sent", "WhatsApp sent", "Farmers reached in window"],
+    ["Round", "Window", "SMS sent", "WhatsApp sent", "Farmers reached in window", "Basis", "Coupon code(s)", "Redeemers (reached test)", "Redemption rate", "Coupon revenue (₹)"],
     ...phases.map((p) => {
       const sms = [...smsByRound].filter(([k]) => k.endsWith(`:${p.ordinal}`)).reduce((s, [, v]) => s + v, 0);
       const wa = [...waByRound].filter(([k]) => k.endsWith(`:${p.ordinal}`)).reduce((s, [, v]) => s + v, 0);
       const reached = test.filter((m) => m.reachedAt && roundOf(m.reachedAt) === p.ordinal).length;
-      return [`${p.ordinal}. ${p.name}`, `${fmtDay(p.defaultStart)} → ${fmtDay(p.defaultEnd)}`, sms, wa, reached] as (string | number)[];
+      const rc = roundCoupon.get(p.ordinal)!;
+      const reachedCount = reachedTestFarmerIds.size;
+      let redeemers = 0, rev = 0;
+      if (rc.codes.length) for (const fid of reachedTestFarmerIds) { const v = rc.byFarmer.get(fid) ?? 0; if (v > 0) { redeemers++; rev += v; } }
+      const couponCols: (string | number)[] = rc.codes.length
+        ? ["Coupon", rc.codes.join(", "), redeemers, reachedCount ? `${Math.round((redeemers / reachedCount) * 1000) / 10}%` : "—", Math.round(rev)]
+        : ["Spend", "", "", "", ""];
+      return [`${p.ordinal}. ${p.name}`, `${fmtDay(p.defaultStart)} → ${fmtDay(p.defaultEnd)}`, sms, wa, reached, ...couponCols] as (string | number)[];
     }),
     [""],
     ["Note", "Call / in-person / comments are not timestamped per round — the per-round sheets show only the message sends (SMS/WhatsApp) that fall in each round's window plus who was reached in it. The full current outreach state per farmer is in the 'All farmers' sheet."],
+    ["Coupon note", "A round with a coupon code is scored on hard redemptions (a reached test farmer buying on that code, item or invoice, within the round window + 30 days). A round with no code falls back to matched spend, same as the campaign total."],
   ];
 
   // ── All farmers sheet (full current outreach state) ──
-  const allHeader = ["Group", "Farmer", "Mobile", "Village", "Store", "Value segment", "Lifecycle", "Reached", "Channels", "Response", "Response crop", "Broadcast delivered", "SMS sent", "WhatsApp sent", "Recorded by", "Recorded at (IST)", "Comment"];
+  const allHeader = ["Group", "Farmer", "Mobile", "Village", "Store", "Value segment", "Lifecycle", "Reached", "Channels", "Response", "Response crop", "Broadcast delivered", "SMS sent", "WhatsApp sent",
+    ...(anyCoupons ? ["Coupon(s) redeemed", "Coupon revenue (₹)"] : []),
+    "Recorded by", "Recorded at (IST)", "Comment"];
   const allRows: (string | number)[][] = members.map((m) => {
     const f = fMap.get(m.farmerId);
+    const cp = couponByFarmer.get(m.farmerId);
     return [
       m.group ?? "", f?.name ?? `Farmer #${m.farmerId}`, f?.mobile ?? "", f?.village ?? "", store(m.storeId),
       m.valueSegment ? segMeta(m.valueSegment).label : (m.segment ? segMeta(m.segment).label : ""),
@@ -657,6 +693,7 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
       m.response ? RESP[m.response] ?? m.response : "", m.responseCrop ? cropLabel(m.responseCrop) : "",
       (m.broadcastMediums ?? []).map((x) => MED[x] ?? x).join(", "),
       smsTotal.get(m.id) ?? 0, waTotal.get(m.id) ?? 0,
+      ...(anyCoupons ? [cp ? [...cp.codes].join(", ") : "", cp ? Math.round(cp.revenue) : ""] : []),
       m.reachedBy ? `${m.reachedBy}${m.reachedByCode ? ` (${m.reachedByCode})` : ""}` : "", fmtTs(m.reachedAt), m.comment ?? "",
     ];
   });
@@ -668,18 +705,28 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
 
   // ── One sheet per round — message sends in that round's window + who was reached in it ──
   const roundHeader = ["Farmer", "Mobile", "Store", "SMS sent (round)", "WhatsApp sent (round)", "Reached in round", "Response (current)", "Comment (current)", "Recorded by", "Recorded at (IST)"];
+  const roundHeaderCoupon = ["Farmer", "Mobile", "Store", "Group", "SMS sent (round)", "WhatsApp sent (round)", "Reached in round", "Redeemed coupon", "Coupon revenue (₹)", "Response (current)", "Comment (current)", "Recorded by", "Recorded at (IST)"];
   for (const p of phases) {
+    const rc = roundCoupon.get(p.ordinal)!;
+    const isCoupon = rc.codes.length > 0;
     const rrows: (string | number)[][] = [];
     for (const m of members) {
       const sms = smsByRound.get(`${m.id}:${p.ordinal}`) ?? 0;
       const wa = waByRound.get(`${m.id}:${p.ordinal}`) ?? 0;
       const reachedIn = !!(m.reachedAt && roundOf(m.reachedAt) === p.ordinal);
-      if (!sms && !wa && !reachedIn) continue; // only farmers with activity in this round
+      const redeemed = rc.byFarmer.get(m.farmerId) ?? 0;
+      // Coupon rounds also list farmers who redeemed even with no logged send/reach (e.g. via broadcast).
+      if (!sms && !wa && !reachedIn && !(isCoupon && redeemed > 0)) continue;
       const f = fMap.get(m.farmerId);
-      rrows.push([f?.name ?? `Farmer #${m.farmerId}`, f?.mobile ?? "", store(m.storeId), sms, wa, reachedIn ? "Yes" : "", m.response ? RESP[m.response] ?? m.response : "", reachedIn ? (m.comment ?? "") : "", reachedIn && m.reachedBy ? `${m.reachedBy}${m.reachedByCode ? ` (${m.reachedByCode})` : ""}` : "", reachedIn ? fmtTs(m.reachedAt) : ""]);
+      const base: (string | number)[] = [f?.name ?? `Farmer #${m.farmerId}`, f?.mobile ?? "", store(m.storeId)];
+      const tail: (string | number)[] = [m.response ? RESP[m.response] ?? m.response : "", reachedIn ? (m.comment ?? "") : "", reachedIn && m.reachedBy ? `${m.reachedBy}${m.reachedByCode ? ` (${m.reachedByCode})` : ""}` : "", reachedIn ? fmtTs(m.reachedAt) : ""];
+      rrows.push(isCoupon
+        ? [...base, m.group ?? "", sms, wa, reachedIn ? "Yes" : "", redeemed > 0 ? "Yes" : "", redeemed > 0 ? Math.round(redeemed) : "", ...tail]
+        : [...base, sms, wa, reachedIn ? "Yes" : "", ...tail]);
     }
     const nm = `R${p.ordinal} ${p.name}`.replace(/[\\/?*[\]:]/g, " ").slice(0, 31); // Excel sheet-name limit
-    sheets.push({ name: nm || `Round ${p.ordinal}`, rows: rrows.length ? [roundHeader, ...rrows] : [["No message sends or reaches recorded in this round's window."]] });
+    const noActivity = isCoupon ? "No sends, reaches or coupon redemptions in this round's window." : "No message sends or reaches recorded in this round's window.";
+    sheets.push({ name: nm || `Round ${p.ordinal}`, rows: rrows.length ? [isCoupon ? roundHeaderCoupon : roundHeader, ...rrows] : [[noActivity]] });
   }
 
   const safe = (campaignName || "campaign").replace(/[\\/?*[\]:]/g, " ").trim().slice(0, 60) || "campaign";
