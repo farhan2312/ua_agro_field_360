@@ -47,6 +47,11 @@ function lastActiveColor(s: string) {
   return /day/i.test(s) ? "#E65100" : "#757575";
 }
 
+/** Exact last-active moment in IST — the precise "date and time" for monitoring/transparency. */
+function fmtActiveIST(iso: string) {
+  return new Date(iso).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" });
+}
+
 const ROLE_CARDS: { accent: string; title: string; body: string }[] = [
   {
     accent: "#2E7D32",
@@ -270,9 +275,10 @@ export function UsersTab({
                 </div>
                 {/* Territory */}
                 <div className="truncate pr-2 text-[12px] text-[#616161]" title={ur.territory || ur.zone}>{ur.territory || ur.zone}</div>
-                {/* Last Active */}
-                <div className="text-[12px]" style={{ color: lastActiveColor(ur.lastActive) }}>
-                  {ur.lastActive}
+                {/* Last Active — relative label + exact IST date/time for real monitoring */}
+                <div title={ur.lastActiveAt ? fmtActiveIST(ur.lastActiveAt) : undefined}>
+                  <div className="text-[12px]" style={{ color: lastActiveColor(ur.lastActive) }}>{ur.lastActive}</div>
+                  {ur.lastActiveAt && <div className="text-[10px] text-[#9E9E9E]">{fmtActiveIST(ur.lastActiveAt)}</div>}
                 </div>
                 {/* Visits MTD */}
                 <div className="text-[13px] font-bold" style={{ color: visitsColor }}>
