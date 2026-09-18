@@ -12,12 +12,13 @@ import { StoreTagPills } from "./StoreTagPills";
  * (tri-state: fills all / clears all). A per-row "＋" adds a single tag; clicking a pill removes it.
  * Filter by tag to find stores. Catalog CRUD stays in Settings.
  */
-export function StoreTagBoard({ stores, tags, tagMap, tagIdsByStore, onApply }: {
+export function StoreTagBoard({ stores, tags, tagMap, tagIdsByStore, onApply, onClearAll }: {
   stores: StoreListItem[];
   tags: StoreTagMeta[];
   tagMap: Map<number, StoreTagMeta>;
   tagIdsByStore: Record<number, number[]>;
   onApply: (storeIds: number[], tagId: number, on: boolean) => void;
+  onClearAll: (storeIds: number[]) => void;
 }) {
   const [q, setQ] = useState("");
   const [filterTags, setFilterTags] = useState<Set<number>>(new Set());
@@ -119,7 +120,14 @@ export function StoreTagBoard({ stores, tags, tagMap, tagIdsByStore, onApply }: 
               </button>
             );
           })}
-          <button type="button" onClick={() => setSelected(new Set())} className="ml-auto text-[11.5px] font-semibold text-[#C62828] hover:underline">Clear selection</button>
+          {selList.some((id) => tagsOf(id).length > 0) && (
+            <button type="button"
+              onClick={() => { if (window.confirm(`Remove ALL tags from ${selList.length} selected store${selList.length > 1 ? "s" : ""}?`)) onClearAll(selList); }}
+              className="ml-auto rounded-full border-[1.5px] border-[#E0A0A0] px-2.5 py-[3px] text-[11px] font-semibold text-[#C62828] hover:bg-[#FDECEA]">
+              Clear all tags
+            </button>
+          )}
+          <button type="button" onClick={() => setSelected(new Set())} className={`${selList.some((id) => tagsOf(id).length > 0) ? "" : "ml-auto "}text-[11.5px] font-semibold text-[#C62828] hover:underline`}>Clear selection</button>
         </div>
       )}
 
@@ -167,6 +175,12 @@ export function StoreTagBoard({ stores, tags, tagMap, tagIdsByStore, onApply }: 
                           </button>
                         ); })}
                         <AddTagMenu tags={tags} has={t} onAdd={(tagId) => onApply([s.id], tagId, true)} />
+                        {t.length >= 2 && (
+                          <button type="button" onClick={() => onClearAll([s.id])} title="Remove all tags from this store"
+                            className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-[#9E9E9E] hover:bg-[#FDECEA] hover:text-[#C62828]">
+                            clear all
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
