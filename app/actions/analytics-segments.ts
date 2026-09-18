@@ -29,6 +29,8 @@ export interface WbFilters {
   problems?: string[];       // visit lens — match ANY
   visitFrom?: string;        // visit lens — visitedAt >= this date (ISO YYYY-MM-DD)
   visitTo?: string;          // visit lens — visitedAt <= this date (ISO YYYY-MM-DD)
+  salesFrom?: string;        // sales lens — bounds the EXPORT's sale lines: soldAt >= this date (ISO YYYY-MM-DD)
+  salesTo?: string;          // sales lens — bounds the EXPORT's sale lines: soldAt <= this date (ISO YYYY-MM-DD)
 }
 
 const num = (x: unknown) => (x == null ? 0 : Number(x));
