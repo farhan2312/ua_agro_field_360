@@ -207,7 +207,7 @@ export function viewTitle(
     case "whatsappInbox":
       return ["WhatsApp Inbox", "Everyone who has messaged the official number"];
     case "bugs":
-      return ["Bug Tracker", "Reports filed through the portal · triage & resolve"];
+      return ["Issue Tracker", "Reports filed through the portal · triage & resolve"];
     case "training":
       return ["Training & Help", "Guides and how-to videos for the portal"];
     case "campaigns":

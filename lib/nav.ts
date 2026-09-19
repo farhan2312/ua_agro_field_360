@@ -42,7 +42,7 @@ export const ADMIN_NAV: NavItem[] = [
   { id: "salesImport", label: "Sales Sync", href: "/imports" },
   { id: "settings", label: "Settings", href: "/settings" },
   { id: "audit", label: "Audit Log", href: "/audit" },
-  { id: "bugs", label: "Bug Tracker", href: "/bugs" },
+  { id: "bugs", label: "Issue Tracker", href: "/bugs" },
 ];
 
 /** Nav items visible to a role (RBAC). */
