@@ -590,19 +590,21 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
 
   const [farmers, stores, phases, smsLogs, waLogs] = await Promise.all([
     prisma.farmer.findMany({ where: { id: { in: members.map((m) => m.farmerId) } }, select: { id: true, name: true, mobile: true, village: true } }),
-    prisma.store.findMany({ select: { id: true, name: true } }),
+    prisma.store.findMany({ select: { id: true, name: true, regionalManager: true } }),
     prisma.campaignPhase.findMany({ where: { campaignId }, orderBy: { ordinal: "asc" }, select: { ordinal: true, name: true, type: true, defaultStart: true, defaultEnd: true, coupons: true } }),
     prisma.smsLog.findMany({ where: { campaignId, memberId: { not: null } }, select: { memberId: true, createdAt: true } }),
     prisma.whatsAppLog.findMany({ where: { campaignId, memberId: { not: null } }, select: { memberId: true, createdAt: true } }),
   ]);
   const fMap = new Map(farmers.map((f) => [f.id, f]));
   const sMap = new Map(stores.map((s) => [s.id, shortStoreName(s.name) || s.name]));
+  const rmMap = new Map(stores.map((s) => [s.id, (s.regionalManager ?? "").trim()]));
 
   const MED: Record<string, string> = { CALL: "Call", WHATSAPP: "WhatsApp", SMS: "SMS", IN_PERSON: "In-person", UNREACHABLE: "Unreachable" };
   const RESP: Record<string, string> = { INTERESTED: "Interested", NOT_INTERESTED: "Not interested", OTHER_CROP: "Other crop" };
   const fmtTs = (d: Date | null) => (d ? new Date(d.getTime() + 330 * 60_000).toISOString().slice(0, 16).replace("T", " ") : "");
   const fmtDay = (d: Date) => new Date(d.getTime() + 330 * 60_000).toISOString().slice(0, 10);
   const store = (id: number | null) => (id != null ? sMap.get(id) ?? "" : "");
+  const rm = (id: number | null) => (id != null ? rmMap.get(id) ?? "" : "");
 
   // Round attribution for timestamped sends: which phase window contains a send/date.
   const roundOf = (d: Date): number | null => phases.find((p) => d >= p.defaultStart && d <= p.defaultEnd)?.ordinal ?? null;
@@ -678,14 +680,14 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
   ];
 
   // ── All farmers sheet (full current outreach state) ──
-  const allHeader = ["Group", "Farmer", "Mobile", "Village", "Store", "Value segment", "Lifecycle", "Reached", "Channels", "Response", "Response crop", "Broadcast delivered", "SMS sent", "WhatsApp sent",
+  const allHeader = ["Group", "Farmer", "Mobile", "Village", "Store", "RM", "Value segment", "Lifecycle", "Reached", "Channels", "Response", "Response crop", "Broadcast delivered", "SMS sent", "WhatsApp sent",
     ...(anyCoupons ? ["Coupon(s) redeemed", "Coupon revenue (₹)"] : []),
     "Recorded by", "Recorded at (IST)", "Comment"];
   const allRows: (string | number)[][] = members.map((m) => {
     const f = fMap.get(m.farmerId);
     const cp = couponByFarmer.get(m.farmerId);
     return [
-      m.group ?? "", f?.name ?? `Farmer #${m.farmerId}`, f?.mobile ?? "", f?.village ?? "", store(m.storeId),
+      m.group ?? "", f?.name ?? `Farmer #${m.farmerId}`, f?.mobile ?? "", f?.village ?? "", store(m.storeId), rm(m.storeId),
       m.valueSegment ? segMeta(m.valueSegment).label : (m.segment ? segMeta(m.segment).label : ""),
       m.lifecycleSegment ? segMeta(m.lifecycleSegment).label : "",
       m.reached ? "Yes" : "No",
@@ -704,8 +706,8 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
   ];
 
   // ── One sheet per round — message sends in that round's window + who was reached in it ──
-  const roundHeader = ["Farmer", "Mobile", "Store", "SMS sent (round)", "WhatsApp sent (round)", "Reached in round", "Response (current)", "Comment (current)", "Recorded by", "Recorded at (IST)"];
-  const roundHeaderCoupon = ["Farmer", "Mobile", "Store", "Group", "SMS sent (round)", "WhatsApp sent (round)", "Reached in round", "Redeemed coupon", "Coupon revenue (₹)", "Response (current)", "Comment (current)", "Recorded by", "Recorded at (IST)"];
+  const roundHeader = ["Farmer", "Mobile", "Store", "RM", "SMS sent (round)", "WhatsApp sent (round)", "Reached in round", "Response (current)", "Comment (current)", "Recorded by", "Recorded at (IST)"];
+  const roundHeaderCoupon = ["Farmer", "Mobile", "Store", "RM", "Group", "SMS sent (round)", "WhatsApp sent (round)", "Reached in round", "Redeemed coupon", "Coupon revenue (₹)", "Response (current)", "Comment (current)", "Recorded by", "Recorded at (IST)"];
   for (const p of phases) {
     const rc = roundCoupon.get(p.ordinal)!;
     const isCoupon = rc.codes.length > 0;
@@ -718,7 +720,7 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
       // Coupon rounds also list farmers who redeemed even with no logged send/reach (e.g. via broadcast).
       if (!sms && !wa && !reachedIn && !(isCoupon && redeemed > 0)) continue;
       const f = fMap.get(m.farmerId);
-      const base: (string | number)[] = [f?.name ?? `Farmer #${m.farmerId}`, f?.mobile ?? "", store(m.storeId)];
+      const base: (string | number)[] = [f?.name ?? `Farmer #${m.farmerId}`, f?.mobile ?? "", store(m.storeId), rm(m.storeId)];
       const tail: (string | number)[] = [m.response ? RESP[m.response] ?? m.response : "", reachedIn ? (m.comment ?? "") : "", reachedIn && m.reachedBy ? `${m.reachedBy}${m.reachedByCode ? ` (${m.reachedByCode})` : ""}` : "", reachedIn ? fmtTs(m.reachedAt) : ""];
       rrows.push(isCoupon
         ? [...base, m.group ?? "", sms, wa, reachedIn ? "Yes" : "", redeemed > 0 ? "Yes" : "", redeemed > 0 ? Math.round(redeemed) : "", ...tail]
@@ -827,8 +829,9 @@ export async function exportCampaignAudienceXlsx(campaignId: number, campaignNam
   });
   if (!members.length) return { ok: false, error: "No enrolled farmers in your scope for this campaign." };
 
-  const stores = await prisma.store.findMany({ select: { id: true, name: true } });
+  const stores = await prisma.store.findMany({ select: { id: true, name: true, regionalManager: true } });
   const sMap = new Map(stores.map((s) => [s.id, shortStoreName(s.name)]));
+  const rmByName = new Map(stores.map((s) => [shortStoreName(s.name), (s.regionalManager ?? "").trim()]));
 
   const V = [...VALUE_SEGMENTS], L = [...LIFECYCLE_SEGMENTS];
   const vseg = (m: { valueSegment: string | null; segment: string }) => m.valueSegment ?? (V.includes(m.segment as never) ? m.segment : "REGULAR");
@@ -846,9 +849,9 @@ export async function exportCampaignAudienceXlsx(campaignId: number, campaignNam
   const mrows = [...cross.entries()].map(([store, c]) => ({ store, ...c })).sort((a, b) => b.total - a.total);
 
   const matrixSheet: (string | number)[][] = [
-    ["Store", ...V.map((s) => segMeta(s).label), "Segment Total", ...L.map((s) => segMeta(s).label), "Lifecycle Total"],
-    ["All stores", ...V.map((k) => vTot[k] ?? 0), members.length, ...L.map((k) => lTot[k] ?? 0), members.length],
-    ...mrows.map((r) => [r.store, ...V.map((k) => r.value[k] ?? 0), r.total, ...L.map((k) => r.lifecycle[k] ?? 0), r.total]),
+    ["Store", "RM", ...V.map((s) => segMeta(s).label), "Segment Total", ...L.map((s) => segMeta(s).label), "Lifecycle Total"],
+    ["All stores", "", ...V.map((k) => vTot[k] ?? 0), members.length, ...L.map((k) => lTot[k] ?? 0), members.length],
+    ...mrows.map((r) => [r.store, rmByName.get(r.store) ?? "", ...V.map((k) => r.value[k] ?? 0), r.total, ...L.map((k) => r.lifecycle[k] ?? 0), r.total]),
   ];
   const safe = (campaignName || "campaign").replace(/[\\/?*[\]:]/g, " ").trim().slice(0, 60) || "campaign";
   const b64 = buildWorkbookB64([
