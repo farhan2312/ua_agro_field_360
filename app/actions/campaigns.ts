@@ -588,12 +588,13 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
   });
   if (!members.length) return { ok: false, error: "No enrolled farmers to export." };
 
-  const [farmers, stores, phases, smsLogs, waLogs] = await Promise.all([
+  const [farmers, stores, phases, smsLogs, waLogs, camp] = await Promise.all([
     prisma.farmer.findMany({ where: { id: { in: members.map((m) => m.farmerId) } }, select: { id: true, name: true, mobile: true, village: true } }),
     prisma.store.findMany({ select: { id: true, name: true, regionalManager: true } }),
     prisma.campaignPhase.findMany({ where: { campaignId }, orderBy: { ordinal: "asc" }, select: { ordinal: true, name: true, type: true, defaultStart: true, defaultEnd: true, coupons: true } }),
     prisma.smsLog.findMany({ where: { campaignId, memberId: { not: null } }, select: { memberId: true, createdAt: true } }),
     prisma.whatsAppLog.findMany({ where: { campaignId, memberId: { not: null } }, select: { memberId: true, createdAt: true } }),
+    prisma.campaign.findUnique({ where: { id: campaignId }, select: { startDate: true, endDate: true } }),
   ]);
   const fMap = new Map(farmers.map((f) => [f.id, f]));
   const sMap = new Map(stores.map((s) => [s.id, shortStoreName(s.name) || s.name]));
@@ -729,6 +730,32 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
     const nm = `R${p.ordinal} ${p.name}`.replace(/[\\/?*[\]:]/g, " ").slice(0, 31); // Excel sheet-name limit
     const noActivity = isCoupon ? "No sends, reaches or coupon redemptions in this round's window." : "No message sends or reaches recorded in this round's window.";
     sheets.push({ name: nm || `Round ${p.ordinal}`, rows: rrows.length ? [isCoupon ? roundHeaderCoupon : roundHeader, ...rrows] : [[noActivity]] });
+  }
+
+  // ── Transactions sheet — exactly what the TEST farmers bought in the campaign window (+30-day tail) ──
+  if (camp) {
+    const winStart = camp.startDate;
+    const winEnd = new Date(camp.endDate); winEnd.setDate(winEnd.getDate() + 30);
+    const testIds = [...new Set(members.filter((m) => m.group === "TEST").map((m) => m.farmerId))];
+    const txns = testIds.length
+      ? await prisma.saleLine.findMany({
+          where: { source: "REAL", farmerId: { in: testIds }, soldAt: { gte: winStart, lte: winEnd } },
+          select: { farmerId: true, soldAt: true, orderNo: true, itemRaw: true, cropTag: true, qty: true, uom: true, basic: true, itemCouponCode: true, invoiceCouponCode: true, storeId: true },
+          orderBy: [{ farmerId: "asc" }, { soldAt: "asc" }],
+          take: 100000,
+        })
+      : [];
+    const txnHeader = ["Farmer", "Mobile", "Store", "RM", "Date", "Order No", "Item", "Crop", "Qty", "UOM", "Base value (₹)", "Coupon"];
+    const txnRows: (string | number)[][] = txns.map((r) => {
+      const f = r.farmerId != null ? fMap.get(r.farmerId) : undefined;
+      const coupon = (r.itemCouponCode && r.itemCouponCode !== "0" ? r.itemCouponCode : "") || (r.invoiceCouponCode && r.invoiceCouponCode !== "0" ? r.invoiceCouponCode : "");
+      return [
+        f?.name ?? (r.farmerId != null ? `Farmer #${r.farmerId}` : "—"), f?.mobile ?? "", store(r.storeId), rm(r.storeId),
+        r.soldAt ? fmtDay(r.soldAt) : "", r.orderNo ?? "", r.itemRaw ?? "", r.cropTag ? cropLabel(r.cropTag) : "",
+        r.qty ?? 0, r.uom ?? "", Math.round(r.basic ?? 0), coupon,
+      ];
+    });
+    sheets.push({ name: "Transactions (test)", rows: txnRows.length ? [txnHeader, ...txnRows] : [["No transactions by test farmers in the campaign window."]] });
   }
 
   const safe = (campaignName || "campaign").replace(/[\\/?*[\]:]/g, " ").trim().slice(0, 60) || "campaign";
@@ -952,15 +979,6 @@ export async function markCampaignMember(
   }
 }
 
-export interface UpliftRow {
-  segment: string;
-  test: { farmers: number; reached: number; purchased: number; avg: number };
-  control: { farmers: number; purchased: number; avg: number };
-  upliftPurchasePct: number; // test%purch − control%purch
-  upliftAvg: number;
-  incremental: number;
-}
-
 /* ── Attribution: which purchases count as "campaign revenue" ── */
 interface ProductFilter { crops: string[]; categories: string[]; all: boolean }
 
@@ -1030,36 +1048,85 @@ type UpliftMemberVM = { farmerId: number; segment: string | null; valueSegment: 
 const valueKeyOf = (m: UpliftMemberVM) => m.valueSegment ?? (VALUE_SEGMENTS.includes(m.segment as never) ? (m.segment as string) : "REGULAR");
 const lifecycleKeyOf = (m: UpliftMemberVM) => m.lifecycleSegment ?? (LIFECYCLE_SEGMENTS.includes(m.segment as never) ? (m.segment as string) : "LAPSED");
 
-/** Purchase-rate uplift rows (test vs control) over `matched` spend, grouped by the chosen segment axis. */
-function buildUpliftRows(members: UpliftMemberVM[], matched: Map<number, number>, keyOf: (m: UpliftMemberVM) => string, order: readonly string[]): UpliftRow[] {
-  type Acc = { tF: number; tR: number; tP: number; tSum: number; cF: number; cP: number; cSum: number };
-  const bySeg = new Map<string, Acc>();
-  for (const m of members) {
-    const k = keyOf(m);
-    const a = bySeg.get(k) ?? { tF: 0, tR: 0, tP: 0, tSum: 0, cF: 0, cP: 0, cSum: 0 };
-    const spend = matched.get(m.farmerId) ?? 0;
-    const bought = spend > 0;
-    if (m.group === "TEST") { a.tF++; if (m.reached) a.tR++; if (bought) { a.tP++; a.tSum += spend; } }
-    else { a.cF++; if (bought) { a.cP++; a.cSum += spend; } }
-    bySeg.set(k, a);
-  }
-  return order.filter((k) => bySeg.has(k)).map((segment) => {
-    const a = bySeg.get(segment)!;
-    const testPurchPct = a.tR > 0 ? a.tP / a.tR : a.tF > 0 ? a.tP / a.tF : 0;
-    const ctrlPurchPct = a.cF > 0 ? a.cP / a.cF : 0;
-    const testAvg = a.tP > 0 ? a.tSum / a.tP : 0;
-    const ctrlAvg = a.cP > 0 ? a.cSum / a.cP : 0;
-    const upliftPct = testPurchPct - ctrlPurchPct;
-    const reachedOrFarmers = a.tR > 0 ? a.tR : a.tF;
-    return {
-      segment,
-      test: { farmers: a.tF, reached: a.tR, purchased: a.tP, avg: Math.round(testAvg) },
-      control: { farmers: a.cF, purchased: a.cP, avg: Math.round(ctrlAvg) },
-      upliftPurchasePct: Math.round(upliftPct * 1000) / 10,
-      upliftAvg: Math.round(testAvg - ctrlAvg),
-      incremental: Math.round(reachedOrFarmers * upliftPct * testAvg),
-    };
-  });
+/* ── Segment × view attribution table (Shilpa's dashboard spec, 2026-09-16) ──
+ * Per value/lifecycle segment: Test/Reach/Buy counts, Test%Buy, Reach%Buy, Control%Buy,
+ * RELATIVE uplift % = (reach%buy − ctrl%buy)/reach%buy, and incremental = uplift × total sales.
+ * Three "match" views drive what counts as a BUY (coupon-redeemed / crop-matched / any transaction);
+ * TOTAL SALES is always every transaction (view-independent), shown for all-test (a) and reached (b).
+ * Leads / No-spend get NO uplift — their whole sales count as incremental. */
+export type MatchView = "coupon" | "crop" | "total";
+export interface SegViewCell {
+  buy: number;            // reached TEST who bought (this view)
+  testPctBuy: number;     // buy / test  (%, 1-dp)
+  reachPctBuy: number;    // buy / reached  (%, 1-dp)
+  controlBuy: number;     // control who bought (this view)
+  controlPctBuy: number;  // controlBuy / control  (%, 1-dp)
+  upliftPct: number | null; // relative uplift % (1-dp); null = n/a (reach%=0, or a leads row)
+  incrAllTest: number;    // uplift × total-sales(all test)   [leads: = total sales]
+  incrReached: number;    // uplift × total-sales(reached)    [leads: = total sales]
+}
+export interface SegRow {
+  segment: string; isLeads: boolean;
+  test: number; reached: number; control: number;
+  totalSalesAllTest: number; totalSalesReached: number; // all transactions (base ₹), view-independent
+  views: Record<MatchView, SegViewCell>;
+}
+export interface TrackerScope {
+  key: string; label: string;               // "overall"/"All rounds" · "R1"/"Round 1 · Discount"
+  windowStart: string; windowEnd: string;    // dates + 30-day tail
+  couponCodes: string[];
+  byValue: SegRow[]; byLifecycle: SegRow[];
+}
+
+const MV: MatchView[] = ["coupon", "crop", "total"];
+
+/** Build one scope's segment tables (overall campaign or one round) across all three match views. */
+async function computeScope(members: UpliftMemberVM[], pf: ProductFilter, codes: string[], ws: Date, we: Date, key: string, label: string): Promise<TrackerScope> {
+  const allIds = [...new Set(members.map((m) => m.farmerId))];
+  const [allSpend, cropSpend, couponSpend] = await Promise.all([
+    matchedSpendByFarmer({ crops: [], categories: [], all: true }, allIds, ws, we), // every transaction
+    pf.all ? Promise.resolve<Map<number, number> | null>(null) : matchedSpendByFarmer(pf, allIds, ws, we),
+    codes.length ? couponSpendByFarmer(codes, allIds, ws, we) : Promise.resolve(new Map<number, number>()),
+  ]);
+  const cropMap = cropSpend ?? allSpend; // non-product-specific campaign → crop view == all transactions
+  const boughtIn = (fid: number, v: MatchView) => ((v === "total" ? allSpend : v === "crop" ? cropMap : couponSpend).get(fid) ?? 0) > 0;
+
+  const build = (keyOf: (m: UpliftMemberVM) => string, order: readonly string[]): SegRow[] => {
+    type Acc = { test: number; reached: number; control: number; totAll: number; totReached: number; buy: Record<MatchView, number>; cbuy: Record<MatchView, number> };
+    const mk = (): Acc => ({ test: 0, reached: 0, control: 0, totAll: 0, totReached: 0, buy: { coupon: 0, crop: 0, total: 0 }, cbuy: { coupon: 0, crop: 0, total: 0 } });
+    const bySeg = new Map<string, Acc>();
+    for (const m of members) {
+      const k = keyOf(m); const a = bySeg.get(k) ?? mk();
+      const spend = allSpend.get(m.farmerId) ?? 0;
+      if (m.group === "TEST") {
+        a.test++; a.totAll += spend;
+        if (m.reached) { a.reached++; a.totReached += spend; for (const v of MV) if (boughtIn(m.farmerId, v)) a.buy[v]++; }
+      } else { a.control++; for (const v of MV) if (boughtIn(m.farmerId, v)) a.cbuy[v]++; }
+      bySeg.set(k, a);
+    }
+    return order.filter((k) => bySeg.has(k)).map((segment): SegRow => {
+      const a = bySeg.get(segment)!;
+      const isLeads = segment === "NO_SPEND" || segment === "LEAD";
+      const views = {} as Record<MatchView, SegViewCell>;
+      for (const v of MV) {
+        const reachRatio = a.reached > 0 ? a.buy[v] / a.reached : 0;
+        const ctrlRatio = a.control > 0 ? a.cbuy[v] / a.control : 0;
+        const uplift = !isLeads && reachRatio > 0 ? (reachRatio - ctrlRatio) / reachRatio : null;
+        views[v] = {
+          buy: a.buy[v],
+          testPctBuy: a.test > 0 ? Math.round((a.buy[v] / a.test) * 1000) / 10 : 0,
+          reachPctBuy: Math.round(reachRatio * 1000) / 10,
+          controlBuy: a.cbuy[v],
+          controlPctBuy: Math.round(ctrlRatio * 1000) / 10,
+          upliftPct: uplift != null ? Math.round(uplift * 1000) / 10 : null,
+          incrAllTest: isLeads ? Math.round(a.totAll) : uplift != null ? Math.round(uplift * a.totAll) : 0,
+          incrReached: isLeads ? Math.round(a.totReached) : uplift != null ? Math.round(uplift * a.totReached) : 0,
+        };
+      }
+      return { segment, isLeads, test: a.test, reached: a.reached, control: a.control, totalSalesAllTest: Math.round(a.totAll), totalSalesReached: Math.round(a.totReached), views };
+    });
+  };
+  return { key, label, windowStart: iso(ws)!, windowEnd: iso(we)!, couponCodes: codes, byValue: build(valueKeyOf, VALUE_SEGMENTS), byLifecycle: build(lifecycleKeyOf, LIFECYCLE_SEGMENTS) };
 }
 
 export interface CampaignReach {
@@ -1074,27 +1141,12 @@ export interface CampaignReach {
 export interface CampaignAttribution {
   basisLabel: string; crops: string[]; categories: string[]; all: boolean; noCatalogMatch: boolean;
   windowStart: string; windowEnd: string;
-  reachedFarmers: number; payingFarmers: number; matchedRevenue: number; totalRevenue: number;
 }
-/** Per-round attribution. Mode is decided by the round's own coupon codes: any code → coupon-redemption
- *  is the headline success metric; none → the invoice/matched-spend calc (today's default) is used.
- *  Uplift is kept alongside in both modes. Redemption success = REACHED TEST members who redeemed. */
-export interface RoundAttribution {
-  ordinal: number; name: string;
-  mode: "COUPON" | "SPEND";
-  couponCodes: string[]; // the round's redeemable codes (COUPON mode)
-  windowStart: string; windowEnd: string; // round dates + 30-day grace tail
-  reached: number; // reached TEST members (campaign-level reached flag)
-  // Coupon basis (COUPON mode; zero in SPEND mode):
-  redeemers: number; // reached TEST members who redeemed a round code in-window
-  redemptionRatePct: number; // redeemers / reached
-  couponRevenue: number; // base (pre-tax) on coupon-redeemed lines by those redeemers
-  otherRedemptions: number; // distinct farmers redeeming a round code who are NOT reached-TEST (context, uncredited)
-  // Spend basis (always computed — the SPEND-mode headline, kept as the "influenced" secondary in COUPON mode):
-  payingFarmers: number; matchedRevenue: number; // reached TEST with matched spend in-window
-  upliftByValue: UpliftRow[]; upliftByLifecycle: UpliftRow[]; // uplift alongside, over the round window
+export interface CampaignTracker {
+  reach: CampaignReach;
+  attribution: CampaignAttribution;
+  scopes: TrackerScope[]; // [0] = overall (all rounds); then one per round
 }
-export interface CampaignTracker { reach: CampaignReach; attribution: CampaignAttribution; upliftByValue: UpliftRow[]; upliftByLifecycle: UpliftRow[]; rounds: RoundAttribution[] }
 
 /**
  * Campaign Tracker (managers only): outreach reach + real attributed revenue + test/control uplift.
@@ -1171,59 +1223,15 @@ export async function getCampaignTracker(campaignId: number): Promise<CampaignTr
   }
   const byStore = [...storeAgg.values()].sort((a, b) => b.total - a.total || a.store.localeCompare(b.store));
 
-  // Matched spend per farmer for ALL members (uplift needs the control baseline); total spend for reached test (context).
-  const allIds = [...new Set(members.map((m) => m.farmerId))];
-  const matched = await matchedSpendByFarmer(pf, allIds, start, end);
-  const reachedIds = reachedMembers.map((m) => m.farmerId);
-  const totalSpend = await matchedSpendByFarmer({ crops: [], categories: [], all: true }, reachedIds, start, end);
-
-  const matchedRevenue = reachedMembers.reduce((s, m) => s + (matched.get(m.farmerId) ?? 0), 0);
-  const totalRevenue = [...totalSpend.values()].reduce((a, b) => a + b, 0);
-  const payingFarmers = reachedMembers.filter((m) => (matched.get(m.farmerId) ?? 0) > 0).length;
-
-  // Uplift — test vs control on MATCHED spend in window. The value tier and the lifecycle stage are
-  // independent (an HNI farmer can be Lapsed), so we build BOTH breakdowns; the UI toggles between them.
-  // Segment snapshots fall back to the legacy collapsed `segment` for members enrolled before the split.
-  const upliftByValue = buildUpliftRows(members, matched, valueKeyOf, VALUE_SEGMENTS);
-  const upliftByLifecycle = buildUpliftRows(members, matched, lifecycleKeyOf, LIFECYCLE_SEGMENTS);
-
-  // ── Per-round attribution ──────────────────────────────────────────────────────────────────────
-  // Each round decides its own mode from its coupon codes: any code → coupon-redemption is the headline;
-  // none → the invoice/matched-spend calc (today's default). Uplift is kept alongside in both modes.
+  // ── Segment × view scopes: overall (all rounds) + one per round ──────────────────────────────────
   const phases = await prisma.campaignPhase.findMany({ where: { campaignId }, orderBy: { ordinal: "asc" } });
-  const reachedTestSet = new Set(reachedIds);
-  const rounds: RoundAttribution[] = [];
+  const codesOf = (p: (typeof phases)[number]) => [...new Set(asCoupons(p.coupons).map((c) => c.code.trim().toUpperCase()).filter(Boolean))];
+  const allCodes = [...new Set(phases.flatMap(codesOf))];
+  const scopes: TrackerScope[] = [];
+  scopes.push(await computeScope(members, pf, allCodes, start, end, "overall", "All rounds"));
   for (const p of phases) {
-    const rStart = p.defaultStart;
-    const rEnd = new Date(p.defaultEnd); rEnd.setDate(rEnd.getDate() + 30); // same +30-day grace tail
-    const codes = [...new Set(asCoupons(p.coupons).map((c) => c.code.trim().toUpperCase()).filter(Boolean))];
-    const mode: "COUPON" | "SPEND" = codes.length ? "COUPON" : "SPEND";
-
-    // Matched spend over the round window — powers the SPEND headline AND the uplift kept alongside.
-    const rMatched = await matchedSpendByFarmer(pf, allIds, rStart, rEnd);
-    const rPaying = reachedMembers.filter((m) => (rMatched.get(m.farmerId) ?? 0) > 0).length;
-    const rMatchedRev = reachedMembers.reduce((s, m) => s + (rMatched.get(m.farmerId) ?? 0), 0);
-
-    let redeemers = 0, couponRevenue = 0, otherRedemptions = 0;
-    if (mode === "COUPON") {
-      const red = await couponSpendByFarmer(codes, reachedIds, rStart, rEnd); // reached TEST redeemers
-      redeemers = red.size;
-      couponRevenue = [...red.values()].reduce((a, b) => a + b, 0);
-      // Redemptions of a round code by farmers who are NOT reached-TEST members (control, un-reached, or non-members).
-      const allRedeemers = await prisma.saleLine.findMany({ where: couponLineWhere(codes, rStart, rEnd), select: { farmerId: true }, distinct: ["farmerId"] });
-      otherRedemptions = allRedeemers.filter((r) => r.farmerId != null && !reachedTestSet.has(r.farmerId)).length;
-    }
-
-    rounds.push({
-      ordinal: p.ordinal, name: p.name, mode, couponCodes: codes,
-      windowStart: iso(rStart)!, windowEnd: iso(rEnd)!,
-      reached: reachedMembers.length,
-      redeemers, redemptionRatePct: reachedMembers.length ? Math.round((redeemers / reachedMembers.length) * 1000) / 10 : 0,
-      couponRevenue, otherRedemptions,
-      payingFarmers: rPaying, matchedRevenue: rMatchedRev,
-      upliftByValue: buildUpliftRows(members, rMatched, valueKeyOf, VALUE_SEGMENTS),
-      upliftByLifecycle: buildUpliftRows(members, rMatched, lifecycleKeyOf, LIFECYCLE_SEGMENTS),
-    });
+    const rEnd = new Date(p.defaultEnd); rEnd.setDate(rEnd.getDate() + 30); // +30-day grace tail
+    scopes.push(await computeScope(members, pf, codesOf(p), p.defaultStart, rEnd, `R${p.ordinal}`, `Round ${p.ordinal} · ${p.name}`));
   }
 
   const basisLabel = pf.all
@@ -1232,12 +1240,8 @@ export async function getCampaignTracker(campaignId: number): Promise<CampaignTr
 
   return {
     reach: { testTotal: test.length, reached: reachedMembers.length, byApproach, byResponse, otherCrops, byStore, broadcastDelivered, byBroadcastChannel },
-    attribution: {
-      basisLabel, crops: pf.crops, categories: pf.categories, all: pf.all, noCatalogMatch,
-      windowStart: iso(start)!, windowEnd: iso(end)!,
-      reachedFarmers: reachedMembers.length, payingFarmers, matchedRevenue, totalRevenue,
-    },
-    upliftByValue, upliftByLifecycle, rounds,
+    attribution: { basisLabel, crops: pf.crops, categories: pf.categories, all: pf.all, noCatalogMatch, windowStart: iso(start)!, windowEnd: iso(end)! },
+    scopes,
   };
 }
 
