@@ -1713,11 +1713,12 @@ function TrackerBody({ t }: { t: CampaignTracker }) {
 function SegTable({ rows, view }: { rows: SegRow[]; view: MatchView }) {
   if (rows.length === 0) return <div className="py-4 text-center text-[12.5px] text-[#9E9E9E]">No members / no sales in this window yet.</div>;
   const pct = (x: number) => `${x}%`;
+  const coupon = view === "coupon";
   return (
     <div className="overflow-x-auto"><table className="w-full min-w-[860px] text-right text-[12px]">
       <thead><tr className="border-b border-[#EEE] text-[10px] font-bold uppercase text-[#9E9E9E]">
         <th className="py-2 text-left">Segment</th><th>Test</th><th>Reach</th><th>Buy</th><th>Test %buy</th><th>Reach %buy</th>
-        <th>Control</th><th>Ctrl buy</th><th>Ctrl %buy</th><th>Uplift %</th><th>Incremental ₹</th><th>Total sales</th>
+        <th>Control</th><th>Ctrl buy</th><th>Ctrl %buy</th><th>Uplift %</th><th>{coupon ? "Coupon revenue ₹" : "Incremental ₹"}</th><th>Total sales</th>
       </tr></thead>
       <tbody>{rows.map((r) => { const c = r.views[view]; return (
         <tr key={r.segment} className="border-b border-[#F5F5F5]">
@@ -1738,7 +1739,11 @@ function SegTable({ rows, view }: { rows: SegRow[]; view: MatchView }) {
         </tr>
       ); })}</tbody>
     </table>
-    <div className="mt-2 text-[10.5px] text-[#9E9E9E]">Leads / No-spend: no control comparison — their full sales count as incremental (shown in the Incremental column).</div>
+    <div className="mt-2 text-[10.5px] text-[#9E9E9E]">
+      {coupon
+        ? "Coupon view: control can't redeem a code, so uplift is n/a (—) — the column shows actual coupon revenue redeemed (base ₹ on coded lines), all-test / reached."
+        : "Leads / No-spend: no control comparison — their full sales count as incremental (shown in the Incremental column)."}
+    </div>
     </div>
   );
 }

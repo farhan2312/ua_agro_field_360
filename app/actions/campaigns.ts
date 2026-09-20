@@ -773,12 +773,14 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
       for (const view of MV) {
         perf.push([`${sc.label}  ·  ${VIEW_LBL[view]}  ·  ${sc.windowStart} → ${sc.windowEnd}`]);
         perf.push(COLHDR);
+        const isCoupon = view === "coupon";
         for (const r of sc.byValue) {
           const c = r.views[view];
           const nrow = perf.length + 1; // Excel row of the row we are about to push
-          const uplift: Cell = r.isLeads ? "—" : { f: `IF(F${nrow}=0,"",(F${nrow}-I${nrow})/F${nrow})`, z: "0.0%" };
-          const incrAll: Cell = r.isLeads ? { f: `M${nrow}` } : { f: `IF(J${nrow}="",0,J${nrow}*M${nrow})` };
-          const incrReach: Cell = r.isLeads ? { f: `N${nrow}` } : { f: `IF(J${nrow}="",0,J${nrow}*N${nrow})` };
+          // Coupon view: uplift is n/a and Incremental = coupon revenue redeemed (a value, not a formula).
+          const uplift: Cell = isCoupon || r.isLeads ? "—" : { f: `IF(F${nrow}=0,"",(F${nrow}-I${nrow})/F${nrow})`, z: "0.0%" };
+          const incrAll: Cell = isCoupon ? c.incrAllTest : r.isLeads ? { f: `M${nrow}` } : { f: `IF(J${nrow}="",0,J${nrow}*M${nrow})` };
+          const incrReach: Cell = isCoupon ? c.incrReached : r.isLeads ? { f: `N${nrow}` } : { f: `IF(J${nrow}="",0,J${nrow}*N${nrow})` };
           perf.push([
             segMeta(r.segment).label, r.test, r.reached, c.buy,
             { f: `IF(B${nrow}=0,0,D${nrow}/B${nrow})`, z: "0.0%" },
@@ -1098,9 +1100,9 @@ export interface SegViewCell {
   reachPctBuy: number;    // buy / reached  (%, 1-dp)
   controlBuy: number;     // control who bought (this view)
   controlPctBuy: number;  // controlBuy / control  (%, 1-dp)
-  upliftPct: number | null; // relative uplift % (1-dp); null = n/a (reach%=0, or a leads row)
-  incrAllTest: number;    // uplift × total-sales(all test)   [leads: = total sales]
-  incrReached: number;    // uplift × total-sales(reached)    [leads: = total sales]
+  upliftPct: number | null; // relative uplift % (1-dp); null = n/a (coupon view, reach%=0, or a leads row)
+  incrAllTest: number;    // COUPON view: coupon revenue redeemed; else uplift × total-sales (leads: = total sales)
+  incrReached: number;    // same basis, reached-test subset
 }
 export interface SegRow {
   segment: string; isLeads: boolean;
@@ -1129,15 +1131,16 @@ async function computeScope(members: UpliftMemberVM[], pf: ProductFilter, codes:
   const boughtIn = (fid: number, v: MatchView) => ((v === "total" ? allSpend : v === "crop" ? cropMap : couponSpend).get(fid) ?? 0) > 0;
 
   const build = (keyOf: (m: UpliftMemberVM) => string, order: readonly string[]): SegRow[] => {
-    type Acc = { test: number; reached: number; control: number; totAll: number; totReached: number; buy: Record<MatchView, number>; cbuy: Record<MatchView, number> };
-    const mk = (): Acc => ({ test: 0, reached: 0, control: 0, totAll: 0, totReached: 0, buy: { coupon: 0, crop: 0, total: 0 }, cbuy: { coupon: 0, crop: 0, total: 0 } });
+    type Acc = { test: number; reached: number; control: number; totAll: number; totReached: number; cpAll: number; cpReached: number; buy: Record<MatchView, number>; cbuy: Record<MatchView, number> };
+    const mk = (): Acc => ({ test: 0, reached: 0, control: 0, totAll: 0, totReached: 0, cpAll: 0, cpReached: 0, buy: { coupon: 0, crop: 0, total: 0 }, cbuy: { coupon: 0, crop: 0, total: 0 } });
     const bySeg = new Map<string, Acc>();
     for (const m of members) {
       const k = keyOf(m); const a = bySeg.get(k) ?? mk();
       const spend = allSpend.get(m.farmerId) ?? 0;
+      const cp = couponSpend.get(m.farmerId) ?? 0; // ₹ this farmer redeemed on a campaign coupon
       if (m.group === "TEST") {
-        a.test++; a.totAll += spend;
-        if (m.reached) { a.reached++; a.totReached += spend; for (const v of MV) if (boughtIn(m.farmerId, v)) a.buy[v]++; }
+        a.test++; a.totAll += spend; a.cpAll += cp;
+        if (m.reached) { a.reached++; a.totReached += spend; a.cpReached += cp; for (const v of MV) if (boughtIn(m.farmerId, v)) a.buy[v]++; }
       } else { a.control++; for (const v of MV) if (boughtIn(m.farmerId, v)) a.cbuy[v]++; }
       bySeg.set(k, a);
     }
@@ -1148,7 +1151,11 @@ async function computeScope(members: UpliftMemberVM[], pf: ProductFilter, codes:
       for (const v of MV) {
         const reachRatio = a.reached > 0 ? a.buy[v] / a.reached : 0;
         const ctrlRatio = a.control > 0 ? a.cbuy[v] / a.control : 0;
-        const uplift = !isLeads && reachRatio > 0 ? (reachRatio - ctrlRatio) / reachRatio : null;
+        // COUPON view: control can never redeem a code, so a test-vs-control uplift is meaningless
+        // (it would always read 100%). Incremental here = the actual coupon revenue redeemed, not
+        // uplift × total sales. CROP / TOTAL views keep the relative-uplift attribution.
+        const isCoupon = v === "coupon";
+        const uplift = isCoupon || isLeads || reachRatio <= 0 ? null : (reachRatio - ctrlRatio) / reachRatio;
         views[v] = {
           buy: a.buy[v],
           testPctBuy: a.test > 0 ? Math.round((a.buy[v] / a.test) * 1000) / 10 : 0,
@@ -1156,8 +1163,8 @@ async function computeScope(members: UpliftMemberVM[], pf: ProductFilter, codes:
           controlBuy: a.cbuy[v],
           controlPctBuy: Math.round(ctrlRatio * 1000) / 10,
           upliftPct: uplift != null ? Math.round(uplift * 1000) / 10 : null,
-          incrAllTest: isLeads ? Math.round(a.totAll) : uplift != null ? Math.round(uplift * a.totAll) : 0,
-          incrReached: isLeads ? Math.round(a.totReached) : uplift != null ? Math.round(uplift * a.totReached) : 0,
+          incrAllTest: isCoupon ? Math.round(a.cpAll) : isLeads ? Math.round(a.totAll) : uplift != null ? Math.round(uplift * a.totAll) : 0,
+          incrReached: isCoupon ? Math.round(a.cpReached) : isLeads ? Math.round(a.totReached) : uplift != null ? Math.round(uplift * a.totReached) : 0,
         };
       }
       return { segment, isLeads, test: a.test, reached: a.reached, control: a.control, totalSalesAllTest: Math.round(a.totAll), totalSalesReached: Math.round(a.totReached), views };
