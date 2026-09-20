@@ -15,7 +15,7 @@ import { asCoupons } from "@/lib/campaign-phases";
 import { logAudit } from "@/lib/audit";
 import { getSession } from "@/lib/auth";
 import { cropLabel } from "@/lib/crops";
-import { buildWorkbookB64 } from "@/lib/xlsx-export";
+import { buildWorkbookB64, type Cell } from "@/lib/xlsx-export";
 import { sendSms, zapConfig, listSmsTemplates, type SmsTemplate } from "@/lib/zapsms";
 import { sendWhatsApp, waConfig, waCreateTemplate } from "@/lib/whatsapp";
 import { SAMPLE_VARS, resolveVars, fillDltTemplate, fillWaTemplate, positionalParams, countDltVars, VAR_LABEL, type FarmerVarSource } from "@/lib/campaign-vars";
@@ -701,7 +701,7 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
     ];
   });
 
-  const sheets: { name: string; rows: (string | number)[][] }[] = [
+  const sheets: { name: string; rows: Cell[][] }[] = [
     { name: "Overview", rows: overview },
     { name: "All farmers", rows: [allHeader, ...allRows] },
   ];
@@ -756,6 +756,43 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
       ];
     });
     sheets.push({ name: "Transactions (test)", rows: txnRows.length ? [txnHeader, ...txnRows] : [["No transactions by test farmers in the campaign window."]] });
+  }
+
+  // ── Performance (formulas) sheet — Shilpa's uplift table with LIVE Excel formula linking ──
+  // Raw inputs (Test/Reach/Buy/Control/Ctrl Buy/Total sales) are values; every derived column
+  // (%buy, uplift %, incremental) is a real formula so the workbook recalculates when opened.
+  const tracker = await getCampaignTracker(campaignId);
+  if (tracker) {
+    const VIEW_LBL: Record<MatchView, string> = { coupon: "Coupon-redeemed", crop: "Crop-matched", total: "All transactions" };
+    const COLHDR = ["Segment", "Test", "Reach", "Buy", "Test %Buy", "Reach %Buy", "Control", "Ctrl Buy", "Ctrl %Buy", "Uplift %", "Incr (all test)", "Incr (reached)", "Total sales (all test)", "Total sales (reached)"];
+    const perf: Cell[][] = [
+      ["Campaign performance — live formulas. Uplift % = (Reach %Buy − Ctrl %Buy) ÷ Reach %Buy · Incremental = Uplift % × total sales (all transactions). Leads/No-spend: no control → full sales are incremental."],
+      [],
+    ];
+    for (const sc of tracker.scopes) {
+      for (const view of MV) {
+        perf.push([`${sc.label}  ·  ${VIEW_LBL[view]}  ·  ${sc.windowStart} → ${sc.windowEnd}`]);
+        perf.push(COLHDR);
+        for (const r of sc.byValue) {
+          const c = r.views[view];
+          const nrow = perf.length + 1; // Excel row of the row we are about to push
+          const uplift: Cell = r.isLeads ? "—" : { f: `IF(F${nrow}=0,"",(F${nrow}-I${nrow})/F${nrow})`, z: "0.0%" };
+          const incrAll: Cell = r.isLeads ? { f: `M${nrow}` } : { f: `IF(J${nrow}="",0,J${nrow}*M${nrow})` };
+          const incrReach: Cell = r.isLeads ? { f: `N${nrow}` } : { f: `IF(J${nrow}="",0,J${nrow}*N${nrow})` };
+          perf.push([
+            segMeta(r.segment).label, r.test, r.reached, c.buy,
+            { f: `IF(B${nrow}=0,0,D${nrow}/B${nrow})`, z: "0.0%" },
+            { f: `IF(C${nrow}=0,0,D${nrow}/C${nrow})`, z: "0.0%" },
+            r.control, c.controlBuy,
+            { f: `IF(G${nrow}=0,0,H${nrow}/G${nrow})`, z: "0.0%" },
+            uplift, incrAll, incrReach,
+            r.totalSalesAllTest, r.totalSalesReached,
+          ]);
+        }
+        perf.push([]);
+      }
+    }
+    sheets.push({ name: "Performance (formulas)", rows: perf });
   }
 
   const safe = (campaignName || "campaign").replace(/[\\/?*[\]:]/g, " ").trim().slice(0, 60) || "campaign";
