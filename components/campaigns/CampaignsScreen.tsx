@@ -732,11 +732,11 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
       </Modal>
 
       {/* Campaign Tracker (managers only) */}
-      <Modal open={trackerOf != null} onClose={() => setTrackerOf(null)} className="w-[96vw] max-w-[1400px]">
+      <Modal open={trackerOf != null} onClose={() => setTrackerOf(null)} className="w-[96vw] max-w-[1400px] flex flex-col overflow-y-hidden">
         {trackerOf && (
           <>
             <ModalHeader eyebrow="Campaign Tracker" eyebrowColor="#2E7D32" title={trackerOf.name} subtitle="Outreach reach · segment uplift · incremental sales" onClose={() => setTrackerOf(null)} />
-            <div className="max-h-[80vh] overflow-y-auto px-5 py-4">
+            <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
               <div className="mb-3 flex justify-end">
                 <button type="button" disabled={trackerExporting}
                   onClick={async () => {
