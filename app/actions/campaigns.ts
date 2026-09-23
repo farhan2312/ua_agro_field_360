@@ -732,30 +732,39 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
     sheets.push({ name: nm || `Round ${p.ordinal}`, rows: rrows.length ? [isCoupon ? roundHeaderCoupon : roundHeader, ...rrows] : [[noActivity]] });
   }
 
-  // ── Transactions sheet — exactly what the TEST farmers bought in the campaign window (+30-day tail) ──
+  // ── Transactions sheet — every line item campaign farmers (TEST + CONTROL) bought in the window ──
+  // The Group column lets you compare what the contacted test group bought vs the un-contacted control.
   if (camp) {
     const winStart = camp.startDate;
     const winEnd = new Date(camp.endDate); winEnd.setDate(winEnd.getDate() + 30);
-    const testIds = [...new Set(members.filter((m) => m.group === "TEST").map((m) => m.farmerId))];
-    const txns = testIds.length
+    const memberIds = [...new Set(members.map((m) => m.farmerId))];
+    const memMeta = new Map(members.map((m) => [m.farmerId, {
+      group: m.group ?? "",
+      vseg: m.valueSegment ? segMeta(m.valueSegment).label : (m.segment ? segMeta(m.segment).label : ""),
+      reached: m.reached ? "Yes" : "No",
+    }]));
+    const txns = memberIds.length
       ? await prisma.saleLine.findMany({
-          where: { source: "REAL", farmerId: { in: testIds }, soldAt: { gte: winStart, lte: winEnd } },
+          where: { source: "REAL", farmerId: { in: memberIds }, soldAt: { gte: winStart, lte: winEnd } },
           select: { farmerId: true, soldAt: true, orderNo: true, itemRaw: true, cropTag: true, qty: true, uom: true, basic: true, itemCouponCode: true, invoiceCouponCode: true, storeId: true },
           orderBy: [{ farmerId: "asc" }, { soldAt: "asc" }],
           take: 100000,
         })
       : [];
-    const txnHeader = ["Farmer", "Mobile", "Store", "RM", "Date", "Order No", "Item", "Crop", "Qty", "UOM", "Base value (₹)", "Coupon"];
+    // Test rows first, then control (Excel autofilter still lets them slice either way).
+    txns.sort((a, b) => (memMeta.get(a.farmerId!)?.group === memMeta.get(b.farmerId!)?.group ? 0 : memMeta.get(a.farmerId!)?.group === "TEST" ? -1 : 1));
+    const txnHeader = ["Group", "Reached", "Farmer", "Mobile", "Store", "RM", "Value segment", "Date", "Order No", "Item", "Crop", "Qty", "UOM", "Base value (₹)", "Coupon"];
     const txnRows: (string | number)[][] = txns.map((r) => {
       const f = r.farmerId != null ? fMap.get(r.farmerId) : undefined;
+      const meta = r.farmerId != null ? memMeta.get(r.farmerId) : undefined;
       const coupon = (r.itemCouponCode && r.itemCouponCode !== "0" ? r.itemCouponCode : "") || (r.invoiceCouponCode && r.invoiceCouponCode !== "0" ? r.invoiceCouponCode : "");
       return [
-        f?.name ?? (r.farmerId != null ? `Farmer #${r.farmerId}` : "—"), f?.mobile ?? "", store(r.storeId), rm(r.storeId),
+        meta?.group ?? "", meta?.reached ?? "", f?.name ?? (r.farmerId != null ? `Farmer #${r.farmerId}` : "—"), f?.mobile ?? "", store(r.storeId), rm(r.storeId), meta?.vseg ?? "",
         r.soldAt ? fmtDay(r.soldAt) : "", r.orderNo ?? "", r.itemRaw ?? "", r.cropTag ? cropLabel(r.cropTag) : "",
         r.qty ?? 0, r.uom ?? "", Math.round(r.basic ?? 0), coupon,
       ];
     });
-    sheets.push({ name: "Transactions (test)", rows: txnRows.length ? [txnHeader, ...txnRows] : [["No transactions by test farmers in the campaign window."]] });
+    sheets.push({ name: "Transactions", rows: txnRows.length ? [txnHeader, ...txnRows] : [["No transactions by campaign farmers in the window."]] });
   }
 
   // ── Performance (formulas) sheet — Shilpa's uplift table with LIVE Excel formula linking ──
