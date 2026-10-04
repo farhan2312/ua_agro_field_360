@@ -928,8 +928,18 @@ export function statusOf(m: CampaignMemberVM): "reached" | "unreachable" | "pend
   if (m.mediums.includes("UNREACHABLE")) return "unreachable";
   return "pending";
 }
-/** Sort order for the list — un-contacted first, unreachable next, reached last. */
-export function rank(m: CampaignMemberVM): number { const s = statusOf(m); return s === "pending" ? 0 : s === "unreachable" ? 1 : 2; }
+/** Value-tier order so the highest-value farmers surface first (HNI → Potential HNI → Regular → No-spend). */
+const VALUE_RANK: Record<string, number> = { HNI: 0, POTENTIAL_HNI: 1, REGULAR: 2, NO_SPEND: 3 };
+export function valueRank(m: CampaignMemberVM): number {
+  const key = m.valueSegment ?? m.segment;
+  return VALUE_RANK[key] ?? 4;
+}
+/** Sort order for the list — un-contacted first (then unreachable, then reached), and WITHIN each of
+ *  those, by value tier so HNI farmers are contacted before Potential HNI, Regular, No-spend. */
+export function rank(m: CampaignMemberVM): number {
+  const s = statusOf(m); const status = s === "pending" ? 0 : s === "unreachable" ? 1 : 2;
+  return status * 10 + valueRank(m);
+}
 /** Normalise an Indian mobile to its last 10 digits for tel:/wa.me links (null if not a usable number). */
 export function digits10(mobile: string | null): string | null {
   if (!mobile) return null;

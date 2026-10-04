@@ -537,7 +537,7 @@ export async function listCampaigns(): Promise<CampaignListItem[]> {
 /** Scoped enrolled-farmer list for a campaign — TEST group only (the CONTROL holdout is never contacted). */
 export interface CampaignMemberVM {
   id: number; name: string; mobile: string | null; village: string | null; store: string | null;
-  segment: string; reached: boolean; mediums: string[]; comment: string | null; reachedAt: string | null;
+  segment: string; valueSegment: string | null; reached: boolean; mediums: string[]; comment: string | null; reachedAt: string | null;
   reachedBy: string | null; reachedByCode: string | null;
   response: string | null; responseCrop: string | null; // interest outcome + the crop when OTHER_CROP
   broadcastMediums: string[]; // channels DELIVERED via mass send (separate from `reached`)
@@ -552,7 +552,7 @@ export async function getCampaignMembers(campaignId: number, limit = 25000): Pro
   const members = await prisma.campaignMember.findMany({
     where: { campaignId, group: "TEST", ...(scope ?? {}) }, // officers/RMs contact only the TEST group
     take: limit, orderBy: { id: "asc" },
-    select: { id: true, farmerId: true, segment: true, reached: true, mediums: true, comment: true, reachedAt: true, reachedBy: true, reachedByCode: true, storeId: true, response: true, responseCrop: true, broadcastMediums: true },
+    select: { id: true, farmerId: true, segment: true, valueSegment: true, reached: true, mediums: true, comment: true, reachedAt: true, reachedBy: true, reachedByCode: true, storeId: true, response: true, responseCrop: true, broadcastMediums: true },
   });
   if (!members.length) return [];
   const [farmers, stores] = await Promise.all([
@@ -566,7 +566,7 @@ export async function getCampaignMembers(campaignId: number, limit = 25000): Pro
     return {
       id: m.id, name: f?.name ?? `Farmer #${m.farmerId}`, mobile: f?.mobile ?? null, village: f?.village ?? null,
       store: m.storeId != null ? sMap.get(m.storeId) ?? null : null,
-      segment: m.segment, reached: m.reached, mediums: m.mediums, comment: m.comment, reachedAt: iso(m.reachedAt),
+      segment: m.segment, valueSegment: m.valueSegment, reached: m.reached, mediums: m.mediums, comment: m.comment, reachedAt: iso(m.reachedAt),
       reachedBy: m.reachedBy, reachedByCode: m.reachedByCode, response: m.response, responseCrop: m.responseCrop,
       broadcastMediums: m.broadcastMediums,
     };
