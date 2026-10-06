@@ -31,33 +31,36 @@ export function NewFarmersChart({ data }: { data: NewFarmerAcq }) {
   }
   const villageColor = new Map(data.villages.map((v, i) => [v, colorOf(v, i)]));
   const max = Math.max(1, ...data.months.map((m) => m.total));
-  const H = 130, BW = 30, GAP = 12, PAD_L = 2;
-  const chartW = data.months.length * (BW + GAP) + PAD_L;
+  // Horizontal stacked bars: one row per month. L = month-label gutter, R = total-label gutter.
+  const W = 760, L = 62, R = 58, ROW = 20, GAP = 9;
+  const barMaxW = W - L - R;
+  const chartH = data.months.length * (ROW + GAP);
 
   return (
     <div className={CARD}>
-      <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-2">
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
         <div className="text-[13px] font-bold text-[#1A1C1A]">New customers from sales</div>
         <div className="text-[11px] text-[#9E9E9E]"><b className="text-[#2E7D32]">{n(data.total)}</b> farmers · {n(data.distinctVillages)} villages · by first-purchase month, stacked by village (top 20)</div>
       </div>
 
       <div className="overflow-x-auto">
-        <svg width={chartW} height={H + 26} className="block">
-          <line x1={0} y1={3} x2={chartW} y2={3} stroke="#F0F0F0" />
+        <svg width={W} height={chartH} className="block">
           {data.months.map((mo, i) => {
-            const x = PAD_L + i * (BW + GAP);
-            let yCursor = H + 3; // stack upward from the baseline
+            const y = i * (ROW + GAP);
+            const barW = (mo.total / max) * barMaxW;
+            let xCursor = L;
             return (
               <g key={mo.ym}>
+                <text x={L - 6} y={y + ROW / 2} textAnchor="end" dominantBaseline="middle" fontSize={9.5} className="fill-[#616161]" fontWeight={600}>{mo.label}</text>
                 {data.villages.map((v) => {
                   const c = mo.counts[v] ?? 0;
                   if (c <= 0) return null;
-                  const h = (c / max) * H;
-                  yCursor -= h;
-                  return <rect key={v} x={x} y={yCursor} width={BW} height={h} fill={villageColor.get(v)}><title>{`${mo.label} · ${v}: ${n(c)}`}</title></rect>;
+                  const w = (c / max) * barMaxW;
+                  const seg = <rect key={v} x={xCursor} y={y} width={w} height={ROW} fill={villageColor.get(v)}><title>{`${mo.label} · ${v}: ${n(c)}`}</title></rect>;
+                  xCursor += w;
+                  return seg;
                 })}
-                <text x={x + BW / 2} y={yCursor - 3} textAnchor="middle" fontSize={8.5} className="fill-[#616161]" fontWeight={700}>{n(mo.total)}</text>
-                <text x={x + BW / 2} y={H + 17} textAnchor="middle" fontSize={8.5} className="fill-[#9E9E9E]">{mo.label}</text>
+                <text x={L + barW + 5} y={y + ROW / 2} dominantBaseline="middle" fontSize={9.5} className="fill-[#1A1C1A]" fontWeight={700}>{n(mo.total)}</text>
               </g>
             );
           })}
