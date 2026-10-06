@@ -799,7 +799,7 @@ export interface NewFarmerAcq {
 /**
  * Farmers whose profile was auto-created from a SALE (no prior registration) — code `FARM-C-<mobile>`.
  * Bucketed by the month of their FIRST purchase (= when they first appeared as a customer), split by
- * village. Role-scoped (officer→store, RM→region). Top-12 villages kept; the long tail → "Other", blank
+ * village. Role-scoped (officer→store, RM→region). Top-20 villages kept; the long tail → "Other", blank
  * village → "Unknown".
  */
 export async function getNewFarmerAcquisition(): Promise<NewFarmerAcq> {
@@ -836,8 +836,8 @@ export async function getNewFarmerAcquisition(): Promise<NewFarmerAcq> {
     monthSet.add(r.ym);
   }
   const distinctVillages = [...villageTotal.keys()].filter((v) => v !== UNKNOWN).length;
-  // Top-12 named villages; everything else → Other; blank → Unknown (kept separate, shown last).
-  const top = [...villageTotal.entries()].filter(([v]) => v !== UNKNOWN).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([v]) => v);
+  // Top-20 named villages; everything else → Other; blank → Unknown (kept separate, shown last).
+  const top = [...villageTotal.entries()].filter(([v]) => v !== UNKNOWN).sort((a, b) => b[1] - a[1]).slice(0, 20).map(([v]) => v);
   const topSet = new Set(top);
   const bucket = (v: string) => (v === UNKNOWN ? UNKNOWN : topSet.has(v) ? v : OTHER);
 
