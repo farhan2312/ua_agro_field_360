@@ -7,7 +7,6 @@ import { canManage } from "@/lib/scope";
 import { getWorkbench, getWorkbenchFacets, getNewFarmerAcquisition, type WbData, type WbFacets, type NewFarmerAcq } from "@/app/actions/analytics-segments";
 import { VALUE_SEGMENTS, LIFECYCLE_SEGMENTS } from "@/lib/campaign-segments";
 import { AnalyticsWorkbench } from "@/components/analytics/AnalyticsWorkbench";
-import { NewFarmersChart } from "@/components/analytics/NewFarmersChart";
 import { ScopedDashboard, UnassignedDashboard, type ScopedDashboardData } from "@/components/dashboard/ScopedDashboard";
 
 export const dynamic = "force-dynamic";
@@ -50,12 +49,9 @@ export default async function AnalyticsPage() {
   return (
     <div className="animate-fadeUp">
       {overview && <ScopedDashboard data={overview} name={persona.name} />}
-      {newFarmers.months.length > 0 && (
-        <div className="mt-6"><NewFarmersChart data={newFarmers} /></div>
-      )}
       <div className="mt-6">
         <div className="mb-3 text-[14px] font-bold text-[#1A1C1A]">Explore — filter, drill in, save as a cluster</div>
-        <AnalyticsWorkbench initial={data} facets={facets} canChain={canManage(scope.role)} canExport={scope.role === "sysadmin"} />
+        <AnalyticsWorkbench initial={data} facets={facets} canChain={canManage(scope.role)} canExport={scope.role === "sysadmin"} newFarmers={newFarmers} />
       </div>
     </div>
   );

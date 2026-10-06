@@ -15,8 +15,9 @@ import {
   getWorkbench, getWorkbenchCustomers, saveWorkbenchSegment, getCropTrend, getVisitAnalytics, getSalesRawData,
   type Lens, type WbFilters, type WbData, type WbFacets, type WbBar, type WbCustomer, type CropTrendPoint,
   type VisitAnalytics, type VisitMonth, type VisitAdoption, type VisitStoreRow, type MergedMatrix, type TreeCell, type SegDim,
-  type RawKpis, type RawLine,
+  type RawKpis, type RawLine, type NewFarmerAcq,
 } from "@/app/actions/analytics-segments";
+import { NewFarmersChart } from "./NewFarmersChart";
 
 const CARD = "rounded-[14px] border border-black/[0.04] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]";
 type ExportScope = "sales" | "visits" | "both";
@@ -27,7 +28,7 @@ const money = (x: number) => (x >= 1e7 ? `₹${(x / 1e7).toFixed(2)} Cr` : x >= 
 const fyStartOfYm = (ym: string) => { const [y, m] = ym.split("-").map(Number); return m >= 4 ? y : y - 1; };
 const fyLabel = (y: number) => `FY ${y}–${String((y + 1) % 100).padStart(2, "0")}`; // FY 2024–25
 
-export function AnalyticsWorkbench({ initial, facets, canChain = false, canExport = false }: { initial: WbData; facets: WbFacets; canChain?: boolean; canExport?: boolean }) {
+export function AnalyticsWorkbench({ initial, facets, canChain = false, canExport = false, newFarmers }: { initial: WbData; facets: WbFacets; canChain?: boolean; canExport?: boolean; newFarmers?: NewFarmerAcq }) {
   const [filters, setFilters] = useState<WbFilters>({ lens: "sales" });
   const [perfTab, setPerfTab] = useState<PerfKind | null>(null); // null = segmentation (Sales/Visits); else a performance board
   const [data, setData] = useState(initial);
@@ -276,6 +277,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false, canExpor
       <div className="flex flex-col gap-[14px]">
         <LeadConversionsCard />
         <CropTrendCard crops={filters.crops ?? []} years={years} />
+        {newFarmers && newFarmers.months.length > 0 && <NewFarmersChart data={newFarmers} />}
 
         <div className="grid grid-cols-1 gap-[14px] lg:grid-cols-2">
           <DonutCard title={`${VALUE_TITLE} share`} slices={data.valueDist} />
