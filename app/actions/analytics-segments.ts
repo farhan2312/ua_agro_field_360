@@ -788,22 +788,22 @@ export async function getCropTrend(crops: string[]): Promise<CropTrendPoint[]> {
   return out;
 }
 
-/* ── New customers created from sales (FARM-C-*), by first-purchase month, stacked by village ── */
+/* ── New customers created from sales (FARM-C-*), by first-purchase month, stacked by store ── */
 export interface NewFarmerAcq {
-  villages: string[]; // legend order: top villages, then "Other", then "Unknown"
+  keys: string[]; // legend order: top stores, then "Other", then "Unassigned"
   months: { ym: string; label: string; total: number; counts: Record<string, number> }[];
   total: number;
-  distinctVillages: number;
+  distinct: number; // distinct stores
 }
 
 /**
  * Farmers whose profile was auto-created from a SALE (no prior registration) — code `FARM-C-<mobile>`.
  * Bucketed by the month of their FIRST purchase (= when they first appeared as a customer), split by
- * village. Role-scoped (officer→store, RM→region). Top-20 villages kept; the long tail → "Other", blank
- * village → "Unknown".
+ * STORE. Role-scoped (officer→store, RM→region). Top-20 stores kept; the long tail → "Other", no store
+ * → "Unassigned".
  */
 export async function getNewFarmerAcquisition(): Promise<NewFarmerAcq> {
-  const empty: NewFarmerAcq = { villages: [], months: [], total: 0, distinctVillages: 0 };
+  const empty: NewFarmerAcq = { keys: [], months: [], total: 0, distinct: 0 };
   const { role, storeId, managedStoreIds } = await getScope();
   if (role === "campaigner") return empty;
   const scopeSql: Prisma.Sql =
@@ -812,12 +812,12 @@ export async function getNewFarmerAcquisition(): Promise<NewFarmerAcq> {
       : role === "regional"
         ? managedStoreIds && managedStoreIds.length ? Prisma.sql`AND f."storeId" = ANY(${managedStoreIds})` : Prisma.sql`AND false`
         : Prisma.empty;
-  let rows: { ym: string; village: string; n: number }[] = [];
+  let rows: { ym: string; sid: number | null; n: number }[] = [];
   try {
-    rows = await prisma.$queryRaw<{ ym: string; village: string; n: number }[]>(Prisma.sql`
-      SELECT to_char(date_trunc('month', t.first_sale), 'YYYY-MM') ym, t.village village, COUNT(*)::int n
+    rows = await prisma.$queryRaw<{ ym: string; sid: number | null; n: number }[]>(Prisma.sql`
+      SELECT to_char(date_trunc('month', t.first_sale), 'YYYY-MM') ym, t.sid sid, COUNT(*)::int n
       FROM (
-        SELECT f.id, COALESCE(NULLIF(btrim(f."village"), ''), '') village, MIN(s."soldAt") first_sale
+        SELECT f.id, f."storeId" sid, MIN(s."soldAt") first_sale
         FROM "Farmer" f JOIN "Sale" s ON s."farmerId" = f.id
         WHERE f."code" LIKE 'FARM-C-%' AND f."source" = 'REAL' ${scopeSql}
         GROUP BY f.id, 2
@@ -827,33 +827,34 @@ export async function getNewFarmerAcquisition(): Promise<NewFarmerAcq> {
   } catch { return empty; }
   if (!rows.length) return empty;
 
-  const UNKNOWN = "Unknown", OTHER = "Other";
-  const villageTotal = new Map<string, number>();
+  // Resolve store ids → short names; null store → "Unassigned".
+  const UNASSIGNED = "Unassigned", OTHER = "Other";
+  const ids = [...new Set(rows.map((r) => r.sid).filter((x): x is number => x != null))];
+  const stores = ids.length ? await prisma.store.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }) : [];
+  const nameById = new Map(stores.map((s) => [s.id, shortStore(s.name) || s.name]));
+  const nameOf = (sid: number | null) => (sid == null ? UNASSIGNED : nameById.get(sid) ?? `Store #${sid}`);
+
+  const storeTotal = new Map<string, number>();
   const monthSet = new Set<string>();
-  for (const r of rows) {
-    const v = r.village === "" ? UNKNOWN : r.village;
-    villageTotal.set(v, (villageTotal.get(v) ?? 0) + r.n);
-    monthSet.add(r.ym);
-  }
-  const distinctVillages = [...villageTotal.keys()].filter((v) => v !== UNKNOWN).length;
-  // Top-20 named villages; everything else → Other; blank → Unknown (kept separate, shown last).
-  const top = [...villageTotal.entries()].filter(([v]) => v !== UNKNOWN).sort((a, b) => b[1] - a[1]).slice(0, 20).map(([v]) => v);
+  for (const r of rows) { const k = nameOf(r.sid); storeTotal.set(k, (storeTotal.get(k) ?? 0) + r.n); monthSet.add(r.ym); }
+  const distinct = [...storeTotal.keys()].filter((k) => k !== UNASSIGNED).length;
+  // Top-20 stores; the rest → Other; no store → Unassigned (kept separate, shown last).
+  const top = [...storeTotal.entries()].filter(([k]) => k !== UNASSIGNED).sort((a, b) => b[1] - a[1]).slice(0, 20).map(([k]) => k);
   const topSet = new Set(top);
-  const bucket = (v: string) => (v === UNKNOWN ? UNKNOWN : topSet.has(v) ? v : OTHER);
+  const bucket = (k: string) => (k === UNASSIGNED ? UNASSIGNED : topSet.has(k) ? k : OTHER);
 
   const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const byYm = new Map<string, { ym: string; label: string; total: number; counts: Record<string, number> }>();
   for (const ym of [...monthSet].sort()) { const [y, m] = ym.split("-"); byYm.set(ym, { ym, label: `${MONTHS[Number(m) - 1]} '${y.slice(2)}`, total: 0, counts: {} }); }
-  let hasOther = false, hasUnknown = false, total = 0;
+  let hasOther = false, hasUnassigned = false, total = 0;
   for (const r of rows) {
-    const v = r.village === "" ? UNKNOWN : r.village;
-    const b = bucket(v);
-    if (b === OTHER) hasOther = true; if (b === UNKNOWN) hasUnknown = true;
+    const b = bucket(nameOf(r.sid));
+    if (b === OTHER) hasOther = true; if (b === UNASSIGNED) hasUnassigned = true;
     const mo = byYm.get(r.ym)!;
     mo.counts[b] = (mo.counts[b] ?? 0) + r.n; mo.total += r.n; total += r.n;
   }
-  const villages = [...top, ...(hasOther ? [OTHER] : []), ...(hasUnknown ? [UNKNOWN] : [])];
-  return { villages, months: [...byYm.values()], total, distinctVillages };
+  const keys = [...top, ...(hasOther ? [OTHER] : []), ...(hasUnassigned ? [UNASSIGNED] : [])];
+  return { keys, months: [...byYm.values()], total, distinct };
 }
 
 /* ── Lead → customer conversions (wasLead flag), role-scoped, broken down by month + store ── */
