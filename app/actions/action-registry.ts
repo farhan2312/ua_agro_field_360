@@ -48,7 +48,9 @@ function toVM(
   };
 }
 
-/** Every action in the viewer's scope (newest-due open first, then done). */
+/** Every action in the viewer's scope — OPEN first (earliest/overdue due dates), then DONE.
+ *  Loads the full scoped set (no low cap) so the client store/status/search filters + pagination
+ *  always operate on complete data — a low cap previously truncated the all-stores view. */
 export async function listActions(): Promise<ActionVM[]> {
   const scope = await getScope();
   const sw = actionScope(scope);
@@ -56,8 +58,8 @@ export async function listActions(): Promise<ActionVM[]> {
   try {
     const rows = await prisma.action.findMany({
       where: sw ?? undefined,
-      orderBy: [{ status: "asc" }, { dueDate: "asc" }],
-      take: 2000,
+      orderBy: [{ status: "desc" }, { dueDate: "asc" }], // "OPEN" > "DONE" → open first, by due date
+      take: 50000, // safety cap far above the real total; loads everything in scope
       include: {
         farmer: { select: { id: true, name: true, mobile: true, village: true } },
         store: { select: { name: true, zone: true } },
