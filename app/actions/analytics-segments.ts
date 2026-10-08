@@ -799,7 +799,7 @@ export interface NewFarmerAcq {
 /**
  * Farmers whose profile was auto-created from a SALE (no prior registration) — code `FARM-C-<mobile>`.
  * Bucketed by the month of their FIRST purchase (= when they first appeared as a customer), split by
- * STORE. Role-scoped (officer→store, RM→region). Top-20 stores kept; the long tail → "Other", no store
+ * STORE. Role-scoped (officer→store, RM→region). Top-40 stores kept; the long tail → "Other", no store
  * → "Unassigned".
  */
 export async function getNewFarmerAcquisition(): Promise<NewFarmerAcq> {
@@ -838,8 +838,8 @@ export async function getNewFarmerAcquisition(): Promise<NewFarmerAcq> {
   const monthSet = new Set<string>();
   for (const r of rows) { const k = nameOf(r.sid); storeTotal.set(k, (storeTotal.get(k) ?? 0) + r.n); monthSet.add(r.ym); }
   const distinct = [...storeTotal.keys()].filter((k) => k !== UNASSIGNED).length;
-  // Top-20 stores; the rest → Other; no store → Unassigned (kept separate, shown last).
-  const top = [...storeTotal.entries()].filter(([k]) => k !== UNASSIGNED).sort((a, b) => b[1] - a[1]).slice(0, 20).map(([k]) => k);
+  // Top-40 stores; the rest → Other; no store → Unassigned (kept separate, shown last).
+  const top = [...storeTotal.entries()].filter(([k]) => k !== UNASSIGNED).sort((a, b) => b[1] - a[1]).slice(0, 40).map(([k]) => k);
   const topSet = new Set(top);
   const bucket = (k: string) => (k === UNASSIGNED ? UNASSIGNED : topSet.has(k) ? k : OTHER);
 

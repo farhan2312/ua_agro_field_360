@@ -7,6 +7,8 @@ const n = (x: number) => x.toLocaleString("en-IN");
 const PALETTE = [
   "#2E7D32", "#1565C0", "#6A1B9A", "#E65100", "#00838F", "#C62828", "#5E35B1", "#00897B", "#F9A825", "#3949AB",
   "#7CB342", "#D81B60", "#0097A7", "#8D6E63", "#AFB42B", "#512DA8", "#00695C", "#EF6C00", "#AD1457", "#283593",
+  "#43A047", "#1E88E5", "#8E24AA", "#F4511E", "#00ACC1", "#E53935", "#7E57C2", "#26A69A", "#FDD835", "#5C6BC0",
+  "#9CCC65", "#EC407A", "#26C6DA", "#A1887F", "#D4E157", "#7B1FA2", "#009688", "#FB8C00", "#C2185B", "#303F9F",
 ];
 const OTHER_COLOR = "#90A4AE", UNASSIGNED_COLOR = "#CFD8DC";
 
@@ -40,7 +42,7 @@ export function NewFarmersChart({ data }: { data: NewFarmerAcq }) {
     <div className={CARD}>
       <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
         <div className="text-[13px] font-bold text-[#1A1C1A]">New customers from sales</div>
-        <div className="text-[11px] text-[#9E9E9E]"><b className="text-[#2E7D32]">{n(data.total)}</b> farmers · {n(data.distinct)} stores · by first-purchase month, stacked by store (top 20)</div>
+        <div className="text-[11px] text-[#9E9E9E]"><b className="text-[#2E7D32]">{n(data.total)}</b> farmers · {n(data.distinct)} stores · by first-purchase month, stacked by store (top 40)</div>
       </div>
 
       <div className="overflow-x-auto">
