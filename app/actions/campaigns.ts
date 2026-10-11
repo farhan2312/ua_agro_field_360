@@ -373,8 +373,10 @@ export async function createCampaign(input: CreateCampaignInput): Promise<{ ok: 
       data: { name: input.name.trim(), startDate: cs, endDate: ce, projectId: input.projectId, clusterId: input.clusterId ?? null, commPlans, testPct: input.testPct ?? 75, status: "ACTIVE" },
     });
 
-    // Enrol snapshot; store/zone denormalized so officers/RMs see only their own farmers. 75/25 test/control.
-    const controlEvery = Math.max(2, Math.round(100 / (100 - (input.testPct ?? 75)))); // ~4 for 75/25
+    // Enrol snapshot; store/zone denormalized so officers/RMs see only their own farmers.
+    // Test/control split chosen by the maker: ~testPct% of the audience is TEST (contacted), the rest
+    // control. Deterministic by farmer id mod 100 → an even split that holds for any ratio (not just 75/25).
+    const testPct = Math.min(95, Math.max(5, Math.round(input.testPct ?? 75)));
     let total = 0;
     for (let i = 0; i < ids.length; i += 5000) {
       const slice = ids.slice(i, i + 5000);
@@ -383,7 +385,7 @@ export async function createCampaign(input: CreateCampaignInput): Promise<{ ok: 
         campaignId: camp.id, farmerId: f.id, segment: f.campaignSegment ?? "OTHER",
         valueSegment: f.valueSegment, lifecycleSegment: f.lifecycleSegment,
         crop: f.cropTags[0] ?? null, storeId: f.storeId ?? null, zone: f.zone ?? null,
-        group: f.id % controlEvery === 0 ? "CONTROL" : "TEST",
+        group: (f.id % 100) < testPct ? "TEST" : "CONTROL",
       }));
       const res = await prisma.campaignMember.createMany({ data: members, skipDuplicates: true });
       total += res.count;

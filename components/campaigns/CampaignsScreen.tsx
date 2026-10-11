@@ -505,6 +505,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
   const [projectId, setProjectId] = useState<number | null>(defaultProject?.id ?? null);
   const [clusterId, setClusterId] = useState<number | null>(null); // null = whole project
   const [commPlans, setCommPlans] = useState<string[]>([]); // every campaign must be tagged with ≥1 comm plan (by name)
+  const [testPct, setTestPct] = useState(75); // % of the audience that goes into the contacted TEST group (rest = control)
   const [startDate, setStart] = useState(defaultProject?.startDate ?? "");
   const [endDate, setEnd] = useState(defaultProject?.endDate ?? "");
   const [pending, start] = useTransition();
@@ -548,12 +549,12 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
     if (commPlans.length === 0) { setMsg("Tag at least one comm plan."); return; }
     setMsg(null);
     start(async () => {
-      const res = await createCampaign({ name, startDate, endDate, projectId, clusterId, commPlans });
+      const res = await createCampaign({ name, startDate, endDate, projectId, clusterId, commPlans, testPct });
       if (res.ok) {
         setMsg(`Created "${name}" · ${n(res.members ?? 0)} enrolled${res.skipped ? ` · ${n(res.skipped)} skipped (already in another campaign of this project)` : ""}.`);
         // Close + reset the form, then soft-refresh so the new campaign appears in the list.
         setCreating(false);
-        setName(""); setClusterId(null); setCommPlans([]);
+        setName(""); setClusterId(null); setCommPlans([]); setTestPct(75);
         // Drop ?forProject= — otherwise the chain deep link re-opens the form on refresh.
         if (initialProjectId != null) router.replace("/campaigns");
         router.refresh();
@@ -629,6 +630,19 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
           <div className="mt-3 flex items-center justify-between rounded-[10px] bg-[#F5F7F5] px-4 py-3">
             <div className="text-[12px] text-[#616161]">Audience {clusterId ? "(cluster)" : "(project, de-duplicated)"} · before cross-campaign de-dup</div>
             <div className="text-[18px] font-bold text-[#2E7D32]">{n(audience)}</div>
+          </div>
+          {/* Test / Control split — the maker chooses how much of the audience is contacted (test) vs held back (control) */}
+          <div className="mt-3 rounded-[10px] bg-[#F5F7F5] px-4 py-3">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Test / Control split</label>
+              <span className="text-[12.5px] font-semibold"><span className="text-[#2E7D32]">Test {testPct}%</span> <span className="text-[#BDBDBD]">·</span> <span className="text-[#757575]">Control {100 - testPct}%</span></span>
+            </div>
+            <input type="range" min={10} max={90} step={5} value={testPct} onChange={(e) => setTestPct(Number(e.target.value))} className="mt-2 w-full accent-[#2E7D32]" />
+            <div className="mt-1 flex justify-between text-[11px]">
+              <span className="font-semibold text-[#2E7D32]">~{n(Math.round(audience * testPct / 100))} contacted (test)</span>
+              <span className="font-semibold text-[#757575]">~{n(audience - Math.round(audience * testPct / 100))} holdout (control)</span>
+            </div>
+            <div className="mt-1 text-[10.5px] text-[#9E9E9E]">The <b>test</b> group is contacted; <b>control</b> is held back as the no-contact baseline for measuring uplift. Default 75 / 25.</div>
           </div>
           <button type="button" onClick={submit} disabled={pending || !name.trim() || commPlans.length === 0} className="mt-4 rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{pending ? "Creating…" : "Create & enrol"}</button>
         </div>
