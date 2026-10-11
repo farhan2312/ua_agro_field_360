@@ -633,16 +633,20 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
           </div>
           {/* Test / Control split — the maker chooses how much of the audience is contacted (test) vs held back (control) */}
           <div className="mt-3 rounded-[10px] bg-[#F5F7F5] px-4 py-3">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Test / Control split</label>
-              <span className="text-[12.5px] font-semibold"><span className="text-[#2E7D32]">Test {testPct}%</span> <span className="text-[#BDBDBD]">·</span> <span className="text-[#757575]">Control {100 - testPct}%</span></span>
+              <div className="flex items-center gap-3">
+                <input type="range" min={0} max={100} step={5} value={testPct} onChange={(e) => setTestPct(Number(e.target.value))}
+                  style={{ background: `linear-gradient(to right, #2E7D32 0%, #2E7D32 ${testPct}%, #C62828 ${testPct}%, #C62828 100%)` }}
+                  className="h-[6px] w-[220px] cursor-pointer appearance-none rounded-full outline-none [&::-webkit-slider-thumb]:h-[16px] [&::-webkit-slider-thumb]:w-[16px] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-[#1A1C1A] [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow [&::-moz-range-thumb]:h-[16px] [&::-moz-range-thumb]:w-[16px] [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-[#1A1C1A] [&::-moz-range-thumb]:bg-white" />
+                <span className="whitespace-nowrap text-[12px] font-semibold tabular-nums"><span className="text-[#2E7D32]">Test {testPct}%</span> <span className="text-[#BDBDBD]">/</span> <span className="text-[#C62828]">Control {100 - testPct}%</span></span>
+              </div>
             </div>
-            <input type="range" min={10} max={90} step={5} value={testPct} onChange={(e) => setTestPct(Number(e.target.value))} className="mt-2 w-full accent-[#2E7D32]" />
-            <div className="mt-1 flex justify-between text-[11px]">
+            <div className="mt-1.5 flex justify-between text-[11px]">
               <span className="font-semibold text-[#2E7D32]">~{n(Math.round(audience * testPct / 100))} contacted (test)</span>
-              <span className="font-semibold text-[#757575]">~{n(audience - Math.round(audience * testPct / 100))} holdout (control)</span>
+              <span className="font-semibold text-[#C62828]">~{n(audience - Math.round(audience * testPct / 100))} holdout (control)</span>
             </div>
-            <div className="mt-1 text-[10.5px] text-[#9E9E9E]">The <b>test</b> group is contacted; <b>control</b> is held back as the no-contact baseline for measuring uplift. Default 75 / 25.</div>
+            <div className="mt-1 text-[10.5px] text-[#9E9E9E]">The <b>test</b> group is contacted; <b>control</b> is held back as the no-contact baseline for uplift. 100/0 = contact everyone (no control); 0/100 = hold everyone back. Default 75 / 25.</div>
           </div>
           <button type="button" onClick={submit} disabled={pending || !name.trim() || commPlans.length === 0} className="mt-4 rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{pending ? "Creating…" : "Create & enrol"}</button>
         </div>

@@ -376,7 +376,7 @@ export async function createCampaign(input: CreateCampaignInput): Promise<{ ok: 
     // Enrol snapshot; store/zone denormalized so officers/RMs see only their own farmers.
     // Test/control split chosen by the maker: ~testPct% of the audience is TEST (contacted), the rest
     // control. Deterministic by farmer id mod 100 → an even split that holds for any ratio (not just 75/25).
-    const testPct = Math.min(95, Math.max(5, Math.round(input.testPct ?? 75)));
+    const testPct = Math.min(100, Math.max(0, Math.round(input.testPct ?? 75))); // 0 = all control, 100 = all test
     let total = 0;
     for (let i = 0; i < ids.length; i += 5000) {
       const slice = ids.slice(i, i + 5000);
