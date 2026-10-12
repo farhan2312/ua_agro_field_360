@@ -11,7 +11,7 @@ async function requireManager() {
 }
 
 function roleLabelOf(role: string, label: string | null): string {
-  return label ?? (role === "REGIONAL" ? "Regional Manager" : "Agri Officer");
+  return label ?? (role === "REGIONAL" ? "Regional Manager" : role === "CENTRAL" ? "Central" : "Agri Officer");
 }
 
 export interface HelperCandidate { id: number; name: string; employeeCode: string | null; roleLabel: string; storeName: string | null }
@@ -23,7 +23,7 @@ export async function getHelperCandidates(): Promise<HelperCandidate[]> {
   await requireManager();
   const [users, stores] = await Promise.all([
     prisma.user.findMany({
-      where: { active: true, role: { in: ["ASR", "STORE_MANAGER", "REGIONAL"] } },
+      where: { active: true, role: { in: ["ASR", "STORE_MANAGER", "REGIONAL", "CENTRAL"] } },
       select: { id: true, name: true, employeeCode: true, roleLabel: true, role: true, storeId: true },
       orderBy: { name: "asc" },
     }),
