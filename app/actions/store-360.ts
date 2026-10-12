@@ -23,14 +23,24 @@ export interface StoreListItem {
   farmers: number; officers: number; ltv: number; activeCampaigns: number; openActions: number; overdueActions: number; lastVisit: string | null;
 }
 
+export interface StoreListResult {
+  stores: StoreListItem[];
+  /** Farmers with no store assigned — can't sit under any store card, so the per-store total
+   *  (sum of cards) is less than the org-wide farmer count by exactly this many. 0 for RMs
+   *  (an unassigned farmer belongs to no one's stores). */
+  unassignedFarmers: number;
+}
+
 /** Stores the caller may see, each with headline KPIs. null = no access (officer/campaigner). */
-export async function getStoreList(): Promise<StoreListItem[] | null> {
+export async function getStoreList(): Promise<StoreListResult | null> {
   const scope = await getScope();
   if (!MANAGER_ROLES.has(scope.role)) return null;
   const where: Prisma.StoreWhereInput = scope.role === "regional" ? { id: { in: scope.managedStoreIds ?? [] } } : {};
   const stores = await prisma.store.findMany({ where, select: { id: true, code: true, name: true, zone: true, regionalManager: true, status: true }, orderBy: { name: "asc" } });
   const ids = stores.map((s) => s.id);
-  if (!ids.length) return [];
+  // Storeless farmers are visible org-wide only (RMs scope to their stores, which all have an id).
+  const unassignedFarmers = scope.role === "regional" ? 0 : await prisma.farmer.count({ where: { storeId: null } });
+  if (!ids.length) return { stores: [], unassignedFarmers };
   const inIds = { in: ids };
   const sod = startOfToday(); // overdue = due strictly before today (matches Action Registry)
 
@@ -56,12 +66,13 @@ export async function getStoreList(): Promise<StoreListItem[] | null> {
   const ltvMap = new Map(ltvG.map((r) => [r.storeId, Math.round(r._sum.basic ?? 0)]));
   const vMap = new Map(visitG.map((r) => [r.storeId, r._max.visitedAt]));
 
-  return stores.map((s) => ({
+  const list = stores.map((s) => ({
     id: s.id, name: shortStoreName(s.name) || s.name, code: s.code, zone: s.zone, regionalManager: s.regionalManager, status: s.status,
     farmers: fMap.get(s.id) ?? 0, officers: oMap.get(s.id) ?? 0, ltv: ltvMap.get(s.id) ?? 0,
     activeCampaigns: activeMap.get(s.id) ?? 0, openActions: openMap.get(s.id) ?? 0, overdueActions: overMap.get(s.id) ?? 0,
     lastVisit: iso(vMap.get(s.id) ?? null),
   }));
+  return { stores: list, unassignedFarmers };
 }
 
 export interface StoreDetail {
