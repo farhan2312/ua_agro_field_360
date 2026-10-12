@@ -6,6 +6,7 @@ import { getScope } from "@/lib/scope";
 import { segMeta, VALUE_SEGMENTS, LIFECYCLE_SEGMENTS } from "@/lib/campaign-segments";
 import { cropLabel } from "@/lib/crops";
 import { shortStoreName } from "@/lib/store-utils";
+import { startOfToday } from "@/lib/action-constants";
 
 /**
  * Store 360 — a store-level mirror of Farmer 360. Visible to Regional Managers (their managed stores
@@ -31,14 +32,14 @@ export async function getStoreList(): Promise<StoreListItem[] | null> {
   const ids = stores.map((s) => s.id);
   if (!ids.length) return [];
   const inIds = { in: ids };
-  const now = new Date();
+  const sod = startOfToday(); // overdue = due strictly before today (matches Action Registry)
 
   const [farmerG, officerG, ltvG, openG, overG, visitG, activeMap] = await Promise.all([
     prisma.farmer.groupBy({ by: ["storeId"], where: { storeId: inIds }, _count: { _all: true } }),
     prisma.user.groupBy({ by: ["storeId"], where: { storeId: inIds, role: { in: ["ASR", "STORE_MANAGER"] }, active: true }, _count: { _all: true } }),
     prisma.saleLine.groupBy({ by: ["storeId"], where: { storeId: inIds, source: "REAL" }, _sum: { basic: true } }),
     prisma.action.groupBy({ by: ["storeId"], where: { storeId: inIds, status: "OPEN" }, _count: { _all: true } }),
-    prisma.action.groupBy({ by: ["storeId"], where: { storeId: inIds, status: "OPEN", dueDate: { lt: now } }, _count: { _all: true } }),
+    prisma.action.groupBy({ by: ["storeId"], where: { storeId: inIds, status: "OPEN", dueDate: { lt: sod } }, _count: { _all: true } }),
     prisma.visit.groupBy({ by: ["storeId"], where: { storeId: inIds }, _max: { visitedAt: true } }),
     (async () => {
       const active = await prisma.campaign.findMany({ where: { status: "ACTIVE" }, select: { id: true } });
@@ -87,7 +88,7 @@ export async function getStoreDetail(storeId: number): Promise<StoreDetail | nul
 
   const store = await prisma.store.findUnique({ where: { id: storeId }, select: { id: true, code: true, name: true, zone: true, address: true, regionalManager: true, status: true } });
   if (!store) return null;
-  const now = new Date();
+  const sod = startOfToday(); // overdue = due strictly before today (matches Action Registry)
 
   const [
     farmerCount, officerRows, ltvAgg, openActions, overdueActions, doneActions, visitCount, ghoshtiCount,
@@ -98,7 +99,7 @@ export async function getStoreDetail(storeId: number): Promise<StoreDetail | nul
     prisma.user.findMany({ where: { storeId, role: { in: ["ASR", "STORE_MANAGER"] } }, select: { name: true, employeeCode: true, roleLabel: true, role: true, lastLoginAt: true, lastSeenAt: true, active: true }, orderBy: { name: "asc" } }),
     prisma.saleLine.aggregate({ where: { storeId, source: "REAL" }, _sum: { basic: true } }),
     prisma.action.count({ where: { storeId, status: "OPEN" } }),
-    prisma.action.count({ where: { storeId, status: "OPEN", dueDate: { lt: now } } }),
+    prisma.action.count({ where: { storeId, status: "OPEN", dueDate: { lt: sod } } }),
     prisma.action.count({ where: { storeId, status: "DONE" } }),
     prisma.visit.count({ where: { storeId } }),
     prisma.ghoshti.count({ where: { storeId } }),

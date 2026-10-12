@@ -1,5 +1,13 @@
 /** Shared Action-registry enums, reasons + view-model (kept out of the "use server" actions file). */
 
+/**
+ * Start of "today" (server-local midnight) — the single, shared overdue cutoff. An action is OVERDUE
+ * only when its dueDate is strictly before this: a follow-up due *today* is still due, not overdue.
+ * Every overdue count in the app (Action Registry, Store 360, Overall + leaderboards) must use this so
+ * the numbers agree — using `new Date()` instead wrongly flags all of today's follow-ups as overdue.
+ */
+export const startOfToday = (): Date => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
+
 export const ACTION_STATUSES = ["OPEN", "DONE"] as const;
 export type ActionStatus = (typeof ACTION_STATUSES)[number];
 
