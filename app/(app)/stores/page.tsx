@@ -17,5 +17,5 @@ export default async function StoresPage() {
     );
   }
 
-  return <StoreListScreen stores={data.stores} unassignedFarmers={data.unassignedFarmers} />;
+  return <StoreListScreen stores={data.stores} unassignedFarmers={data.unassignedFarmers} unassignedOverdue={data.unassignedOverdue} />;
 }

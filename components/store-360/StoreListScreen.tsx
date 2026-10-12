@@ -23,7 +23,7 @@ function Stat({ label, value, tone, sub }: { label: string; value: string; tone?
   );
 }
 
-export function StoreListScreen({ stores, unassignedFarmers = 0 }: { stores: StoreListItem[]; unassignedFarmers?: number }) {
+export function StoreListScreen({ stores, unassignedFarmers = 0, unassignedOverdue = 0 }: { stores: StoreListItem[]; unassignedFarmers?: number; unassignedOverdue?: number }) {
   const [q, setQ] = useState("");
   const rows = useMemo(() => {
     const t = q.trim().toLowerCase();
@@ -46,7 +46,8 @@ export function StoreListScreen({ stores, unassignedFarmers = 0 }: { stores: Sto
         <div className={`${CARD} px-4 py-3`}><Stat label="Farmers" value={n(totals.farmers)} tone="#2E7D32"
           sub={unassignedFarmers > 0 ? `in ${n(totals.stores)} stores · +${n(unassignedFarmers)} unassigned` : undefined} /></div>
         <div className={`${CARD} px-4 py-3`}><Stat label="Sales LTV (base)" value={inr(totals.ltv)} tone="#1565C0" /></div>
-        <div className={`${CARD} px-4 py-3`}><Stat label="Overdue follow-ups" value={n(totals.overdue)} tone={totals.overdue > 0 ? "#C62828" : "#1A1C1A"} /></div>
+        <div className={`${CARD} px-4 py-3`}><Stat label="Overdue follow-ups" value={n(totals.overdue)} tone={totals.overdue > 0 ? "#C62828" : "#1A1C1A"}
+          sub={unassignedOverdue > 0 ? `+${n(unassignedOverdue)} unassigned` : undefined} /></div>
       </div>
 
       <div className="mb-4 flex items-center gap-2">

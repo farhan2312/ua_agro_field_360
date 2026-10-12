@@ -29,6 +29,9 @@ export interface StoreListResult {
    *  (sum of cards) is less than the org-wide farmer count by exactly this many. 0 for RMs
    *  (an unassigned farmer belongs to no one's stores). */
   unassignedFarmers: number;
+  /** Overdue follow-ups with no store assigned — same story: they can't appear under a store card,
+   *  so the summed overdue total trails the org-wide one by this many. 0 for RMs. */
+  unassignedOverdue: number;
 }
 
 /** Stores the caller may see, each with headline KPIs. null = no access (officer/campaigner). */
@@ -40,11 +43,11 @@ export async function getStoreList(): Promise<StoreListResult | null> {
   const ids = stores.map((s) => s.id);
   // Storeless farmers are visible org-wide only (RMs scope to their stores, which all have an id).
   const unassignedFarmers = scope.role === "regional" ? 0 : await prisma.farmer.count({ where: { storeId: null } });
-  if (!ids.length) return { stores: [], unassignedFarmers };
+  if (!ids.length) return { stores: [], unassignedFarmers, unassignedOverdue: 0 };
   const inIds = { in: ids };
   const sod = startOfToday(); // overdue = due strictly before today (matches Action Registry)
 
-  const [farmerG, officerG, ltvG, openG, overG, visitG, activeMap] = await Promise.all([
+  const [farmerG, officerG, ltvG, openG, overG, visitG, activeMap, unassignedOverdue] = await Promise.all([
     prisma.farmer.groupBy({ by: ["storeId"], where: { storeId: inIds }, _count: { _all: true } }),
     prisma.user.groupBy({ by: ["storeId"], where: { storeId: inIds, role: { in: ["ASR", "STORE_MANAGER"] }, active: true }, _count: { _all: true } }),
     prisma.saleLine.groupBy({ by: ["storeId"], where: { storeId: inIds, source: "REAL" }, _sum: { basic: true } }),
@@ -60,6 +63,8 @@ export async function getStoreList(): Promise<StoreListResult | null> {
       for (const r of gm) { if (r.storeId == null) continue; (sets.get(r.storeId) ?? sets.set(r.storeId, new Set()).get(r.storeId)!).add(r.campaignId); }
       return new Map([...sets].map(([k, v]) => [k, v.size]));
     })(),
+    // Store-less overdue follow-ups — org-wide only (not in any RM's stores).
+    scope.role === "regional" ? Promise.resolve(0) : prisma.action.count({ where: { status: "OPEN", dueDate: { lt: sod }, storeId: null } }),
   ]);
   const num = (m: { storeId: number | null; _count: { _all: number } }[]) => new Map(m.map((r) => [r.storeId, r._count._all]));
   const fMap = num(farmerG), oMap = num(officerG), openMap = num(openG), overMap = num(overG);
@@ -72,7 +77,7 @@ export async function getStoreList(): Promise<StoreListResult | null> {
     activeCampaigns: activeMap.get(s.id) ?? 0, openActions: openMap.get(s.id) ?? 0, overdueActions: overMap.get(s.id) ?? 0,
     lastVisit: iso(vMap.get(s.id) ?? null),
   }));
-  return { stores: list, unassignedFarmers };
+  return { stores: list, unassignedFarmers, unassignedOverdue };
 }
 
 export interface StoreDetail {
