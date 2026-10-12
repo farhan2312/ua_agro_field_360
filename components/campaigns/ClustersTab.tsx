@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
 import { InfoTip } from "@/components/InfoTip";
 import { segMeta, segDef, VALUE_SEGMENTS, LIFECYCLE_SEGMENTS, VALUE_TITLE, LIFECYCLE_TITLE } from "@/lib/campaign-segments";
@@ -89,6 +89,69 @@ export function ClustersTab({ initial, zones, crops, pests, stores, canChain, ca
 
       {building && <RuleBuilder zones={zones} crops={crops} pests={pests} stores={stores} canChain={canChain} onClose={() => setBuilding(false)} onCreated={() => { setBuilding(false); refresh(); }} />}
       {viewing && <MembersModal cluster={viewing} onClose={() => setViewing(null)} />}
+    </div>
+  );
+}
+
+/* Multi-select checkbox dropdown: tick options inside the panel. Has a Select-all / Clear-all
+   row and an optional search box for long lists (stores). Selection is driven by the parent. */
+function CheckDropdown({ placeholder, options, selected, onToggle, onSelectAll, onClear, searchable = false }: {
+  placeholder: string;
+  options: { value: string; label: string; hint?: string }[];
+  selected: Set<string>;
+  onToggle: (value: string) => void;
+  onSelectAll: () => void;
+  onClear: () => void;
+  searchable?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  const needle = q.trim().toLowerCase();
+  const shown = needle ? options.filter((o) => o.label.toLowerCase().includes(needle)) : options;
+  const selCount = options.reduce((acc, o) => acc + (selected.has(o.value) ? 1 : 0), 0);
+  const allOn = options.length > 0 && selCount === options.length;
+
+  return (
+    <div ref={ref} className="relative mb-2">
+      <button type="button" onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between rounded-lg border border-[#E0E0E0] bg-white px-3 py-2 text-left text-[13px]">
+        <span className={selCount ? "text-[#1A1C1A]" : "text-[#9E9E9E]"}>{selCount ? `${selCount} selected` : placeholder}</span>
+        <span className="ml-2 text-[10px] text-[#9E9E9E]">▾</span>
+      </button>
+      {open && (
+        <div className="mt-1 overflow-hidden rounded-lg border border-[#E0E0E0] bg-white shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
+          {searchable && (
+            <div className="border-b border-[#F0F0F0] p-2">
+              <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…"
+                className="w-full rounded-md border border-[#E0E0E0] px-2 py-1.5 text-[12px]" />
+            </div>
+          )}
+          <label className="flex cursor-pointer items-center gap-2 border-b border-[#F0F0F0] bg-[#FAFBFA] px-3 py-2 text-[12px] font-semibold text-[#2E7D32]">
+            <input type="checkbox" checked={allOn}
+              ref={(el) => { if (el) el.indeterminate = selCount > 0 && !allOn; }}
+              onChange={() => (allOn ? onClear() : onSelectAll())} className="h-3.5 w-3.5 accent-[#2E7D32]" />
+            {allOn ? "Clear all" : "Select all"}{options.length ? ` (${options.length})` : ""}
+          </label>
+          <div className="max-h-[180px] overflow-y-auto">
+            {shown.length === 0 ? (
+              <div className="px-3 py-3 text-center text-[12px] text-[#9E9E9E]">No matches</div>
+            ) : shown.map((o) => (
+              <label key={o.value} className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-[12.5px] hover:bg-[#F5F7F5]">
+                <input type="checkbox" checked={selected.has(o.value)} onChange={() => onToggle(o.value)} className="h-3.5 w-3.5 accent-[#2E7D32]" />
+                <span className="flex-1 text-[#1A1C1A]">{o.label}</span>
+                {o.hint && <span className="text-[10.5px] text-[#9E9E9E]">{o.hint}</span>}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -203,21 +266,23 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
             : cropSource === "visit" ? "Matches farmers an officer recorded growing this crop (from field visits)."
             : "Matches either source — bought it or seen growing on a visit."}
         </div>
-        <select value="" onChange={(e) => { if (e.target.value) toggle(crops, setCrops, e.target.value); }}
-          className="mb-2 w-full rounded-lg border border-[#E0E0E0] bg-white px-3 py-2 text-[13px]">
-          <option value="">+ Add a crop…</option>
-          {cropOpts.filter((c) => !crops.includes(c.crop)).map((c) => <option key={c.crop} value={c.crop}>{cropLabel(c.crop)} ({c.count.toLocaleString("en-IN")})</option>)}
-        </select>
+        <CheckDropdown placeholder="Select crops…" searchable
+          options={cropOpts.map((c) => ({ value: c.crop, label: cropLabel(c.crop), hint: c.count.toLocaleString("en-IN") }))}
+          selected={new Set(crops)}
+          onToggle={(v) => toggle(crops, setCrops, v)}
+          onSelectAll={() => setCrops(cropOpts.map((c) => c.crop))}
+          onClear={() => setCrops([])} />
         <div className="mb-3 flex flex-wrap gap-1.5">{crops.map((c) => (
           <button key={c} type="button" onClick={() => toggle(crops, setCrops, c)} className="rounded-full border-[1.5px] border-[#2E7D32] bg-[#E8F5E9] px-3 py-1 text-[12px] font-semibold text-[#2E7D32]">{cropLabel(c)} ✕</button>
         ))}</div>
 
         <div className="mb-1.5 text-[11px] font-semibold uppercase text-[#9E9E9E]">Target pest / disease (any of)</div>
-        <select value="" onChange={(e) => { if (e.target.value) toggle(pests, setPests, e.target.value); }}
-          className="mb-2 w-full rounded-lg border border-[#E0E0E0] bg-white px-3 py-2 text-[13px]">
-          <option value="">+ Add a pest / disease…</option>
-          {pestOpts.filter((p) => !pests.includes(p.pest)).map((p) => <option key={p.pest} value={p.pest}>{tagLabel(p.pest)} ({p.count.toLocaleString("en-IN")})</option>)}
-        </select>
+        <CheckDropdown placeholder="Select pests / diseases…" searchable
+          options={pestOpts.map((p) => ({ value: p.pest, label: tagLabel(p.pest), hint: p.count.toLocaleString("en-IN") }))}
+          selected={new Set(pests)}
+          onToggle={(v) => toggle(pests, setPests, v)}
+          onSelectAll={() => setPests(pestOpts.map((p) => p.pest))}
+          onClear={() => setPests([])} />
         <div className="mb-3 flex flex-wrap gap-1.5">{pests.map((p) => (
           <button key={p} type="button" onClick={() => toggle(pests, setPests, p)} className="rounded-full border-[1.5px] border-[#E65100] bg-[#FFF3E0] px-3 py-1 text-[12px] font-semibold text-[#E65100]">{tagLabel(p)} ✕</button>
         ))}</div>
@@ -225,11 +290,12 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
 
         {/* Districts — multi-select; cascades into the Stores picker below */}
         <div className="mb-1.5 text-[11px] font-semibold uppercase text-[#9E9E9E]">Districts (any of)</div>
-        <select value="" onChange={(e) => { if (e.target.value) toggleZone(e.target.value); }}
-          className="mb-2 w-full rounded-lg border border-[#E0E0E0] bg-white px-3 py-2 text-[13px]">
-          <option value="">+ Add a district…</option>
-          {zones.filter((z) => !zoneList.includes(z)).map((z) => <option key={z} value={z}>{z}</option>)}
-        </select>
+        <CheckDropdown placeholder="Select districts…" searchable
+          options={zones.map((z) => ({ value: z, label: z }))}
+          selected={new Set(zoneList)}
+          onToggle={toggleZone}
+          onSelectAll={() => setZoneList([...zones])}
+          onClear={() => setZoneList([])} />
         {zoneList.length > 0 && (
           <div className="mb-3 flex flex-wrap gap-1.5">{zoneList.map((z) => (
             <button key={z} type="button" onClick={() => toggleZone(z)} className="rounded-full border-[1.5px] border-[#2E7D32] bg-[#E8F5E9] px-3 py-1 text-[12px] font-semibold text-[#2E7D32]">{z} ✕</button>
@@ -238,11 +304,12 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
 
         {/* Stores — cascading multi-select, filtered by the selected regions */}
         <div className="mb-1.5 text-[11px] font-semibold uppercase text-[#9E9E9E]">Stores (any of){zoneList.length > 0 ? ` · in ${zoneList.length} district${zoneList.length > 1 ? "s" : ""}` : ""}</div>
-        <select value="" onChange={(e) => { if (e.target.value) toggleStore(Number(e.target.value)); }}
-          className="mb-2 w-full rounded-lg border border-[#E0E0E0] bg-white px-3 py-2 text-[13px]">
-          <option value="">+ Add a store…</option>
-          {availStores.filter((s) => !storeIds.includes(s.id)).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
+        <CheckDropdown placeholder="Select stores…" searchable
+          options={availStores.map((s) => ({ value: String(s.id), label: s.name }))}
+          selected={new Set(storeIds.map(String))}
+          onToggle={(v) => toggleStore(Number(v))}
+          onSelectAll={() => setStoreIds(availStores.map((s) => s.id))}
+          onClear={() => setStoreIds([])} />
         {storeIds.length > 0 && (
           <div className="mb-3 flex flex-wrap gap-1.5">{storeIds.map((id) => { const s = storeById.get(id); return (
             <button key={id} type="button" onClick={() => toggleStore(id)} className="rounded-full border-[1.5px] border-[#1565C0] bg-[#E3F2FD] px-3 py-1 text-[12px] font-semibold text-[#1565C0]">{s ? shortStoreName(s.name) : `#${id}`} ✕</button>
