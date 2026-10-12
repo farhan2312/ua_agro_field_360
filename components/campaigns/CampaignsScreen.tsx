@@ -11,6 +11,7 @@ import { BroadcastPanel } from "./BroadcastPanel";
 import { BroadcastHistory } from "./BroadcastHistory";
 import { PhasesPanel } from "./phases/PhasesPanel";
 import { PhaseOutreachPanel } from "./phases/PhaseOutreachPanel";
+import { HelpersModal } from "./HelpersModal";
 import { WA_VAR_TOKENS, SAMPLE_VARS, fillNamedTemplate, countDltVars, fillDltTemplate } from "@/lib/campaign-vars";
 import { listTemplates, type WaTemplate } from "@/app/actions/whatsapp-templates";
 import { useConfirm } from "@/components/ConfirmDialog";
@@ -527,6 +528,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
   const [editOf, setEditOf] = useState<CampaignListItem | null>(null);
   const [phasesOf, setPhasesOf] = useState<CampaignListItem | null>(null); // manager phase setup/board
   const [phaseOutreachOf, setPhaseOutreachOf] = useState<CampaignListItem | null>(null); // phase-routed outreach (all roles)
+  const [helpersOf, setHelpersOf] = useState<CampaignListItem | null>(null); // manager: lend officers/RMs to this campaign
 
   // The comm-plan scripts tagged to the open campaign (by name) — shown as the outreach left panel.
   const scripts = membersOf ? templates.filter((t) => membersOf.commPlans.includes(t.name)) : [];
@@ -676,6 +678,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
             {canManage && <button type="button" onClick={() => setPhasesOf(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#E65100] hover:bg-[#FFF3E0]">⚙ Round setup</button>}
             {canManage && <button type="button" onClick={() => openTracker(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9]">Campaign Tracker</button>}
             {canManage && <button type="button" onClick={() => setEditOf(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#455A64] hover:bg-[#ECEFF1]">✎ Edit</button>}
+            {canManage && <button type="button" onClick={() => setHelpersOf(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#00838F] hover:bg-[#E0F7FA]">👥 Helpers</button>}
             {canManage && <button type="button" onClick={() => setExtendOf(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#6A1B9A] hover:bg-[#F3E5F5]">Extend</button>}
             {canManage && <button type="button" onClick={() => setHistoryOf(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#0B8A3D] hover:bg-[#E8F5E9]">📣 Broadcasts</button>}
           </div>
@@ -796,6 +799,9 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
       )}
       {phaseOutreachOf && (
         <PhaseOutreachPanel campaignId={phaseOutreachOf.id} campaignName={phaseOutreachOf.name} onClose={() => setPhaseOutreachOf(null)} />
+      )}
+      {helpersOf && (
+        <HelpersModal campaignId={helpersOf.id} campaignName={helpersOf.name} onClose={() => setHelpersOf(null)} />
       )}
       {broadcasting && membersOf && (
         <BroadcastPanel campaignId={membersOf.id} campaignName={membersOf.name} commPlans={membersOf.commPlans ?? []} templates={templates} onClose={() => { setBroadcasting(false); setBcReload((k) => k + 1); }} />

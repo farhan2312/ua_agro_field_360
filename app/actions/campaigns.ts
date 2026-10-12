@@ -500,18 +500,71 @@ async function campaignerAssignedIds(): Promise<number[] | null> {
   return rows.map((r) => r.campaignId);
 }
 
+/**
+ * Store ids the current user has been lent on ONE campaign (a "helper" grant — see CampaignHelper).
+ * Lets an officer/RM support a campaign whose stores aren't their own. Empty when there's no grant.
+ */
+async function helperStoresFor(campaignId: number): Promise<number[]> {
+  const { userId } = await getScope();
+  if (userId == null) return [];
+  const h = await prisma.campaignHelper.findUnique({
+    where: { campaignId_userId: { campaignId, userId } }, select: { storeIds: true },
+  });
+  return h?.storeIds ?? [];
+}
+
+/**
+ * Member `where` for the current user on ONE campaign: their base role scope (officer→own store,
+ * RM→managed stores) WIDENED by any helper grant's named stores. null = see all (central/sysadmin/
+ * campaigner — campaigner gated separately); "none" = see nothing.
+ */
+async function campaignMemberScope(campaignId: number): Promise<Prisma.CampaignMemberWhereInput | null | "none"> {
+  const { role, storeId, managedStoreIds } = await getScope();
+  if (role === "officer") {
+    const stores = [...new Set([...(storeId != null ? [storeId] : []), ...(await helperStoresFor(campaignId))])];
+    return stores.length ? { storeId: { in: stores } } : "none";
+  }
+  if (role === "regional") {
+    const stores = [...new Set([...(managedStoreIds ?? []), ...(await helperStoresFor(campaignId))])];
+    return stores.length ? { storeId: { in: stores } } : "none";
+  }
+  return null; // central / sysadmin / campaigner
+}
+
 export async function listCampaigns(): Promise<CampaignListItem[]> {
-  const assigned = await campaignerAssignedIds();
-  if (assigned && assigned.length === 0) return []; // campaigner with no campaigns assigned yet
-  const scope = await memberScopeWhere();
-  if (scope === "none") return []; // officer/RM with no store/zone → nothing to show
+  const { role, userId, storeId, managedStoreIds } = await getScope();
+
+  // Per-role campaign filter + member-count filter. Officers/RMs see campaigns that reach their own
+  // store/zone PLUS any campaign they've been lent to as a helper (named stores).
+  let where: Prisma.CampaignWhereInput | undefined;
+  let countWhere: Prisma.CampaignMemberWhereInput | undefined; // undefined = count every member
+
+  if (role === "campaigner") {
+    const rows = userId != null ? await prisma.campaignCaller.findMany({ where: { userId }, select: { campaignId: true } }) : [];
+    const assigned = rows.map((r) => r.campaignId);
+    if (!assigned.length) return []; // campaigner with nothing assigned yet
+    where = { id: { in: assigned } };
+  } else if (role === "officer" || role === "regional") {
+    const ownStores = role === "officer" ? (storeId != null ? [storeId] : []) : (managedStoreIds ?? []);
+    const helperRows = userId != null
+      ? await prisma.campaignHelper.findMany({ where: { userId }, select: { campaignId: true, storeIds: true } })
+      : [];
+    const helperIds = helperRows.map((r) => r.campaignId);
+    const helperStores = [...new Set(helperRows.flatMap((r) => r.storeIds))];
+    const allStores = [...new Set([...ownStores, ...helperStores])];
+    if (!allStores.length && !helperIds.length) return []; // no store/zone and no grant → nothing
+    const or: Prisma.CampaignWhereInput[] = [];
+    if (ownStores.length) or.push({ members: { some: { storeId: { in: ownStores } } } });
+    if (helperIds.length) or.push({ id: { in: helperIds } });
+    where = or.length ? { OR: or } : { id: { in: [] } };
+    countWhere = { storeId: { in: allStores.length ? allStores : [-1] } }; // count only members they can see
+  } // central / sysadmin: where + countWhere stay undefined (everything)
+
   const camps = await prisma.campaign.findMany({
     orderBy: { createdAt: "desc" },
     take: 100,
-    where: assigned
-      ? { id: { in: assigned } } // campaigner: only the campaigns assigned to them
-      : scope ? { members: { some: scope } } : undefined, // officer/RM: campaigns that reach my store/zone
-    include: { _count: { select: { members: scope ? { where: scope } : true } } }, // scoped member count
+    where,
+    include: { _count: { select: { members: countWhere ? { where: countWhere } : true } } }, // scoped member count
   });
   // Batch-resolve target names (loose ids — campaigns don't relation-load project/cluster).
   const projIds = [...new Set(camps.map((c) => c.projectId).filter((x): x is number => x != null))];
@@ -549,7 +602,7 @@ export interface CampaignMemberVM {
 export async function getCampaignMembers(campaignId: number, limit = 25000): Promise<CampaignMemberVM[]> {
   const assigned = await campaignerAssignedIds();
   if (assigned && !assigned.includes(campaignId)) return []; // campaigner may only open assigned campaigns
-  const scope = await memberScopeWhere();
+  const scope = await campaignMemberScope(campaignId); // own store/zone + any helper grant on this campaign
   if (scope === "none") return [];
   const members = await prisma.campaignMember.findMany({
     where: { campaignId, group: "TEST", ...(scope ?? {}) }, // officers/RMs contact only the TEST group
@@ -958,8 +1011,16 @@ export async function markCampaignMember(
   if (!member) return { ok: false, error: "Member not found." };
   // Officers/RMs may only touch members in their own store / managed stores; campaigners only their
   // assigned campaigns; central/sysadmin may touch any.
-  if (role === "officer") { if (storeId == null || member.storeId !== storeId) return { ok: false, error: "This farmer isn't in your store." }; }
-  else if (role === "regional") { if (member.storeId == null || !(managedStoreIds ?? []).includes(member.storeId)) return { ok: false, error: "This farmer isn't in a store you manage." }; }
+  if (role === "officer") {
+    const allowed = new Set<number>(storeId != null ? [storeId] : []);
+    (await helperStoresFor(member.campaignId)).forEach((s) => allowed.add(s)); // + stores lent on this campaign
+    if (member.storeId == null || !allowed.has(member.storeId)) return { ok: false, error: "This farmer isn't in your store." };
+  }
+  else if (role === "regional") {
+    const allowed = new Set<number>(managedStoreIds ?? []);
+    (await helperStoresFor(member.campaignId)).forEach((s) => allowed.add(s)); // + stores lent on this campaign
+    if (member.storeId == null || !allowed.has(member.storeId)) return { ok: false, error: "This farmer isn't in a store you manage." };
+  }
   else if (role === "campaigner") {
     const assigned = userId != null ? await prisma.campaignCaller.count({ where: { userId, campaignId: member.campaignId } }) : 0;
     if (!assigned) return { ok: false, error: "This campaign isn't assigned to you." };

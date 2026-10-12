@@ -409,6 +409,7 @@ model Campaign {
   phases         CampaignPhase[]
   phaseAdvances  CampaignPhaseAdvance[]
   callers        CampaignCaller[]
+  helpers        CampaignHelper[]
 }
 
 /// Assigns a Campaigner (part-time call-team user) to a campaign. A campaigner only sees + calls the
@@ -417,6 +418,25 @@ model CampaignCaller {
   id             Int      @id @default(autoincrement())
   campaignId     Int
   userId         Int // the Campaigner user
+  assignedByName String?
+  assignedByCode String?
+  createdAt      DateTime @default(now())
+  campaign       Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, userId])
+  @@index([userId])
+  @@index([campaignId])
+}
+
+/// Lends a field user (agri officer / regional manager) to a campaign their store isn't part of,
+/// scoped to named store(s). On that one campaign they can mark-reached + comment on those stores'
+/// TEST members, while keeping their normal role (and own-store scope) everywhere else. Added by
+/// whoever manages the campaign (central / sysadmin) from the campaign screen.
+model CampaignHelper {
+  id             Int      @id @default(autoincrement())
+  campaignId     Int
+  userId         Int // the officer / RM lent to this campaign
+  storeIds       Int[]    @default([]) // store ids this helper covers on this campaign
   assignedByName String?
   assignedByCode String?
   createdAt      DateTime @default(now())
