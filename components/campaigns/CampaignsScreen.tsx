@@ -18,7 +18,7 @@ import { useConfirm } from "@/components/ConfirmDialog";
 import { cropLabel } from "@/lib/crops";
 import { inr } from "@/lib/format";
 import {
-  saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, getCampaignTracker, extendCampaign, updateCampaignCommPlans, deleteCampaign, getCampaignMembers, markCampaignMember, getCampaignAnalytics, exportCampaignAudienceXlsx, exportCampaignTrackerXlsx, getSmsTemplates,
+  saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, getCampaignTracker, extendCampaign, updateCampaignCommPlans, setCampaignWorkedBy, deleteCampaign, getCampaignMembers, markCampaignMember, getCampaignAnalytics, exportCampaignAudienceXlsx, exportCampaignTrackerXlsx, getSmsTemplates,
   type CampaignListItem, type CampaignTracker, type ProjectVM, type CampaignMemberVM, type CampaignAnalytics, type SmsTemplateVM, type TrackerScope, type SegRow, type MatchView,
 } from "@/app/actions/campaigns";
 import { downloadB64 } from "@/lib/download";
@@ -507,6 +507,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
   const [clusterId, setClusterId] = useState<number | null>(null); // null = whole project
   const [commPlans, setCommPlans] = useState<string[]>([]); // every campaign must be tagged with ≥1 comm plan (by name)
   const [testPct, setTestPct] = useState(75); // % of the audience that goes into the contacted TEST group (rest = control)
+  const [workedBy, setWorkedBy] = useState<"STORE" | "CAMPAIGNERS" | "BOTH">("STORE"); // who sees + works the campaign
   const [startDate, setStart] = useState(defaultProject?.startDate ?? "");
   const [endDate, setEnd] = useState(defaultProject?.endDate ?? "");
   const [pending, start] = useTransition();
@@ -551,12 +552,12 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
     if (commPlans.length === 0) { setMsg("Tag at least one comm plan."); return; }
     setMsg(null);
     start(async () => {
-      const res = await createCampaign({ name, startDate, endDate, projectId, clusterId, commPlans, testPct });
+      const res = await createCampaign({ name, startDate, endDate, projectId, clusterId, commPlans, testPct, workedBy });
       if (res.ok) {
         setMsg(`Created "${name}" · ${n(res.members ?? 0)} enrolled${res.skipped ? ` · ${n(res.skipped)} skipped (already in another campaign of this project)` : ""}.`);
         // Close + reset the form, then soft-refresh so the new campaign appears in the list.
         setCreating(false);
-        setName(""); setClusterId(null); setCommPlans([]); setTestPct(75);
+        setName(""); setClusterId(null); setCommPlans([]); setTestPct(75); setWorkedBy("STORE");
         // Drop ?forProject= — otherwise the chain deep link re-opens the form on refresh.
         if (initialProjectId != null) router.replace("/campaigns");
         router.refresh();
@@ -650,6 +651,26 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
             </div>
             <div className="mt-1 text-[10.5px] text-[#9E9E9E]">The <b>test</b> group is contacted; <b>control</b> is held back as the no-contact baseline for uplift. 100/0 = contact everyone (no control); 0/100 = hold everyone back. Default 75 / 25.</div>
           </div>
+          {/* Who works this campaign — gates whether store officers/RMs can see & call it */}
+          <div className="mt-3 rounded-[10px] bg-[#F5F7F5] px-4 py-3">
+            <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Who works this campaign?</label>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {([["STORE", "Store officers", "Agri officers & RMs call their own store's farmers (default)"],
+                 ["CAMPAIGNERS", "Campaigners only", "Only assigned campaigners (+ managers) — hidden from store officers"],
+                 ["BOTH", "Both", "Store officers/RMs and campaigners both work it"]] as const).map(([k, label, desc]) => (
+                <button key={k} type="button" title={desc} onClick={() => setWorkedBy(k)}
+                  className="rounded-full border-[1.5px] px-3 py-1 text-[12px] font-semibold"
+                  style={{ background: workedBy === k ? "#E0F7FA" : "#fff", color: workedBy === k ? "#00838F" : "#616161", borderColor: workedBy === k ? "#00838F" : "#E0E0E0" }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="mt-1.5 text-[10.5px] text-[#9E9E9E]">
+              {workedBy === "CAMPAIGNERS" ? "Store officers & RMs won't see this campaign — assign campaigners (or lend a helper) to work it."
+                : workedBy === "BOTH" ? "Store officers/RMs and any assigned campaigners both see and work this campaign."
+                : "Store officers & RMs see and call the farmers in their own store."}
+            </div>
+          </div>
           <button type="button" onClick={submit} disabled={pending || !name.trim() || commPlans.length === 0} className="mt-4 rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{pending ? "Creating…" : "Create & enrol"}</button>
         </div>
       )}
@@ -661,7 +682,11 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
         ) : list.map((c) => (
           <div key={c.id} className="flex flex-wrap items-center gap-3 border-b border-[#F5F5F5] px-4 py-3">
             <div className="min-w-0 flex-1">
-              <div className="text-[13.5px] font-bold text-[#1A1C1A]">{c.name}</div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[13.5px] font-bold text-[#1A1C1A]">{c.name}</span>
+                {c.workedBy === "CAMPAIGNERS" && <span className="rounded-full bg-[#E0F7FA] px-2 py-0.5 text-[10px] font-semibold text-[#00838F]">📞 Campaigners only</span>}
+                {c.workedBy === "BOTH" && <span className="rounded-full bg-[#F3E5F5] px-2 py-0.5 text-[10px] font-semibold text-[#6A1B9A]">Officers + campaigners</span>}
+              </div>
               <div className="text-[11.5px] text-[#9E9E9E]">{c.startDate} → {c.endDate} · {c.target}</div>
               {c.commPlans.length > 0 && (
                 <div className="mt-1 flex flex-wrap gap-1">
@@ -847,6 +872,7 @@ function ExtendModal({ campaign, project, onClose }: { campaign: CampaignListIte
 /** Edit which comm plans a campaign is tagged with — add/remove by toggling; must keep at least one. */
 function EditCommPlansModal({ campaign, commPlanNames, onClose }: { campaign: CampaignListItem; commPlanNames: string[]; onClose: () => void }) {
   const [selected, setSelected] = useState<string[]>(campaign.commPlans ?? []);
+  const [workedBy, setWorkedBy] = useState<string>(campaign.workedBy ?? "STORE");
   const [saving, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState(false);
@@ -865,7 +891,12 @@ function EditCommPlansModal({ campaign, commPlanNames, onClose }: { campaign: Ca
     setErr(null);
     start(async () => {
       const res = await updateCampaignCommPlans(campaign.id, selected);
-      if (res.ok) location.reload(); else setErr(res.error ?? "Failed");
+      if (!res.ok) { setErr(res.error ?? "Failed"); return; }
+      if (workedBy !== (campaign.workedBy ?? "STORE")) {
+        const w = await setCampaignWorkedBy(campaign.id, workedBy);
+        if (!w.ok) { setErr(w.error ?? "Failed to update who works it"); return; }
+      }
+      location.reload();
     });
   };
   return (
@@ -1567,6 +1598,68 @@ function SegStoreMatrix({ valueCols, lifecycleCols, matrix, total }: { valueCols
   );
 }
 
+/** Per-centre outreach: Reached + how (Call/WA/SMS/In-person) + still-pending, one row per store. */
+function CallByStoreTable({ rows }: { rows: CampaignAnalytics["callByStore"] }) {
+  const tot = rows.reduce((t, r) => ({
+    test: t.test + r.test, reached: t.reached + r.reached, call: t.call + r.call,
+    whatsapp: t.whatsapp + r.whatsapp, sms: t.sms + r.sms, inPerson: t.inPerson + r.inPerson, pending: t.pending + r.pending,
+  }), { test: 0, reached: 0, call: 0, whatsapp: 0, sms: 0, inPerson: 0, pending: 0 });
+  const pct = (r: number, t: number) => (t > 0 ? Math.round((r / t) * 100) : 0);
+  const HEAD = "px-2.5 py-1.5 text-right text-[10.5px] font-semibold uppercase tracking-[0.3px] text-[#757575]";
+  const CELL = "px-2.5 py-1.5 text-right text-[12px] tabular-nums text-[#424242]";
+  return (
+    <div className={`${CARD} p-4`}>
+      <div className="mb-1 flex items-center justify-between">
+        <div className="text-[13px] font-bold text-[#1A1C1A]">Call stats by centre</div>
+        <span className="text-[11px] text-[#9E9E9E]">test group · reached &amp; how</span>
+      </div>
+      <div className="mb-2 text-[11px] text-[#9E9E9E]">A farmer reached by more than one approach counts under each, so Call/WA/SMS/Visit can exceed Reached.</div>
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse">
+          <thead>
+            <tr className="border-b border-[#ECECEC]">
+              <th className="px-2.5 py-1.5 text-left text-[10.5px] font-semibold uppercase tracking-[0.3px] text-[#757575]">Centre</th>
+              <th className={HEAD}>Test</th>
+              <th className={HEAD}>Reached</th>
+              <th className={HEAD}>Call</th>
+              <th className={HEAD}>WhatsApp</th>
+              <th className={HEAD}>SMS</th>
+              <th className={HEAD}>In-person</th>
+              <th className={HEAD}>Pending</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.store} className="border-b border-[#F5F5F5]">
+                <td className="px-2.5 py-1.5 text-left text-[12px] font-semibold text-[#1A1C1A]" title={r.store}>{r.store}</td>
+                <td className={CELL}>{n(r.test)}</td>
+                <td className="px-2.5 py-1.5 text-right text-[12px] tabular-nums font-semibold text-[#2E7D32]">{n(r.reached)} <span className="text-[10px] font-normal text-[#9E9E9E]">({pct(r.reached, r.test)}%)</span></td>
+                <td className={CELL}>{n(r.call)}</td>
+                <td className={CELL}>{n(r.whatsapp)}</td>
+                <td className={CELL}>{n(r.sms)}</td>
+                <td className={CELL}>{n(r.inPerson)}</td>
+                <td className="px-2.5 py-1.5 text-right text-[12px] tabular-nums text-[#C62828]">{n(r.pending)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="border-t-2 border-[#E0E0E0] font-semibold">
+              <td className="px-2.5 py-1.5 text-left text-[12px] text-[#1A1C1A]">All centres</td>
+              <td className={CELL}>{n(tot.test)}</td>
+              <td className="px-2.5 py-1.5 text-right text-[12px] tabular-nums font-bold text-[#2E7D32]">{n(tot.reached)} <span className="text-[10px] font-normal text-[#9E9E9E]">({pct(tot.reached, tot.test)}%)</span></td>
+              <td className={CELL}>{n(tot.call)}</td>
+              <td className={CELL}>{n(tot.whatsapp)}</td>
+              <td className={CELL}>{n(tot.sms)}</td>
+              <td className={CELL}>{n(tot.inPerson)}</td>
+              <td className="px-2.5 py-1.5 text-right text-[12px] tabular-nums text-[#C62828]">{n(tot.pending)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function AnalyticsBody({ a, campaign }: { a: CampaignAnalytics; campaign: CampaignListItem }) {
   const [exporting, setExporting] = useState(false);
   const doExport = () => {
@@ -1593,6 +1686,9 @@ function AnalyticsBody({ a, campaign }: { a: CampaignAnalytics; campaign: Campai
           {exporting ? "Exporting…" : "⬇ Export to Excel"}
         </button>
       </div>
+
+      {/* Centre-wise call stats — the per-store outreach breakdown (BDM/RM view) */}
+      {a.callByStore.length > 0 && <CallByStoreTable rows={a.callByStore} />}
 
       {/* Two independent segment dimensions: value tier + lifecycle */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

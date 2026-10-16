@@ -316,6 +316,7 @@ export interface CreateCampaignInput {
   clusterId?: number | null; // …or one specific cluster within it (null = whole project)
   commPlans: string[]; // comm-plan names this campaign is tagged with (1+ required)
   testPct?: number;
+  workedBy?: "STORE" | "CAMPAIGNERS" | "BOTH"; // who sees + works the campaign (default STORE)
 }
 
 const CLUSTER_SELECT = { id: true, name: true, criteria: true, mode: true, farmerIds: true } as const;
@@ -370,7 +371,7 @@ export async function createCampaign(input: CreateCampaignInput): Promise<{ ok: 
     if (ids.length >= ENROLL_CAP) return { ok: false, error: `Audience is too large to enrol in one campaign (${ENROLL_CAP.toLocaleString("en-IN")}+). Narrow the project first.` };
 
     const camp = await prisma.campaign.create({
-      data: { name: input.name.trim(), startDate: cs, endDate: ce, projectId: input.projectId, clusterId: input.clusterId ?? null, commPlans, testPct: input.testPct ?? 75, status: "ACTIVE" },
+      data: { name: input.name.trim(), startDate: cs, endDate: ce, projectId: input.projectId, clusterId: input.clusterId ?? null, commPlans, testPct: input.testPct ?? 75, status: "ACTIVE", workedBy: ["STORE", "CAMPAIGNERS", "BOTH"].includes(input.workedBy ?? "") ? input.workedBy! : "STORE" },
     });
 
     // Enrol snapshot; store/zone denormalized so officers/RMs see only their own farmers.
@@ -455,6 +456,20 @@ export async function updateCampaignCommPlans(campaignId: number, commPlans: str
   } catch (e) { return { ok: false, error: e instanceof Error ? e.message : "Update failed" }; }
 }
 
+/** Change who works a campaign — STORE (officers/RMs), CAMPAIGNERS (hidden from officers), or BOTH. Manager-only. */
+export async function setCampaignWorkedBy(campaignId: number, workedBy: string): Promise<{ ok: boolean; error?: string }> {
+  const perm = await requireManager(); if (!perm.ok) return perm;
+  if (!["STORE", "CAMPAIGNERS", "BOTH"].includes(workedBy)) return { ok: false, error: "Invalid option." };
+  const camp = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { name: true } });
+  if (!camp) return { ok: false, error: "Campaign not found." };
+  try {
+    await prisma.campaign.update({ where: { id: campaignId }, data: { workedBy } });
+    await logAudit("Campaign", "UPDATE", `Set who works "${camp.name}" to ${workedBy}`);
+    revalidatePath("/campaigns");
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e instanceof Error ? e.message : "Update failed" }; }
+}
+
 /**
  * Delete a campaign and everything scoped to it: members, phases, phase-advances and caller
  * assignments cascade at the DB; broadcasts (+ their recipients) are cleared explicitly since they
@@ -478,6 +493,7 @@ export interface CampaignListItem {
   id: number; name: string; status: string; startDate: string; endDate: string;
   target: string; members: number;
   commPlans: string[]; // comm-plan names the campaign is tagged with
+  workedBy: string; // STORE | CAMPAIGNERS | BOTH — who sees + works this campaign
 }
 
 /** Member `where` for the current user's scope (officer→their store, RM→their managed stores). null = see all. */
@@ -520,12 +536,16 @@ async function helperStoresFor(campaignId: number): Promise<number[]> {
  */
 async function campaignMemberScope(campaignId: number): Promise<Prisma.CampaignMemberWhereInput | null | "none"> {
   const { role, storeId, managedStoreIds } = await getScope();
-  if (role === "officer") {
-    const stores = [...new Set([...(storeId != null ? [storeId] : []), ...(await helperStoresFor(campaignId))])];
-    return stores.length ? { storeId: { in: stores } } : "none";
-  }
-  if (role === "regional") {
-    const stores = [...new Set([...(managedStoreIds ?? []), ...(await helperStoresFor(campaignId))])];
+  if (role === "officer" || role === "regional") {
+    const helperStores = await helperStoresFor(campaignId);
+    // A "campaigner-only" campaign is hidden from store officers/RMs — unless they were explicitly
+    // lent to it as a helper (named stores), which always overrides the setting.
+    if (!helperStores.length) {
+      const camp = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { workedBy: true } });
+      if (camp?.workedBy === "CAMPAIGNERS") return "none";
+    }
+    const own = role === "officer" ? (storeId != null ? [storeId] : []) : (managedStoreIds ?? []);
+    const stores = [...new Set([...own, ...helperStores])];
     return stores.length ? { storeId: { in: stores } } : "none";
   }
   return null; // central / sysadmin / campaigner
@@ -554,8 +574,9 @@ export async function listCampaigns(): Promise<CampaignListItem[]> {
     const allStores = [...new Set([...ownStores, ...helperStores])];
     if (!allStores.length && !helperIds.length) return []; // no store/zone and no grant → nothing
     const or: Prisma.CampaignWhereInput[] = [];
-    if (ownStores.length) or.push({ members: { some: { storeId: { in: ownStores } } } });
-    if (helperIds.length) or.push({ id: { in: helperIds } });
+    // Store officers/RMs see campaigns reaching their stores — but NOT campaigner-only ones.
+    if (ownStores.length) or.push({ members: { some: { storeId: { in: ownStores } } }, workedBy: { in: ["STORE", "BOTH"] } });
+    if (helperIds.length) or.push({ id: { in: helperIds } }); // explicit helper grant overrides workedBy
     where = or.length ? { OR: or } : { id: { in: [] } };
     countWhere = { storeId: { in: allStores.length ? allStores : [-1] } }; // count only members they can see
   } // central / sysadmin: where + countWhere stay undefined (everything)
@@ -580,6 +601,7 @@ export async function listCampaigns(): Promise<CampaignListItem[]> {
     startDate: c.startDate.toISOString().slice(0, 10),
     endDate: c.endDate.toISOString().slice(0, 10),
     commPlans: c.commPlans,
+    workedBy: c.workedBy,
     target: c.clusterId
       ? `Cluster · ${cName.get(c.clusterId) ?? "removed"}`
       : c.projectId
@@ -879,9 +901,13 @@ export interface CampaignAnalytics {
   lifecycleCols: SegCol[];  // matrix lifecycle columns
   /** Merged Store × (Value | Lifecycle) matrix — both count-sets sum to `total` per store. */
   matrix: { store: string; value: Record<string, number>; lifecycle: Record<string, number>; total: number }[];
+  /** Per-centre (store) outreach breakdown over the TEST group: reached + how (Call/WA/SMS/In-person).
+   *  Scoped like everything else, so an RM sees only their own centres. A farmer reached by more than
+   *  one approach counts under each, so the approach columns can exceed `reached`. */
+  callByStore: { store: string; test: number; reached: number; call: number; whatsapp: number; sms: number; inPerson: number; pending: number }[];
 }
 
-const EMPTY_ANALYTICS: CampaignAnalytics = { total: 0, byValue: [], byLifecycle: [], byStore: [], byVillage: [], byCrop: [], valueCols: [], lifecycleCols: [], matrix: [] };
+const EMPTY_ANALYTICS: CampaignAnalytics = { total: 0, byValue: [], byLifecycle: [], byStore: [], byVillage: [], byCrop: [], valueCols: [], lifecycleCols: [], matrix: [], callByStore: [] };
 const colOf = (k: string): SegCol => { const m = segMeta(k); return { key: k, label: m.label, color: m.color, bg: m.bg }; };
 
 /**
@@ -894,7 +920,7 @@ export async function getCampaignAnalytics(campaignId: number): Promise<Campaign
   if (scope === "none") return EMPTY_ANALYTICS;
   const members = await prisma.campaignMember.findMany({
     where: { campaignId, ...(scope ?? {}) },
-    select: { farmerId: true, segment: true, valueSegment: true, lifecycleSegment: true, storeId: true },
+    select: { farmerId: true, segment: true, valueSegment: true, lifecycleSegment: true, storeId: true, group: true, reached: true, mediums: true },
     take: 40000, // realistic campaigns are far below this; guards a pathological audience
   });
   if (!members.length) return EMPTY_ANALYTICS;
@@ -913,9 +939,22 @@ export async function getCampaignAnalytics(campaignId: number): Promise<Campaign
   const crop: Record<string, number> = {};
   // Store → { value → count, lifecycle → count } cross-tab (both sum to the store's member count).
   const cross = new Map<string, { value: Record<string, number>; lifecycle: Record<string, number>; total: number }>();
+  // Centre-wise outreach (TEST group only): per store → reached + approach counts.
+  type CallAcc = { test: number; reached: number; call: number; whatsapp: number; sms: number; inPerson: number };
+  const callMap = new Map<string, CallAcc>();
   for (const m of members) {
     const f = fMap.get(m.farmerId);
     const storeName = m.storeId != null ? sMap.get(m.storeId) ?? "—" : "—";
+    if (m.group === "TEST") {
+      const cs = callMap.get(storeName) ?? callMap.set(storeName, { test: 0, reached: 0, call: 0, whatsapp: 0, sms: 0, inPerson: 0 }).get(storeName)!;
+      cs.test += 1;
+      if (m.reached) cs.reached += 1;
+      const meds = m.mediums ?? [];
+      if (meds.includes("CALL")) cs.call += 1;
+      if (meds.includes("WHATSAPP")) cs.whatsapp += 1;
+      if (meds.includes("SMS")) cs.sms += 1;
+      if (meds.includes("IN_PERSON")) cs.inPerson += 1;
+    }
     // Fall back to deriving from the legacy collapsed snapshot for pre-split members.
     const v = m.valueSegment ?? (VALUE_SEGMENTS.includes(m.segment as never) ? m.segment : "REGULAR");
     const l = m.lifecycleSegment ?? (LIFECYCLE_SEGMENTS.includes(m.segment as never) ? m.segment : "LAPSED");
@@ -942,6 +981,9 @@ export async function getCampaignAnalytics(campaignId: number): Promise<Campaign
     valueCols: [...VALUE_SEGMENTS].map(colOf),
     lifecycleCols: [...LIFECYCLE_SEGMENTS].map(colOf),
     matrix,
+    callByStore: [...callMap.entries()]
+      .map(([store, c]) => ({ store, ...c, pending: Math.max(0, c.test - c.reached) }))
+      .sort((a, b) => b.test - a.test),
   };
 }
 
@@ -1007,19 +1049,17 @@ export async function markCampaignMember(
   patch: { mediums?: string[] | null; comment?: string | null; response?: string | null; responseCrop?: string | null },
 ): Promise<{ ok: boolean; error?: string }> {
   const { role, storeId, managedStoreIds, userId } = await getScope();
-  const member = await prisma.campaignMember.findUnique({ where: { id: memberId }, select: { storeId: true, zone: true, group: true, mediums: true, response: true, campaignId: true } });
+  const member = await prisma.campaignMember.findUnique({ where: { id: memberId }, select: { storeId: true, zone: true, group: true, mediums: true, response: true, campaignId: true, campaign: { select: { workedBy: true } } } });
   if (!member) return { ok: false, error: "Member not found." };
   // Officers/RMs may only touch members in their own store / managed stores; campaigners only their
-  // assigned campaigns; central/sysadmin may touch any.
-  if (role === "officer") {
-    const allowed = new Set<number>(storeId != null ? [storeId] : []);
-    (await helperStoresFor(member.campaignId)).forEach((s) => allowed.add(s)); // + stores lent on this campaign
-    if (member.storeId == null || !allowed.has(member.storeId)) return { ok: false, error: "This farmer isn't in your store." };
-  }
-  else if (role === "regional") {
-    const allowed = new Set<number>(managedStoreIds ?? []);
-    (await helperStoresFor(member.campaignId)).forEach((s) => allowed.add(s)); // + stores lent on this campaign
-    if (member.storeId == null || !allowed.has(member.storeId)) return { ok: false, error: "This farmer isn't in a store you manage." };
+  // assigned campaigns; central/sysadmin may touch any. A "campaigner-only" campaign drops the
+  // officer/RM's own stores (they can act only on stores explicitly lent to them as a helper).
+  if (role === "officer" || role === "regional") {
+    const helperStores = await helperStoresFor(member.campaignId);
+    const base = member.campaign?.workedBy === "CAMPAIGNERS" ? [] : (role === "officer" ? (storeId != null ? [storeId] : []) : (managedStoreIds ?? []));
+    const allowed = new Set<number>([...base, ...helperStores]);
+    if (member.storeId == null || !allowed.has(member.storeId))
+      return { ok: false, error: role === "officer" ? "This farmer isn't in your store." : "This farmer isn't in a store you manage." };
   }
   else if (role === "campaigner") {
     const assigned = userId != null ? await prisma.campaignCaller.count({ where: { userId, campaignId: member.campaignId } }) : 0;
