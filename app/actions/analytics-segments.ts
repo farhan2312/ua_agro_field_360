@@ -105,6 +105,11 @@ function tiersCte(f: WbFilters): Prisma.Sql {
   const recentM = Prisma.raw(String(LIFECYCLE_RECENT_MONTHS)), lapsedM = Prisma.raw(String(LIFECYCLE_LAPSED_MIN_MONTHS));
   // Crop filter → only that crop's tagged lines. No crop → every line.
   const cropCond = f.crops?.length ? Prisma.sql`AND sl."cropTag" = ANY(${f.crops}::text[])` : Prisma.empty;
+  // When an FY is selected, the population is the farmers who actually TRANSACTED in that FY (so the
+  // headcount + matrix track the year, not the whole base). No FY ("All time") → every scoped farmer.
+  const fyActive = f.fyStarts?.length
+    ? Prisma.sql`AND EXISTS (SELECT 1 FROM "SaleLine" sl WHERE sl."farmerId" = f.id AND sl.source = 'REAL' AND sl."soldAt" IS NOT NULL ${cropCond} AND ${window("sl")})`
+    : Prisma.empty;
   // Value tier: crop lens → crop-scoped FY spend; otherwise → the stored lifetime-LTV segment.
   const vsegSql = f.crops?.length
     ? Prisma.sql`CASE WHEN spend >= ${VALUE_HNI_MIN} THEN 'HNI' WHEN spend >= ${VALUE_POTENTIAL_MIN} THEN 'POTENTIAL_HNI' ELSE 'REGULAR' END`
@@ -115,7 +120,7 @@ function tiersCte(f: WbFilters): Prisma.Sql {
         WHERE sl.source = 'REAL' AND sl."soldAt" IS NOT NULL ${cropCond}
         GROUP BY 1)`;
   return Prisma.sql`
-    scoped AS (SELECT f.id, f."storeId", f."zone", f."valueSegment" vstored FROM "Farmer" f ${where}),
+    scoped AS (SELECT f.id, f."storeId", f."zone", f."valueSegment" vstored FROM "Farmer" f ${where} ${fyActive}),
     ${spendAgg},
     recency_agg AS (
       SELECT s."farmerId" id,
