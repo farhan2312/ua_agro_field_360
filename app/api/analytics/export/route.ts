@@ -7,7 +7,7 @@ import { getScope, type Scope } from "@/lib/scope";
 import { SPEND_TIERS } from "@/lib/spend-tiers";
 import { cropLabel } from "@/lib/crops";
 import { tagLabel } from "@/lib/crop-pest";
-import { segMeta, VALUE_SEGMENTS, LIFECYCLE_SEGMENTS } from "@/lib/campaign-segments";
+import { segMeta, VALUE_SEGMENTS, LIFECYCLE_SEGMENTS, LIFECYCLE_RECENT_MONTHS, LIFECYCLE_LAPSED_MIN_MONTHS } from "@/lib/campaign-segments";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -85,6 +85,38 @@ async function writeSalesSheets(
   const V = [...VALUE_SEGMENTS], L = [...LIFECYCLE_SEGMENTS];
   const combos = V.flatMap((v) => L.map((l) => [v, l] as const));
 
+  // ── FY-relative lifecycle: a sale line's "Lifecycle" is the stage the farmer was in AS OF that line's
+  // financial year (end-of-FY as-of), exactly like the on-screen analytics — NOT the farmer's stored
+  // current stage. Otherwise a farmer who was "New" in an old FY reads as "Lapsed" today. Built once as
+  // a (farmerId|fyStartYear → stage) map over ALL the farmer's sales (recency uses every sale). ──
+  const RM = Prisma.raw(String(LIFECYCLE_RECENT_MONTHS)), LM = Prisma.raw(String(LIFECYCLE_LAPSED_MIN_MONTHS));
+  const years = (await prisma.$queryRaw<Array<{ y: number }>>(Prisma.sql`
+    SELECT DISTINCT floor(EXTRACT(YEAR FROM (sl."soldAt" - interval '3 months')))::int y
+    FROM "SaleLine" sl JOIN "Farmer" f ON f.id = sl."farmerId" LEFT JOIN "Store" st ON st.id = f."storeId"
+    WHERE sl.source = 'REAL' AND sl."farmerId" IS NOT NULL AND ${fWhere} ${cropLine} ${fyLine} ${dateLine} AND sl."soldAt" IS NOT NULL`))
+    .map((r) => Number(r.y)).filter(Number.isFinite);
+  const lsegByFarmerFy = new Map<string, string>();
+  if (years.length) {
+    const lrows = await prisma.$queryRaw<Array<{ id: number; y: number; lseg: string }>>(Prisma.sql`
+      WITH sf AS (SELECT f.id FROM "Farmer" f LEFT JOIN "Store" st ON st.id = f."storeId" WHERE ${fWhere}),
+      yrs AS (SELECT unnest(${years}::int[]) y),
+      agg AS (
+        SELECT s."farmerId" id, yr.y,
+          MAX(s."soldAt") FILTER (WHERE s."soldAt" < ((yr.y + 1)::text || '-04-01')::timestamptz) last_at,
+          MIN(s."soldAt") FILTER (WHERE s."soldAt" < ((yr.y + 1)::text || '-04-01')::timestamptz) first_at
+        FROM "Sale" s JOIN sf ON sf.id = s."farmerId" CROSS JOIN yrs yr
+        WHERE s.source = 'REAL' AND s."soldAt" IS NOT NULL
+        GROUP BY 1, 2)
+      SELECT id, y,
+        CASE WHEN last_at IS NULL THEN 'LAPSED'
+          WHEN last_at > ((y + 1)::text || '-04-01')::timestamptz - interval '${RM} months'
+            THEN CASE WHEN first_at > ((y + 1)::text || '-04-01')::timestamptz - interval '${RM} months' THEN 'NEW' ELSE 'RECENT' END
+          WHEN last_at > ((y + 1)::text || '-04-01')::timestamptz - interval '${LM} months' THEN 'AT_RISK'
+          ELSE 'LAPSED' END lseg
+      FROM agg WHERE last_at IS NOT NULL`);
+    for (const r of lrows) lsegByFarmerFy.set(`${r.id}|${r.y}`, r.lseg);
+  }
+
   // ── Sheet: Value × Lifecycle × Store (farmer counts, stored tiers) ──
   const matrixRows = await prisma.$queryRaw<Array<{ sid: number | null; vseg: string | null; lseg: string | null; n: number }>>(Prisma.sql`
     SELECT f."storeId" sid, f."valueSegment" vseg, f."lifecycleSegment" lseg, COUNT(*)::int n
@@ -115,11 +147,12 @@ async function writeSalesSheets(
   const BATCH = 10000;
   for (;;) {
     const rows = await prisma.$queryRaw<Array<{
-      id: number; ordno: string | null; soldat: Date | null; fy: string | null; name: string; mobile: string | null;
+      id: number; fid: number; fystart: number | null; ordno: string | null; soldat: Date | null; fy: string | null; name: string; mobile: string | null;
       village: string | null; sid: number | null; zone: string | null; item: string; crop: string | null; cat: string | null;
       qty: number | null; uom: string | null; basic: number | null; vseg: string | null; lseg: string | null;
     }>>(Prisma.sql`
-      SELECT sl.id, sl."orderNo" ordno, sl."soldAt" soldat, sl."financialYear" fy, f.name, f.mobile, f."village" village,
+      SELECT sl.id, sl."farmerId" fid, floor(EXTRACT(YEAR FROM (sl."soldAt" - interval '3 months')))::int fystart,
+        sl."orderNo" ordno, sl."soldAt" soldat, sl."financialYear" fy, f.name, f.mobile, f."village" village,
         f."storeId" sid, st."zone" zone, sl."itemRaw" item, sl."cropTag" crop, sl."mainCategory" cat,
         sl.qty, sl.uom, sl."basic" basic, f."valueSegment" vseg, f."lifecycleSegment" lseg
       FROM "SaleLine" sl JOIN "Farmer" f ON f.id = sl."farmerId" LEFT JOIN "Store" st ON st.id = f."storeId"
@@ -128,11 +161,14 @@ async function writeSalesSheets(
     if (!rows.length) break;
     for (const r of rows) {
       cursor = r.id; lineCount++;
+      // FY-relative stage (as of this line's FY); fall back to the stored stage if we have no sale history map.
+      const fyRel = r.fystart != null ? lsegByFarmerFy.get(`${r.fid}|${r.fystart}`) : undefined;
+      const lsegKey = fyRel ?? r.lseg;
       ws2.addRow([
         r.ordno ?? "", r.soldat ? new Date(r.soldat).toISOString().slice(0, 10) : "", r.fy ?? "",
         r.name, r.mobile ?? "", r.village ?? "", r.sid != null ? nameById.get(r.sid) ?? "" : "", r.sid != null ? rmById.get(r.sid) ?? "" : "", r.zone ?? "",
         r.item, r.crop ? cropLabel(r.crop) : "", r.cat ?? "", r.qty ?? 0, r.uom ?? "",
-        Math.round(r.basic ?? 0), r.vseg ? segMeta(r.vseg).label : "", r.lseg ? segMeta(r.lseg).label : "",
+        Math.round(r.basic ?? 0), r.vseg ? segMeta(r.vseg).label : "", lsegKey ? segMeta(lsegKey).label : "",
       ]).commit();
     }
     if (rows.length < BATCH) break;
