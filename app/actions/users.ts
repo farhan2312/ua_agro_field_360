@@ -109,8 +109,10 @@ export async function createUserAction(
   const key = input.roleKey;
   const mobile = input.mobile.replace(/\D/g, "");
   try {
-    const clash = await prisma.user.findUnique({ where: { employeeCode: code }, select: { id: true } });
-    if (clash) return { ok: false, error: `Employee code ${code} already exists.` };
+    const clash = await prisma.user.findUnique({ where: { employeeCode: code }, select: { id: true, name: true, active: true } });
+    if (clash) return { ok: false, error: clash.active
+      ? `Employee code ${code} already exists (${clash.name}).`
+      : `Employee code ${code} belongs to a deactivated account (${clash.name}). Find them in the Users list (set the status filter to Inactive), then reactivate and edit that account instead of creating a new one.` };
     const [gradA, gradB] = ROLE_GRAD[key];
     const passwordHash = await bcrypt.hash(input.password.trim() || mobile || "uaagro@123", 10);
     const created = await prisma.user.create({
@@ -153,9 +155,11 @@ export async function saveUser(
     if (code) {
       const clash = await prisma.user.findFirst({
         where: { employeeCode: code, NOT: { id: input.id } },
-        select: { id: true },
+        select: { id: true, name: true, active: true },
       });
-      if (clash) return { ok: false, error: `Employee code ${code} is already used by someone else.` };
+      if (clash) return { ok: false, error: clash.active
+        ? `Employee code ${code} is already used by someone else (${clash.name}).`
+        : `Employee code ${code} belongs to a deactivated account (${clash.name}). Reactivate that account instead of reusing the code here.` };
     }
     const data: Prisma.UserUpdateInput = {
       name,
