@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth";
@@ -143,6 +143,25 @@ export async function createUserAction(
   }
 }
 
+/**
+ * Every column that stores a user's EMPLOYEE CODE for attribution/ownership. When an admin changes a
+ * user's code (e.g. a temporary code → their permanent HR code), these must be re-stamped old→new, or
+ * the user stops matching their own records: `canSignOff`/`canReviewVisit` key off the code, so they
+ * could no longer mark their own follow-ups done, sign off their visits, etc.
+ */
+const EMPLOYEE_CODE_COLUMNS: [table: string, column: string][] = [
+  ["Action", "createdByCode"], ["Action", "completedByCode"],
+  ["ActionComment", "authorCode"],
+  ["Visit", "recordedByCode"], ["Visit", "reviewedByCode"],
+  ["CampaignMember", "reachedByCode"],
+  ["CampaignCaller", "assignedByCode"], ["CampaignHelper", "assignedByCode"],
+  ["CampaignPhaseAdvance", "byCode"],
+  ["Cluster", "createdByCode"], ["Broadcast", "createdByCode"],
+  ["Ghoshti", "createdByCode"], ["Ghoshti", "approvedByCode"], ["GhoshtiAttendee", "recordedByCode"],
+  ["Bug", "reporterCode"],
+  ["SmsLog", "sentByCode"], ["WhatsAppLog", "sentByCode"], ["WhatsAppMessage", "sentByCode"],
+];
+
 /** Update an existing user's details (System-Admin edit modal). */
 export async function saveUser(
   input: UserFormInput & { id: number },
@@ -152,6 +171,10 @@ export async function saveUser(
   const name = input.name.trim();
   if (!name) return { ok: false, error: "Name is required." };
   try {
+    const existing = await prisma.user.findUnique({ where: { id: input.id }, select: { employeeCode: true } });
+    const oldCode = existing?.employeeCode ?? null;
+    // Code changed temp→permanent: carry this user's existing attribution across to the new code.
+    const migrateCode = !!(code && oldCode && oldCode !== code);
     if (code) {
       const clash = await prisma.user.findFirst({
         where: { employeeCode: code, NOT: { id: input.id } },
@@ -180,8 +203,15 @@ export async function saveUser(
       data.passwordHash = await bcrypt.hash(input.password.trim(), 10);
       data.mustChangePassword = true;
     }
-    await prisma.user.update({ where: { id: input.id }, data });
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: input.id }, data }),
+      ...(migrateCode
+        ? EMPLOYEE_CODE_COLUMNS.map(([t, c]) =>
+            prisma.$executeRaw`UPDATE ${Prisma.raw(`"${t}"`)} SET ${Prisma.raw(`"${c}"`)} = ${code} WHERE ${Prisma.raw(`"${c}"`)} = ${oldCode}`)
+        : []),
+    ]);
     revalidatePath("/users");
+    if (migrateCode) { revalidatePath("/action-registry"); revalidatePath("/visits"); }
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Save failed" };
