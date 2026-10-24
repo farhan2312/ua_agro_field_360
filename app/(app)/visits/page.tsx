@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { unstable_cache } from "next/cache";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getScope, visitScopeWhere, storeScopeWhere } from "@/lib/scope";
@@ -50,6 +51,34 @@ function periodCutoff(period: string): Date | null {
   return cutoff;
 }
 
+/**
+ * Filter-option lists (officer names + visit types via full-table DISTINCT scans, and the store list)
+ * are the slowest part of the page but change rarely, so cache them per scope for 10 minutes. This
+ * takes two ~0.6–0.9s DISTINCT scans off every page load. Keyed by the scope signature passed in.
+ */
+const loadVisitFilterOptions = unstable_cache(
+  async (_scopeKey: string, sw: Prisma.VisitWhereInput | null, stw: Prisma.StoreWhereInput | null) => {
+    const [officerRows, typeRows, allStores] = await Promise.all([
+      prisma.visit.findMany({
+        where: sw ? { AND: [{ officerName: { not: null } }, sw] } : { officerName: { not: null } },
+        select: { officerName: true }, distinct: ["officerName"], orderBy: { officerName: "asc" },
+      }),
+      prisma.visit.findMany({
+        where: sw ? { AND: [{ purpose: { not: null } }, sw] } : { purpose: { not: null } },
+        select: { purpose: true }, distinct: ["purpose"], orderBy: { purpose: "asc" },
+      }),
+      prisma.store.findMany({ where: stw ?? undefined, select: { id: true, name: true, regionalManager: true } }),
+    ]);
+    return {
+      officerOptions: officerRows.map((v) => v.officerName).filter((x): x is string => !!x),
+      typeOptions: typeRows.map((v) => v.purpose).filter((x): x is string => !!x),
+      allStores,
+    };
+  },
+  ["visit-repo-filter-options"],
+  { revalidate: 600 },
+);
+
 export default async function VisitRepoPage({
   searchParams,
 }: {
@@ -91,33 +120,12 @@ export default async function VisitRepoPage({
   }
 
   try {
-    // Filter option lists (independent of active filters, but never wider than scope).
-    // DISTINCT queries so these read only the unique officer/purpose values.
-    const [officerRows, typeRows, allStores] = await Promise.all([
-      prisma.visit.findMany({
-        where: scopeWhere ? { AND: [{ officerName: { not: null } }, scopeWhere] } : { officerName: { not: null } },
-        select: { officerName: true },
-        distinct: ["officerName"],
-        orderBy: { officerName: "asc" },
-      }),
-      prisma.visit.findMany({
-        where: scopeWhere ? { AND: [{ purpose: { not: null } }, scopeWhere] } : { purpose: { not: null } },
-        select: { purpose: true },
-        distinct: ["purpose"],
-        orderBy: { purpose: "asc" },
-      }),
-      prisma.store.findMany({
-        where: storeWhere && storeWhere !== "none" ? storeWhere : undefined,
-        select: { id: true, name: true, regionalManager: true },
-      }),
-    ]);
-
-    officerOptions = officerRows
-      .map((v) => v.officerName)
-      .filter((n): n is string => !!n);
-    typeOptions = typeRows
-      .map((v) => v.purpose)
-      .filter((p): p is string => !!p);
+    // Filter option lists (independent of active filters, never wider than scope) — cached per scope.
+    const scopeKey = `${scope.role}:${scope.storeId ?? ""}:${scope.zone ?? ""}`;
+    const opts = await loadVisitFilterOptions(scopeKey, scopeWhere ?? null, storeWhere && storeWhere !== "none" ? storeWhere : null);
+    const allStores = opts.allStores;
+    officerOptions = opts.officerOptions;
+    typeOptions = opts.typeOptions;
     storeOptions = Array.from(
       new Set(allStores.map((s) => shortStoreName(s.name)).filter(Boolean)),
     ).sort();
@@ -161,35 +169,31 @@ export default async function VisitRepoPage({
     // Scope goes on LAST so no query-string filter can widen it.
     const scopedWhere: Prisma.VisitWhereInput = scopeWhere ? { AND: [where, scopeWhere] } : where;
 
-    // KPIs are COUNTs over the FULL filtered set — never the capped table rows (that's the bug that
-    // pinned "Total Visits" at 500 and made it disagree with the analytics Visits tab).
-    const [totalCount, followupCount, officerDistinct, farmerDistinct] = await Promise.all([
+    // KPIs + the page of rows run in ONE wave (fewer round-trips to the DB). KPIs are COUNTs over the
+    // FULL filtered set; the list is explicit-SELECT so it never pulls the heavy inline media columns
+    // (`photos` / `voiceNotes`: multi-MB base64 arrays) that made this page crawl.
+    const [totalCount, followupCount, officerDistinct, farmerDistinct, visits] = await Promise.all([
       prisma.visit.count({ where: scopedWhere }),
       prisma.visit.count({ where: { AND: [scopedWhere, { followUpDate: { not: null } }] } }),
       prisma.visit.findMany({ where: { AND: [scopedWhere, { officerName: { not: null } }] }, select: { officerName: true }, distinct: ["officerName"] }),
       prisma.visit.findMany({ where: { AND: [scopedWhere, { farmerId: { not: null } }] }, select: { farmerId: true }, distinct: ["farmerId"] }),
+      prisma.visit.findMany({
+        where: scopedWhere,
+        orderBy: [{ visitedAt: "desc" }, { id: "desc" }],
+        select: {
+          id: true, date: true, mainCrop: true, landHoldingUnit: true, officerName: true,
+          purpose: true, reviewedAt: true, followUpDate: true,
+          farmer: { select: { id: true, name: true, village: true, district: true, crop: true } },
+          store: { select: { id: true, name: true, regionalManager: true } },
+        },
+        skip: (page - 1) * PAGE_SIZE,
+        take: PAGE_SIZE,
+      }),
     ]);
     total = totalCount;
     followup = followupCount;
     officers = officerDistinct.length;
     farmers = farmerDistinct.length;
-
-    // Explicit SELECT — only the columns the row renders. Critically this OMITS the inline media
-    // columns (`photos` / `voiceNotes`: arrays of base64 data-URLs, often several MB per visit); the
-    // old `include` pulled them for all 50 rows and discarded them, which is what made this page take
-    // minutes to load.
-    const visits = await prisma.visit.findMany({
-      where: scopedWhere,
-      orderBy: [{ visitedAt: "desc" }, { id: "desc" }],
-      select: {
-        id: true, date: true, mainCrop: true, landHoldingUnit: true, officerName: true,
-        purpose: true, reviewedAt: true, followUpDate: true,
-        farmer: { select: { id: true, name: true, village: true, district: true, crop: true } },
-        store: { select: { id: true, name: true, regionalManager: true } },
-      },
-      skip: (page - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
-    });
 
     rows = visits
       .map((v, i): VisitRecord => {
