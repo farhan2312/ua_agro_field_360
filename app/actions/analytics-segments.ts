@@ -1,5 +1,6 @@
 "use server";
 
+import { unstable_cache } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { segMeta, VALUE_SEGMENTS, LIFECYCLE_SEGMENTS, VALUE_HNI_MIN, VALUE_POTENTIAL_MIN, LIFECYCLE_RECENT_MONTHS, LIFECYCLE_LAPSED_MIN_MONTHS } from "@/lib/campaign-segments";
@@ -189,6 +190,12 @@ export interface WbFacets {
 }
 export async function getWorkbenchFacets(): Promise<WbFacets> {
   const { role, storeId, managedStoreIds } = await getScope();
+  return _facetsCached(role, storeId ?? null, managedStoreIds ?? null);
+}
+
+/** Facets = filter-option lists (~9 queries). They change rarely, so cache per scope for 10 min —
+ *  on the (Burstable, cross-region) prod DB these serialized to ~19s and dominated the page load. */
+const _facetsCached = unstable_cache(async (role: string, storeId: number | null, managedStoreIds: number[] | null): Promise<WbFacets> => {
   if (role === "campaigner") // call team has no analytics access — fail closed
     return { stores: [], zones: [], salesCrops: [], visitCrops: [], pests: [], problems: [], spendTiers: [], years: [], visitMinDate: null, villages: [], storeTags: [] };
   const isOfficer = role === "officer", isRM = role === "regional";
@@ -248,7 +255,7 @@ export async function getWorkbenchFacets(): Promise<WbFacets> {
     villages: vil.map((r) => ({ village: r.village, count: num(r.n) })),
     storeTags: (await prisma.storeTag.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }] })).map((t) => ({ id: t.id, name: t.name, color: t.color })),
   };
-}
+}, ["wb-facets"], { revalidate: 600 });
 
 /* ── The workbench data for the current filter ── */
 export interface WbKpis { farmers: number; spend: number; visits: number }
@@ -808,8 +815,12 @@ export interface NewFarmerAcq {
  * → "Unassigned".
  */
 export async function getNewFarmerAcquisition(): Promise<NewFarmerAcq> {
-  const empty: NewFarmerAcq = { keys: [], months: [], total: 0, distinct: 0 };
   const { role, storeId, managedStoreIds } = await getScope();
+  return _newFarmersCached(role, storeId ?? null, managedStoreIds ?? null);
+}
+/** New-customers-from-sales chart — a heavy Farmer⋈Sale aggregate; cache per scope for 10 min. */
+const _newFarmersCached = unstable_cache(async (role: string, storeId: number | null, managedStoreIds: number[] | null): Promise<NewFarmerAcq> => {
+  const empty: NewFarmerAcq = { keys: [], months: [], total: 0, distinct: 0 };
   if (role === "campaigner") return empty;
   const scopeSql: Prisma.Sql =
     role === "officer"
@@ -860,7 +871,7 @@ export async function getNewFarmerAcquisition(): Promise<NewFarmerAcq> {
   }
   const keys = [...top, ...(hasOther ? [OTHER] : []), ...(hasUnassigned ? [UNASSIGNED] : [])];
   return { keys, months: [...byYm.values()], total, distinct };
-}
+}, ["new-farmer-acq"], { revalidate: 600 });
 
 /* ── Lead → customer conversions (wasLead flag), role-scoped, broken down by month + store ── */
 export interface LeadConversions {

@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
+import { unstable_cache } from "next/cache";
 import { getPersona } from "@/lib/session";
-import { getScope } from "@/lib/scope";
+import { getScope, type Scope } from "@/lib/scope";
 import { canAccess } from "@/lib/roles";
 import { loadOverview } from "@/lib/overview";
 import { canManage } from "@/lib/scope";
@@ -10,6 +11,13 @@ import { AnalyticsWorkbench } from "@/components/analytics/AnalyticsWorkbench";
 import { ScopedDashboard, UnassignedDashboard, type ScopedDashboardData } from "@/components/dashboard/ScopedDashboard";
 
 export const dynamic = "force-dynamic";
+
+/** The scoped dashboard KPIs change slowly — cache per scope for 5 min (keyed by the scope object). */
+const cachedOverview = unstable_cache(
+  (scope: Scope) => loadOverview(scope),
+  ["analytics-overview"],
+  { revalidate: 300 },
+);
 
 const EMPTY: WbData = {
   kpis: { farmers: 0, spend: 0, visits: 0 },
@@ -32,15 +40,14 @@ export default async function AnalyticsPage() {
   let facets: WbFacets = { stores: [], zones: [], salesCrops: [], visitCrops: [], pests: [], problems: [], spendTiers: [], years: [], visitMinDate: null, villages: [], storeTags: [] };
   let newFarmers: NewFarmerAcq = { keys: [], months: [], total: 0, distinct: 0 };
   try {
-    // TEMP perf instrumentation (Vercel runtime logs) — each query timed + total, to locate the slow step.
-    const _t = Date.now(); const _tm = async <T,>(label: string, p: Promise<T>): Promise<T> => { const s = Date.now(); const r = await p; console.log(`[analytics-perf] ${label}: ${Date.now() - s}ms`); return r; };
+    // facets + newFarmers cache internally; overview is cached here per scope. Only the default
+    // workbench runs live. On the Burstable/cross-region prod DB these heavy queries dominated the load.
     [overview, data, facets, newFarmers] = await Promise.all([
-      _tm("overview", loadOverview(scope)),
-      _tm("workbench", getWorkbench({ lens: "sales" })),
-      _tm("facets", getWorkbenchFacets()),
-      _tm("newFarmers", getNewFarmerAcquisition()),
+      cachedOverview(scope),
+      getWorkbench({ lens: "sales" }),
+      getWorkbenchFacets(),
+      getNewFarmerAcquisition(),
     ]);
-    console.log(`[analytics-perf] TOTAL: ${Date.now() - _t}ms`);
   } catch {
     // DB unavailable — render an empty shell.
   }
