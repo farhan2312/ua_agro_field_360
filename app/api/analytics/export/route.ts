@@ -230,7 +230,7 @@ async function writeVisitsSheet(
         v."otherShops" AS othershops, v."fpoMember" AS fpo, v."fpoName" AS fponame,
         v."contractFarming" AS contract, v."contractDetail" AS contractdetail,
         v."dairyServices" AS dairy, v."dairyDetail" AS dairydetail, v."whatsappAvail" AS wa, v."whatsappNumber" AS wanum,
-        COALESCE(array_length(v.photos,1),0) AS photos, COALESCE(array_length(v."voiceNotes",1),0) AS voices,
+        v."photoCount" AS photos, v."voiceNoteCount" AS voices,
         v.notes, f."lifecycleSegment"::text AS lead, f."valueSegment"::text AS segment,
         to_char(v."createdAt",'YYYY-MM-DD HH24:MI') AS createdat
       FROM "Visit" v

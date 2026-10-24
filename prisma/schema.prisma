@@ -833,6 +833,10 @@ model Visit {
   whatsappNumber  String?
   photos          String[] @default([])
   voiceNotes      String[] @default([])
+  // Denormalised element counts — SUM(cardinality(photos)) detoasts every multi-MB base64 array
+  // (50s+ over 23k visits). Keep plain-int counts so analytics never reads the media columns.
+  photoCount      Int      @default(0)
+  voiceNoteCount  Int      @default(0)
 
   // Optional review / sign-off layer. A visit is "reviewed" when reviewedAt is set. Officer visits are
   // signed off by their managing RM (or the officer themselves / an admin); RM visits by themselves / admins.

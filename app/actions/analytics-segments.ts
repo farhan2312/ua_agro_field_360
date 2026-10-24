@@ -467,8 +467,8 @@ export async function getVisitAnalytics(f: WbFilters): Promise<VisitAnalytics> {
       SELECT COUNT(*)::int visits, COUNT(DISTINCT v."farmerId")::int farmers,
         COUNT(DISTINCT f."village")::int villages, COUNT(DISTINCT v."officerName")::int officers,
         COUNT(*) FILTER (WHERE v."visitMode" = 'field')::int field,
-        COALESCE(SUM(cardinality(v."photos")), 0)::int photos,
-        COALESCE(SUM(cardinality(v."voiceNotes")), 0)::int voices,
+        COALESCE(SUM(v."photoCount"), 0)::int photos,
+        COALESCE(SUM(v."voiceNoteCount"), 0)::int voices,
         COUNT(*) FILTER (WHERE v."whatsappAvail")::int wa
       ${BASE}`),
     prisma.$queryRaw<{ ym: string; n: number }[]>(Prisma.sql`

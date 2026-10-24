@@ -271,6 +271,8 @@ export async function submitVisitAction(
           : null,
         photos: form.photos,
         voiceNotes: form.voiceNotes,
+        photoCount: form.photos?.length ?? 0,
+        voiceNoteCount: form.voiceNotes?.length ?? 0,
         visitedAt: new Date(),
         source: "REAL",
       },
