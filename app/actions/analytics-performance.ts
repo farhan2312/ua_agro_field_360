@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { getScope, storeScopeWhere } from "@/lib/scope";
 import { startOfToday } from "@/lib/action-constants";
+import { buildWorkbookB64 } from "@/lib/xlsx-export";
 
 /**
  * Performance analytics — the Stores / RMs / Agri-Officers leaderboards.
@@ -24,6 +25,7 @@ export interface PerfRange {
   prevTo?: string;
   storeTags?: number[]; // store-tag ids — restrict to stores carrying ANY of these
   storeStatus?: string[]; // store status — "Active" | "Closed"
+  rms?: string[];     // regional-manager names — restrict to the stores they manage
   label?: string;     // display label of the chosen range (for the UI, echoed back)
 }
 
@@ -46,6 +48,8 @@ export interface PerfEntity {
   currentLeads: number;        // active LEAD farmers (point-in-time)
   farmers: number;             // registered REAL farmers (point-in-time)
   storeCount?: number;         // rms only — how many stores roll up here
+  rm?: string;                 // stores + officers: the store's Regional Manager (rms board: same as name)
+  district?: string;           // stores + officers: the store's district / zone
 }
 
 export interface PerfTotals {
@@ -75,17 +79,18 @@ const growth = (cur: number, prev: number): number | null =>
   prev > 0 ? ((cur - prev) / prev) * 100 : null;
 
 /** Resolve the scoped store-id set: number[] to restrict, or null for "all stores" (admins). */
-async function scopedStoreIds(storeTags?: number[], storeStatus?: string[]): Promise<number[] | null | "none"> {
+async function scopedStoreIds(storeTags?: number[], storeStatus?: string[], rms?: string[]): Promise<number[] | null | "none"> {
   const scope = await getScope();
   const where = storeScopeWhere(scope);
   if (where === "none") return "none";
 
-  // Tag / status filter (and/or the admin "all" case) → materialise the id list.
+  // Tag / status / RM filter (and/or the admin "all" case) → materialise the id list.
   const cond: Prisma.StoreWhereInput = {};
   if (where && where !== null) Object.assign(cond, where);
   if (storeTags?.length) cond.tagIds = { hasSome: storeTags };
   if (storeStatus?.length) cond.status = { in: storeStatus };
-  if (!where && !storeTags?.length && !storeStatus?.length) return null; // admin, no filter → all stores
+  if (rms?.length) cond.regionalManager = { in: rms };
+  if (!where && !storeTags?.length && !storeStatus?.length && !rms?.length) return null; // admin, no filter → all stores
 
   const stores = await prisma.store.findMany({ where: cond, select: { id: true } });
   return stores.map((s) => s.id);
@@ -94,7 +99,7 @@ async function scopedStoreIds(storeTags?: number[], storeStatus?: string[]): Pro
 const D = (s?: string) => (s ? new Date(s) : null);
 
 export async function getPerformance(kind: PerfKind, range: PerfRange = {}): Promise<PerfData> {
-  const ids = await scopedStoreIds(range.storeTags, range.storeStatus);
+  const ids = await scopedStoreIds(range.storeTags, range.storeStatus, range.rms);
   const empty: PerfData = {
     kind, rows: [],
     totals: { entities: 0, sales: 0, salesPrev: 0, salesGrowthPct: null, visits: 0, visitsReviewed: 0, actionsOpen: 0, actionsOverdue: 0, leadsConverted: 0, currentLeads: 0, farmers: 0 },
@@ -189,7 +194,7 @@ async function storeAxisBoard(a: {
     return {
       id: String(st.id), name: shortStore(st.name),
       sub: [st.zone, rm && `RM: ${rm}`].filter(Boolean).join(" · ") || "—",
-      rm,
+      rm, district: st.zone ?? undefined,
       sales, salesPrev, salesGrowthPct: growth(sales, salesPrev),
       visits, visitsReviewed: reviewed, visitsPending: Math.max(0, visits - reviewed), farmersVisited: num(v?.fv),
       actionsOpen: num(ac?.opn), actionsOverdue: num(ac?.overdue), actionsUpcoming: num(ac?.upcoming), actionsDone: num(ac?.done),
@@ -199,7 +204,7 @@ async function storeAxisBoard(a: {
 
   let rows: PerfEntity[];
   if (kind === "stores") {
-    rows = storeRows.map(({ rm: _rm, ...r }) => r);
+    rows = storeRows; // keep rm + district for the export's Store/RM/District columns
   } else {
     // Roll stores up to their regional manager.
     const byRm = new Map<string, (PerfEntity & { rm: string })[]>();
@@ -212,7 +217,7 @@ async function storeAxisBoard(a: {
       const sales = sum((x) => x.sales), salesPrev = sum((x) => x.salesPrev);
       const visits = sum((x) => x.visits), reviewed = sum((x) => x.visitsReviewed);
       return {
-        id: rm, name: rm, sub: `${list.length} store${list.length === 1 ? "" : "s"}`, storeCount: list.length,
+        id: rm, name: rm, sub: `${list.length} store${list.length === 1 ? "" : "s"}`, storeCount: list.length, rm,
         sales, salesPrev, salesGrowthPct: growth(sales, salesPrev),
         visits, visitsReviewed: reviewed, visitsPending: Math.max(0, visits - reviewed), farmersVisited: sum((x) => x.farmersVisited),
         actionsOpen: sum((x) => x.actionsOpen), actionsOverdue: sum((x) => x.actionsOverdue), actionsUpcoming: sum((x) => x.actionsUpcoming), actionsDone: sum((x) => x.actionsDone),
@@ -233,9 +238,11 @@ async function officerBoard(a: {
   const VSID = Prisma.raw(`COALESCE(v."storeId", f."storeId")`);
 
   const [visits, actions] = await Promise.all([
-    prisma.$queryRaw<{ nm: string; store: string | null; visits: number; reviewed: number; fv: number }[]>(Prisma.sql`
+    prisma.$queryRaw<{ nm: string; store: string | null; rm: string | null; zone: string | null; visits: number; reviewed: number; fv: number }[]>(Prisma.sql`
       SELECT TRIM(v."officerName") nm,
         (ARRAY_AGG(st.name ORDER BY st.name))[1] store,
+        (ARRAY_AGG(st."regionalManager" ORDER BY st.name))[1] rm,
+        (ARRAY_AGG(st.zone ORDER BY st.name))[1] zone,
         COUNT(*)::int visits,
         COUNT(*) FILTER (WHERE v."reviewedAt" IS NOT NULL)::int reviewed,
         COUNT(DISTINCT v."farmerId")::int fv
@@ -275,6 +282,8 @@ async function officerBoard(a: {
     const e = get(v.nm, v.store);
     e.visits = num(v.visits); e.visitsReviewed = num(v.reviewed);
     e.visitsPending = Math.max(0, e.visits - e.visitsReviewed); e.farmersVisited = num(v.fv);
+    if (v.rm?.trim()) e.rm = v.rm.trim();
+    if (v.zone?.trim()) e.district = v.zone.trim();
   }
   for (const ac of actions) {
     const e = get(ac.nm);
@@ -299,4 +308,68 @@ function finalize(kind: PerfKind, rows: PerfEntity[], empty: PerfData): PerfData
     },
     hasComparison: empty.hasComparison, rangeLabel: empty.rangeLabel,
   };
+}
+
+/** Distinct regional-manager names in the caller's scope — for the leaderboard's RM filter. */
+export async function getPerfRmOptions(): Promise<string[]> {
+  const scope = await getScope();
+  const where = storeScopeWhere(scope);
+  if (where === "none") return [];
+  const stores = await prisma.store.findMany({
+    where: where && where !== null ? where : undefined,
+    select: { regionalManager: true },
+  });
+  return [...new Set(stores.map((s) => (s.regionalManager ?? "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+}
+
+/** Export the current leaderboard (Stores / RMs / Agri Officers) to Excel — respects every active
+ *  filter (period, store status, store tags, RM) and the caller's scope. */
+export async function exportPerformanceXlsx(kind: PerfKind, range: PerfRange = {}): Promise<{ ok: boolean; filename?: string; b64?: string; error?: string }> {
+  const data = await getPerformance(kind, range);
+  if (!data.rows.length) return { ok: false, error: "No data in this view to export." };
+  const noun = kind === "stores" ? "Store" : kind === "rms" ? "Regional Manager" : "Agri Officer";
+  const showSales = kind !== "officers";
+  const donePct = (r: PerfEntity): number | "" => { const d = r.actionsDone + r.actionsOpen; return d ? Math.round((r.actionsDone / d) * 100) : ""; };
+  const revPct = (r: PerfEntity): number | "" => (r.visits ? Math.round((r.visitsReviewed / r.visits) * 100) : "");
+
+  // Identity columns per axis — Store Name + RM always present where applicable.
+  const idHead = kind === "stores" ? ["Store", "District", "RM"]
+    : kind === "rms" ? ["Regional Manager", "Stores"]
+    : ["Agri Officer", "Store", "RM"];
+  const header = [
+    "Rank", ...idHead,
+    ...(showSales ? ["Sales (₹)", "Growth %"] : []),
+    "Visits", kind === "officers" ? "RM signed %" : "Reviewed %", "Farmers visited",
+    "Actions open", "Actions overdue", "Actions done", "Done %",
+    ...(showSales ? ["Leads converted", "Farmers"] : []),
+  ];
+  const body = data.rows.map((r, i) => {
+    const idc = kind === "stores" ? [r.name, r.district ?? "", r.rm ?? ""]
+      : kind === "rms" ? [r.name, r.storeCount ?? ""]
+      : [r.name, r.sub === "—" ? "" : r.sub, r.rm ?? ""];
+    return [
+      i + 1, ...idc,
+      ...(showSales ? [Math.round(r.sales), r.salesGrowthPct == null ? "" : Number(r.salesGrowthPct.toFixed(1))] : []),
+      r.visits, revPct(r), r.farmersVisited,
+      r.actionsOpen, r.actionsOverdue, r.actionsDone, donePct(r),
+      ...(showSales ? [r.leadsConverted, r.farmers] : []),
+    ];
+  });
+
+  const filters = [
+    ["Report", `${noun} performance`],
+    ["Period", data.rangeLabel],
+    ["Store status", range.storeStatus?.length ? range.storeStatus.join(", ") : "All"],
+    ["Regional manager(s)", range.rms?.length ? range.rms.join(", ") : "All"],
+    ["Store tags", range.storeTags?.length ? `${range.storeTags.length} selected` : "All"],
+    ["Rows", data.rows.length],
+    ["Generated (IST)", new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata" })],
+  ];
+
+  const b64 = buildWorkbookB64([
+    { name: `${noun}s`.slice(0, 31), rows: [header, ...body] },
+    { name: "Filters", rows: filters },
+  ]);
+  const win = (data.rangeLabel.split(" · ")[0] || "All time").replace(/[\/?*[\]:]/g, " ");
+  return { ok: true, filename: `${noun} performance - ${win}.xlsx`, b64 };
 }
