@@ -119,10 +119,16 @@ export default async function VisitRepoPage({
     );
   }
 
+  // TEMP perf instrumentation — reveals in Vercel runtime logs where the Visit Repo spends its time.
+  const _t0 = Date.now();
+  const _log = (label: string, from: number) => console.log(`[visits-perf] ${label}: ${Date.now() - from}ms`);
+
   try {
     // Filter option lists (independent of active filters, never wider than scope) — cached per scope.
     const scopeKey = `${scope.role}:${scope.storeId ?? ""}:${scope.zone ?? ""}`;
+    const _tOpts = Date.now();
     const opts = await loadVisitFilterOptions(scopeKey, scopeWhere ?? null, storeWhere && storeWhere !== "none" ? storeWhere : null);
+    _log("filterOptions", _tOpts);
     const allStores = opts.allStores;
     officerOptions = opts.officerOptions;
     typeOptions = opts.typeOptions;
@@ -172,6 +178,7 @@ export default async function VisitRepoPage({
     // KPIs + the page of rows run in ONE wave (fewer round-trips to the DB). KPIs are COUNTs over the
     // FULL filtered set; the list is explicit-SELECT so it never pulls the heavy inline media columns
     // (`photos` / `voiceNotes`: multi-MB base64 arrays) that made this page crawl.
+    const _tWave = Date.now();
     const [totalCount, followupCount, officerDistinct, farmerDistinct, visits] = await Promise.all([
       prisma.visit.count({ where: scopedWhere }),
       prisma.visit.count({ where: { AND: [scopedWhere, { followUpDate: { not: null } }] } }),
@@ -190,10 +197,12 @@ export default async function VisitRepoPage({
         take: PAGE_SIZE,
       }),
     ]);
+    _log("kpi+list wave", _tWave);
     total = totalCount;
     followup = followupCount;
     officers = officerDistinct.length;
     farmers = farmerDistinct.length;
+    _log("TOTAL server data", _t0);
 
     rows = visits
       .map((v, i): VisitRecord => {
