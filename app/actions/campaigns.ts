@@ -16,6 +16,7 @@ import { logAudit } from "@/lib/audit";
 import { getSession } from "@/lib/auth";
 import { cropLabel } from "@/lib/crops";
 import { buildWorkbookB64, type Cell } from "@/lib/xlsx-export";
+import { buildStyledWorkbookB64 } from "@/lib/xlsx-styled";
 import { sendSms, zapConfig, listSmsTemplates, type SmsTemplate } from "@/lib/zapsms";
 import { sendWhatsApp, waConfig, waCreateTemplate } from "@/lib/whatsapp";
 import { SAMPLE_VARS, resolveVars, fillDltTemplate, fillWaTemplate, positionalParams, countDltVars, VAR_LABEL, type FarmerVarSource } from "@/lib/campaign-vars";
@@ -1033,9 +1034,9 @@ export async function exportCampaignAudienceXlsx(campaignId: number, campaignNam
   ];
 
   const safe = (campaignName || "campaign").replace(/[\\/?*[\]:]/g, " ").trim().slice(0, 60) || "campaign";
-  const b64 = buildWorkbookB64([
-    { name: "Call stats by centre", rows: callSheet },
-    { name: "Value + Lifecycle x Store", rows: matrixSheet },
+  const b64 = await buildStyledWorkbookB64([
+    { name: "Call stats by centre", rows: callSheet, leftCols: [0, 1], boldRows: [1] }, // Centre, RM text; totals row bold
+    { name: "Value + Lifecycle x Store", rows: matrixSheet, leftCols: [0, 1], boldRows: [1] },
   ]);
   return { ok: true, filename: `${safe} - analytics.xlsx`, b64 };
 }

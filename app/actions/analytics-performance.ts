@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { getScope, storeScopeWhere } from "@/lib/scope";
 import { startOfToday } from "@/lib/action-constants";
-import { buildWorkbookB64 } from "@/lib/xlsx-export";
+import { buildStyledWorkbookB64 } from "@/lib/xlsx-styled";
 
 /**
  * Performance analytics — the Stores / RMs / Agri-Officers leaderboards.
@@ -366,9 +366,12 @@ export async function exportPerformanceXlsx(kind: PerfKind, range: PerfRange = {
     ["Generated (IST)", new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata" })],
   ];
 
-  const b64 = buildWorkbookB64([
-    { name: `${noun}s`.slice(0, 31), rows: [header, ...body] },
-    { name: "Filters", rows: filters },
+  const idCount = idHead.length + 1; // Rank + identity columns before the metrics
+  const numFmt: Record<number, string> = {};
+  if (showSales) { numFmt[idCount] = "#,##0"; numFmt[idCount + 1] = "#,##0.0"; } // Sales, Growth %
+  const b64 = await buildStyledWorkbookB64([
+    { name: `${noun}s`.slice(0, 31), rows: [header, ...body], numFmt, leftCols: idHead.map((_, i) => i + 1) },
+    { name: "Filters", rows: [["Filter", "Value"], ...filters], leftCols: [0, 1] },
   ]);
   const win = (data.rangeLabel.split(" · ")[0] || "All time").replace(/[\/?*[\]:]/g, " ");
   return { ok: true, filename: `${noun} performance - ${win}.xlsx`, b64 };
