@@ -174,19 +174,17 @@ export default async function VisitRepoPage({
     officers = officerDistinct.length;
     farmers = farmerDistinct.length;
 
+    // Explicit SELECT — only the columns the row renders. Critically this OMITS the inline media
+    // columns (`photos` / `voiceNotes`: arrays of base64 data-URLs, often several MB per visit); the
+    // old `include` pulled them for all 50 rows and discarded them, which is what made this page take
+    // minutes to load.
     const visits = await prisma.visit.findMany({
       where: scopedWhere,
       orderBy: [{ visitedAt: "desc" }, { id: "desc" }],
-      include: {
-        farmer: {
-          select: {
-            id: true,
-            name: true,
-            village: true,
-            district: true,
-            crop: true,
-          },
-        },
+      select: {
+        id: true, date: true, mainCrop: true, landHoldingUnit: true, officerName: true,
+        purpose: true, reviewedAt: true, followUpDate: true,
+        farmer: { select: { id: true, name: true, village: true, district: true, crop: true } },
         store: { select: { id: true, name: true, regionalManager: true } },
       },
       skip: (page - 1) * PAGE_SIZE,
