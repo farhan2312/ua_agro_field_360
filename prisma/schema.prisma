@@ -352,6 +352,7 @@ model SaleLine {
 
   @@index([productId])
   @@index([farmerId])
+  @@index([farmerId, soldAt]) // per-farmer FY-window EXISTS / spend / recency (analytics FY scoping) — 10s→0.3s
   @@index([orderNo])
   @@index([soldAt])
   @@index([storeId, soldAt])
