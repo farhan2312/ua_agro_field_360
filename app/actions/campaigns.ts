@@ -905,9 +905,11 @@ export interface CampaignAnalytics {
    *  Scoped like everything else, so an RM sees only their own centres. A farmer reached by more than
    *  one approach counts under each, so the approach columns can exceed `reached`. */
   callByStore: { store: string; test: number; reached: number; call: number; whatsapp: number; sms: number; inPerson: number; pending: number }[];
+  /** Regional managers that have members in this campaign (within the caller's scope) — for the RM filter. */
+  rmOptions: string[];
 }
 
-const EMPTY_ANALYTICS: CampaignAnalytics = { total: 0, byValue: [], byLifecycle: [], byStore: [], byVillage: [], byCrop: [], valueCols: [], lifecycleCols: [], matrix: [], callByStore: [] };
+const EMPTY_ANALYTICS: CampaignAnalytics = { total: 0, byValue: [], byLifecycle: [], byStore: [], byVillage: [], byCrop: [], valueCols: [], lifecycleCols: [], matrix: [], callByStore: [], rmOptions: [] };
 const colOf = (k: string): SegCol => { const m = segMeta(k); return { key: k, label: m.label, color: m.color, bg: m.bg }; };
 
 /**
@@ -915,23 +917,31 @@ const colOf = (k: string): SegCol => { const m = segMeta(k); return { key: k, la
  * Scoped like the other member views (officer→store, RM→zone, central→all). Counts every enrolled
  * member (TEST + CONTROL). Returns single-dimension breakdowns + a Segment × Store cross-tab.
  */
-export async function getCampaignAnalytics(campaignId: number): Promise<CampaignAnalytics> {
+export async function getCampaignAnalytics(campaignId: number, rms?: string[]): Promise<CampaignAnalytics> {
   const scope = await memberScopeWhere();
   if (scope === "none") return EMPTY_ANALYTICS;
-  const members = await prisma.campaignMember.findMany({
+  const allMembers = await prisma.campaignMember.findMany({
     where: { campaignId, ...(scope ?? {}) },
     select: { farmerId: true, segment: true, valueSegment: true, lifecycleSegment: true, storeId: true, group: true, reached: true, mediums: true },
     take: 40000, // realistic campaigns are far below this; guards a pathological audience
   });
-  if (!members.length) return EMPTY_ANALYTICS;
+  if (!allMembers.length) return EMPTY_ANALYTICS;
 
-  const farmerIds = [...new Set(members.map((m) => m.farmerId))];
+  const farmerIds = [...new Set(allMembers.map((m) => m.farmerId))];
   const [farmers, stores] = await Promise.all([
     prisma.farmer.findMany({ where: { id: { in: farmerIds } }, select: { id: true, village: true, cropTags: true } }),
-    prisma.store.findMany({ select: { id: true, name: true } }),
+    prisma.store.findMany({ select: { id: true, name: true, regionalManager: true } }),
   ]);
   const fMap = new Map(farmers.map((f) => [f.id, f]));
   const sMap = new Map(stores.map((s) => [s.id, shortStoreName(s.name)]));
+  const rmByStore = new Map(stores.map((s) => [s.id, (s.regionalManager ?? "").trim()]));
+
+  // RM options = every RM with members in this campaign (within scope), computed BEFORE the RM filter.
+  const rmOptions = [...new Set(allMembers.map((m) => (m.storeId != null ? rmByStore.get(m.storeId) : "") || "").filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  // Apply the optional RM filter in-memory (keeps it to one members query).
+  const rmSet = rms?.length ? new Set(rms) : null;
+  const members = rmSet ? allMembers.filter((m) => m.storeId != null && rmSet.has(rmByStore.get(m.storeId) ?? "")) : allMembers;
+  if (!members.length) return { ...EMPTY_ANALYTICS, rmOptions };
 
   const vcount: Record<string, number> = {}, lcount: Record<string, number> = {};
   const store: Record<string, number> = {};
@@ -984,52 +994,50 @@ export async function getCampaignAnalytics(campaignId: number): Promise<Campaign
     callByStore: [...callMap.entries()]
       .map(([store, c]) => ({ store, ...c, pending: Math.max(0, c.test - c.reached) }))
       .sort((a, b) => b.test - a.test),
+    rmOptions,
   };
 }
 
 /**
- * Export a campaign's audience to Excel — same two-sheet format as the analytics-page export, scoped
- * to this campaign's enrolled farmers: sheet 1 = the Segment × Store matrix, sheet 2 = the farmer list.
+ * Export a campaign's audience to Excel — built from the SAME data the Analytics modal shows (via
+ * getCampaignAnalytics), so the file matches the screen: sheet 1 = Call stats by centre (the headline
+ * table), sheet 2 = the Value + Lifecycle × Store composition matrix. Respects the RM filter + scope.
  */
-export async function exportCampaignAudienceXlsx(campaignId: number, campaignName: string): Promise<{ ok: boolean; filename?: string; b64?: string; error?: string }> {
-  const scope = await memberScopeWhere();
-  if (scope === "none") return { ok: false, error: "No store or region is assigned to your account." };
-  const members = await prisma.campaignMember.findMany({
-    where: { campaignId, ...(scope ?? {}) },
-    select: { farmerId: true, segment: true, valueSegment: true, lifecycleSegment: true, storeId: true, group: true },
-    take: 100000,
-  });
-  if (!members.length) return { ok: false, error: "No enrolled farmers in your scope for this campaign." };
+export async function exportCampaignAudienceXlsx(campaignId: number, campaignName: string, rms?: string[]): Promise<{ ok: boolean; filename?: string; b64?: string; error?: string }> {
+  const a = await getCampaignAnalytics(campaignId, rms);
+  if (!a.total) return { ok: false, error: "No enrolled farmers in your scope for this campaign." };
 
-  const stores = await prisma.store.findMany({ select: { id: true, name: true, regionalManager: true } });
-  const sMap = new Map(stores.map((s) => [s.id, shortStoreName(s.name)]));
+  // Store → RM, for the required Store + RM columns (callByStore / matrix are keyed by short store name).
+  const stores = await prisma.store.findMany({ select: { name: true, regionalManager: true } });
   const rmByName = new Map(stores.map((s) => [shortStoreName(s.name), (s.regionalManager ?? "").trim()]));
+  const pct = (r: number, t: number) => (t ? Math.round((r / t) * 100) : 0);
 
-  const V = [...VALUE_SEGMENTS], L = [...LIFECYCLE_SEGMENTS];
-  const vseg = (m: { valueSegment: string | null; segment: string }) => m.valueSegment ?? (V.includes(m.segment as never) ? m.segment : "REGULAR");
-  const lseg = (m: { lifecycleSegment: string | null; segment: string }) => m.lifecycleSegment ?? (L.includes(m.segment as never) ? m.segment : "LAPSED");
-  // Merged Store × (Value | Lifecycle) cross-tab (both count-sets sum to the store total).
-  const cross = new Map<string, { value: Record<string, number>; lifecycle: Record<string, number>; total: number }>();
-  const vTot: Record<string, number> = {}, lTot: Record<string, number> = {};
-  for (const m of members) {
-    const storeName = m.storeId != null ? sMap.get(m.storeId) ?? "—" : "—";
-    const v = vseg(m), l = lseg(m);
-    const row = cross.get(storeName) ?? cross.set(storeName, { value: {}, lifecycle: {}, total: 0 }).get(storeName)!;
-    row.value[v] = (row.value[v] ?? 0) + 1; row.lifecycle[l] = (row.lifecycle[l] ?? 0) + 1; row.total += 1;
-    vTot[v] = (vTot[v] ?? 0) + 1; lTot[l] = (lTot[l] ?? 0) + 1;
-  }
-  const mrows = [...cross.entries()].map(([store, c]) => ({ store, ...c })).sort((a, b) => b.total - a.total);
-
-  const matrixSheet: (string | number)[][] = [
-    ["Store", "RM", ...V.map((s) => segMeta(s).label), "Segment Total", ...L.map((s) => segMeta(s).label), "Lifecycle Total"],
-    ["All stores", "", ...V.map((k) => vTot[k] ?? 0), members.length, ...L.map((k) => lTot[k] ?? 0), members.length],
-    ...mrows.map((r) => [r.store, rmByName.get(r.store) ?? "", ...V.map((k) => r.value[k] ?? 0), r.total, ...L.map((k) => r.lifecycle[k] ?? 0), r.total]),
+  // Sheet 1 — Call stats by centre (mirrors the on-screen table, TEST group).
+  const cbs = a.callByStore;
+  const tot = cbs.reduce((t, s) => ({ test: t.test + s.test, reached: t.reached + s.reached, call: t.call + s.call, whatsapp: t.whatsapp + s.whatsapp, sms: t.sms + s.sms, inPerson: t.inPerson + s.inPerson, pending: t.pending + s.pending }),
+    { test: 0, reached: 0, call: 0, whatsapp: 0, sms: 0, inPerson: 0, pending: 0 });
+  const callSheet: (string | number)[][] = [
+    ["Centre", "RM", "Test farmers", "Reached", "Reached %", "Call", "WhatsApp", "SMS", "In-person", "Pending"],
+    ["All centres", "", tot.test, tot.reached, pct(tot.reached, tot.test), tot.call, tot.whatsapp, tot.sms, tot.inPerson, tot.pending],
+    ...cbs.map((s) => [s.store, rmByName.get(s.store) ?? "", s.test, s.reached, pct(s.reached, s.test), s.call, s.whatsapp, s.sms, s.inPerson, s.pending]),
   ];
+
+  // Sheet 2 — Value + Lifecycle × Store composition matrix.
+  const V = a.valueCols, L = a.lifecycleCols;
+  const vTot: Record<string, number> = {}, lTot: Record<string, number> = {};
+  for (const r of a.matrix) { for (const c of V) vTot[c.key] = (vTot[c.key] ?? 0) + (r.value[c.key] ?? 0); for (const c of L) lTot[c.key] = (lTot[c.key] ?? 0) + (r.lifecycle[c.key] ?? 0); }
+  const matrixSheet: (string | number)[][] = [
+    ["Store", "RM", ...V.map((c) => c.label), "Segment Total", ...L.map((c) => c.label), "Lifecycle Total"],
+    ["All stores", "", ...V.map((c) => vTot[c.key] ?? 0), a.total, ...L.map((c) => lTot[c.key] ?? 0), a.total],
+    ...a.matrix.map((r) => [r.store, rmByName.get(r.store) ?? "", ...V.map((c) => r.value[c.key] ?? 0), r.total, ...L.map((c) => r.lifecycle[c.key] ?? 0), r.total]),
+  ];
+
   const safe = (campaignName || "campaign").replace(/[\\/?*[\]:]/g, " ").trim().slice(0, 60) || "campaign";
   const b64 = buildWorkbookB64([
+    { name: "Call stats by centre", rows: callSheet },
     { name: "Value + Lifecycle x Store", rows: matrixSheet },
   ]);
-  return { ok: true, filename: `${safe} - audience.xlsx`, b64 };
+  return { ok: true, filename: `${safe} - analytics.xlsx`, b64 };
 }
 
 const CONTACT_MEDIA = new Set(["CALL", "WHATSAPP", "SMS", "IN_PERSON"]); // a channel ⇒ reached

@@ -1660,11 +1660,21 @@ function CallByStoreTable({ rows }: { rows: CampaignAnalytics["callByStore"] }) 
   );
 }
 
-function AnalyticsBody({ a, campaign }: { a: CampaignAnalytics; campaign: CampaignListItem }) {
+function AnalyticsBody({ a: initial, campaign }: { a: CampaignAnalytics; campaign: CampaignListItem }) {
+  const [rms, setRms] = useState<string[]>([]);
+  const [data, setData] = useState<CampaignAnalytics>(initial);
+  const [reloading, startReload] = useTransition();
   const [exporting, setExporting] = useState(false);
+
+  // No RM filter → parent's already-loaded data; otherwise refetch scoped to the chosen RM(s).
+  useEffect(() => {
+    if (!rms.length) { setData(initial); return; }
+    startReload(async () => setData(await getCampaignAnalytics(campaign.id, rms)));
+  }, [rms, initial, campaign.id]);
+
   const doExport = () => {
     setExporting(true);
-    exportCampaignAudienceXlsx(campaign.id, campaign.name)
+    exportCampaignAudienceXlsx(campaign.id, campaign.name, rms.length ? rms : undefined)
       .then((res) => {
         if (res.ok && res.b64 && res.filename) downloadB64(res.b64, res.filename);
         else alert(res.error ?? "Export failed.");
@@ -1672,42 +1682,75 @@ function AnalyticsBody({ a, campaign }: { a: CampaignAnalytics; campaign: Campai
       .catch(() => alert("Export failed."))
       .finally(() => setExporting(false));
   };
-  if (a.total === 0) return <div className="py-8 text-center text-[13px] text-[#9E9E9E]">No enrolled farmers in your scope for this campaign.</div>;
+
+  if (initial.total === 0) return <div className="py-8 text-center text-[13px] text-[#9E9E9E]">No enrolled farmers in your scope for this campaign.</div>;
+  const a = data; // render from the (possibly RM-filtered) data
+  const rmOptions = initial.rmOptions; // options stay the full set regardless of the active filter
   const cropData = a.byCrop.map((c, i) => ({ label: c.label, count: c.count, color: CHART_PALETTE[i % CHART_PALETTE.length] }));
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-baseline gap-2">
           <span className="text-[22px] font-bold text-[#00838F]">{n(a.total)}</span>
-          <span className="text-[13px] text-[#757575]">enrolled farmers</span>
+          <span className="text-[13px] text-[#757575]">enrolled farmers{reloading ? " · updating…" : ""}</span>
         </div>
-        <button type="button" onClick={doExport} disabled={exporting}
-          className="rounded-[8px] border border-[#00838F] px-3 py-1.5 text-[12px] font-semibold text-[#00838F] hover:bg-[#E0F7FA] disabled:opacity-40">
-          {exporting ? "Exporting…" : "⬇ Export to Excel"}
-        </button>
+        <div className="flex items-center gap-2">
+          {rmOptions.length > 0 && <RmPicker options={rmOptions} selected={rms} onChange={setRms} />}
+          <button type="button" onClick={doExport} disabled={exporting}
+            className="rounded-[8px] border border-[#00838F] px-3 py-1.5 text-[12px] font-semibold text-[#00838F] hover:bg-[#E0F7FA] disabled:opacity-40">
+            {exporting ? "Exporting…" : "⬇ Export to Excel"}
+          </button>
+        </div>
       </div>
 
-      {/* Centre-wise call stats — the per-store outreach breakdown (BDM/RM view) */}
-      {a.callByStore.length > 0 && <CallByStoreTable rows={a.callByStore} />}
+      {a.total === 0 ? (
+        <div className="rounded-[12px] border border-dashed border-[#E0E0E0] py-8 text-center text-[13px] text-[#9E9E9E]">No farmers for the selected RM — clear the filter to see all.</div>
+      ) : (<>
+        {/* Centre-wise call stats — the per-store outreach breakdown (BDM/RM view) */}
+        {a.callByStore.length > 0 && <CallByStoreTable rows={a.callByStore} />}
 
-      {/* Two independent segment dimensions: value tier + lifecycle */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <PieCard title="By value segment" data={a.byValue.map((s) => ({ label: s.label, count: s.count, color: s.color }))} total={a.total} />
-        <PieCard title="By lifecycle" data={a.byLifecycle.map((s) => ({ label: s.label, count: s.count, color: s.color }))} total={a.total} />
-      </div>
+        {/* Two independent segment dimensions: value tier + lifecycle */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <PieCard title="By value segment" data={a.byValue.map((s) => ({ label: s.label, count: s.count, color: s.color }))} total={a.total} />
+          <PieCard title="By lifecycle" data={a.byLifecycle.map((s) => ({ label: s.label, count: s.count, color: s.color }))} total={a.total} />
+        </div>
 
-      {/* Crop bars (crops overlap across farmers, so a bar reads clearer than a pie) */}
-      <HBarCard title="By crop (top)" data={cropData} total={a.total} note="% = share of enrolled farmers; a farmer may grow several crops, so these overlap." />
+        {/* Crop bars (crops overlap across farmers, so a bar reads clearer than a pie) */}
+        <HBarCard title="By crop (top)" data={cropData} total={a.total} note="% = share of enrolled farmers; a farmer may grow several crops, so these overlap." />
 
-      {/* Decomposition treemaps: store + village */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <TreemapCard title="By store" rows={a.byStore} total={a.total} />
-        <TreemapCard title="By village (top)" rows={a.byVillage} total={a.total} />
-      </div>
+        {/* Decomposition treemaps: store + village */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <TreemapCard title="By store" rows={a.byStore} total={a.total} />
+          <TreemapCard title="By village (top)" rows={a.byVillage} total={a.total} />
+        </div>
 
-      {/* Store × Value + Lifecycle matrix (replaces the farmer list) */}
-      <SegStoreMatrix valueCols={a.valueCols} lifecycleCols={a.lifecycleCols} matrix={a.matrix} total={a.total} />
+        {/* Store × Value + Lifecycle matrix (replaces the farmer list) */}
+        <SegStoreMatrix valueCols={a.valueCols} lifecycleCols={a.lifecycleCols} matrix={a.matrix} total={a.total} />
+      </>)}
     </div>
+  );
+}
+
+/** Compact RM multi-select for the campaign Analytics modal. */
+function RmPicker({ options, selected, onChange }: { options: string[]; selected: string[]; onChange: (v: string[]) => void }) {
+  const text = selected.length === 0 ? "All RMs" : selected.length === 1 ? selected[0] : `${selected.length} RMs`;
+  const toggle = (nm: string) => onChange(selected.includes(nm) ? selected.filter((x) => x !== nm) : [...selected, nm]);
+  return (
+    <details className="group relative">
+      <summary className="flex w-[160px] cursor-pointer list-none items-center justify-between gap-1.5 rounded-lg border border-[#E0E0E0] bg-white px-2.5 py-1.5 text-[12px] text-[#424242]">
+        <span className={`truncate ${selected.length ? "font-semibold text-[#00838F]" : ""}`}>{text}</span>
+        <span className="shrink-0 text-[10px] text-[#9E9E9E] transition-transform group-open:rotate-180">▾</span>
+      </summary>
+      <div className="absolute right-0 z-30 mt-1 max-h-[300px] w-[240px] overflow-y-auto rounded-lg border border-[#E0E0E0] bg-white p-1 shadow-[0_6px_20px_rgba(0,0,0,0.12)]">
+        <button type="button" onClick={() => onChange([])} className="w-full rounded px-2 py-1.5 text-left text-[12.5px] font-semibold hover:bg-[#F5F7F5]" style={selected.length === 0 ? { color: "#00838F" } : { color: "#616161" }}>All RMs</button>
+        {options.map((nm) => (
+          <label key={nm} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[12.5px] text-[#424242] hover:bg-[#F5F7F5]">
+            <input type="checkbox" checked={selected.includes(nm)} onChange={() => toggle(nm)} style={{ accentColor: "#00838F" }} />
+            <span className="truncate" title={nm}>{nm}</span>
+          </label>
+        ))}
+      </div>
+    </details>
   );
 }
 
