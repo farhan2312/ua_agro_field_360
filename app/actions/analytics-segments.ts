@@ -449,10 +449,15 @@ const orderBars = (bars: WbBar[], order: string[]) =>
 export async function getVisitAnalytics(f: WbFilters): Promise<VisitAnalytics> {
   const scoped = await scopeFilters({ ...f, lens: "visit" });
   if (scoped === "none") return EMPTY_VISITS;
+  return _visitAnalyticsCached(scoped);
+}
+/** The Visits-tab bundle (~16 queries over 23k visits ⋈ farmers). Cache per scope+filter for 5 min —
+ *  keyed by the scope-resolved filter object, so the default view and repeat filters are instant. */
+const _visitAnalyticsCached = unstable_cache(async (scoped: WbFilters): Promise<VisitAnalytics> => {
   const whereF = whereOf(scoped, "f");
   // Visit date range (buckets/slider). visitFrom/To are ISO dates; applied on Visit.visitedAt.
-  const dFrom = f.visitFrom && /^\d{4}-\d{2}-\d{2}$/.test(f.visitFrom) ? new Date(`${f.visitFrom}T00:00:00Z`) : null;
-  const dTo = f.visitTo && /^\d{4}-\d{2}-\d{2}$/.test(f.visitTo) ? new Date(`${f.visitTo}T23:59:59Z`) : null;
+  const dFrom = scoped.visitFrom && /^\d{4}-\d{2}-\d{2}$/.test(scoped.visitFrom) ? new Date(`${scoped.visitFrom}T00:00:00Z`) : null;
+  const dTo = scoped.visitTo && /^\d{4}-\d{2}-\d{2}$/.test(scoped.visitTo) ? new Date(`${scoped.visitTo}T23:59:59Z`) : null;
   const dateSql = [
     dFrom ? Prisma.sql`v."visitedAt" >= ${dFrom}` : null,
     dTo ? Prisma.sql`v."visitedAt" <= ${dTo}` : null,
@@ -571,7 +576,7 @@ export async function getVisitAnalytics(f: WbFilters): Promise<VisitAnalytics> {
     officers: bars(officerRows),
     byStore: storeRows.filter((r) => r.store).map((r) => ({ store: r.store as string, visits: num(r.visits), farmers: num(r.farmers) })),
   };
-}
+}, ["visit-analytics"], { revalidate: 300 });
 
 /* ── Drill: farmers in a matrix cell (respects the active filters) ── */
 export interface WbCustomer { id: number; name: string; mobile: string | null; village: string | null; spend: string; segment: string; salesCrops: string[]; visitCrops: string[] }
