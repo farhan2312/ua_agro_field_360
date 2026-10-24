@@ -258,7 +258,7 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false, canExpor
           <SegTree tree={data.tree} by={treeBy} onFlip={flipTree} />
         </div>
       ) : (
-        <div className="mb-3 grid grid-cols-2 gap-[12px] sm:grid-cols-3 lg:grid-cols-6">
+        <div className="mb-3 grid grid-cols-2 gap-[12px] sm:grid-cols-4 lg:grid-cols-7">
           {VISIT_KPIS.map(([label, val]) => {
             const isLeads = label.startsWith("Leads");
             return (
