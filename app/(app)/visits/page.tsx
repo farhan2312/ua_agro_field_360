@@ -61,7 +61,9 @@ export default async function VisitRepoPage({
   const rm = sp.rm ?? "all";
   const type = sp.type ?? "all";
   const review = sp.review === "reviewed" || sp.review === "pending" ? sp.review : "all";
-  const period = sp.period && sp.period in PERIOD_DAYS ? sp.period : "month";
+  // Default to All Time so the headline "Total Visits" is the true grand total (matches the export /
+  // analytics). A narrower window is opt-in via the period pills.
+  const period = sp.period && sp.period in PERIOD_DAYS ? sp.period : "all";
   const exactDate = isYmd(sp.date) ? sp.date : "";
   const fromDate = isYmd(sp.from) ? sp.from : "";
   const toDate = isYmd(sp.to) ? sp.to : "";
@@ -225,6 +227,13 @@ export default async function VisitRepoPage({
     total = followup = officers = farmers = 0;
   }
 
+  // What window the KPI counts cover — so "Total Visits" is never mistaken for an all-time grand total.
+  const periodLabel = exactDate
+    ? `On ${exactDate}`
+    : (fromDate || toDate)
+      ? `${fromDate || "start"} → ${toDate || "today"}`
+      : period === "today" ? "Today" : period === "week" ? "Last 7 days" : period === "month" ? "Last 30 days" : "All time";
+
   return (
     <div className="animate-[fadeUp_0.4s_ease-out]">
       <VisitKpiStrip
@@ -232,6 +241,7 @@ export default async function VisitRepoPage({
         followup={followup}
         officers={officers}
         farmers={farmers}
+        periodLabel={periodLabel}
       />
 
       <VisitFilterBar
