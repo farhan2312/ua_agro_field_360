@@ -34,6 +34,8 @@ type ExportType = "sales" | "visits" | "both";
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const list = <T,>(arr: T[] | undefined, fn: (x: T) => string, none: string) => (arr?.length ? arr.map(fn).join(", ") : none);
 const segLabelSafe = (x: unknown) => { const k = x == null ? "" : String(x); if (!k) return ""; try { return segMeta(k).label; } catch { return k; } };
+/** Farmer crop-tag array → readable "Mustard; Wheat" label string. */
+const cropsJoin = (a: unknown) => (Array.isArray(a) ? (a as string[]).map(cropLabel).join("; ") : "");
 
 function fyWindow(fyStarts?: number[]): Prisma.Sql | null {
   if (!fyStarts?.length) return null;
@@ -142,7 +144,7 @@ async function writeSalesSheets(
 
   // ── Sheet: every matching sale line (keyset-paged) ──
   const ws2 = wb.addWorksheet("Sales lines");
-  ws2.addRow(["Order No", "Date", "Financial year", "Farmer", "Mobile", "Village", "Store", "RM", "District", "Item", "Crop", "Category", "Qty", "UOM", "Base value (Rs)", "Value segment", "Lifecycle"]).commit();
+  ws2.addRow(["Order No", "Date", "Financial year", "Farmer", "Mobile", "Village", "Store", "RM", "District", "Item", "Crop (this line)", "Sales crops (all)", "Visit crops (all)", "Category", "Qty", "UOM", "Base value (Rs)", "Value segment", "Lifecycle"]).commit();
   let cursor = 0, lineCount = 0;
   const BATCH = 10000;
   for (;;) {
@@ -150,11 +152,13 @@ async function writeSalesSheets(
       id: number; fid: number; fystart: number | null; ordno: string | null; soldat: Date | null; fy: string | null; name: string; mobile: string | null;
       village: string | null; sid: number | null; zone: string | null; item: string; crop: string | null; cat: string | null;
       qty: number | null; uom: string | null; basic: number | null; vseg: string | null; lseg: string | null;
+      scrops: string[] | null; vcrops: string[] | null;
     }>>(Prisma.sql`
       SELECT sl.id, sl."farmerId" fid, floor(EXTRACT(YEAR FROM (sl."soldAt" - interval '3 months')))::int fystart,
         sl."orderNo" ordno, sl."soldAt" soldat, sl."financialYear" fy, f.name, f.mobile, f."village" village,
         f."storeId" sid, st."zone" zone, sl."itemRaw" item, sl."cropTag" crop, sl."mainCategory" cat,
-        sl.qty, sl.uom, sl."basic" basic, f."valueSegment" vseg, f."lifecycleSegment" lseg
+        sl.qty, sl.uom, sl."basic" basic, f."valueSegment" vseg, f."lifecycleSegment" lseg,
+        f."salesCropTags" scrops, f."visitCropTags" vcrops
       FROM "SaleLine" sl JOIN "Farmer" f ON f.id = sl."farmerId" LEFT JOIN "Store" st ON st.id = f."storeId"
       WHERE sl.source = 'REAL' AND sl."farmerId" IS NOT NULL AND ${fWhere} ${cropLine} ${fyLine} ${dateLine} AND sl.id > ${cursor}
       ORDER BY sl.id LIMIT ${BATCH}`);
@@ -167,7 +171,7 @@ async function writeSalesSheets(
       ws2.addRow([
         r.ordno ?? "", r.soldat ? new Date(r.soldat).toISOString().slice(0, 10) : "", r.fy ?? "",
         r.name, r.mobile ?? "", r.village ?? "", r.sid != null ? nameById.get(r.sid) ?? "" : "", r.sid != null ? rmById.get(r.sid) ?? "" : "", r.zone ?? "",
-        r.item, r.crop ? cropLabel(r.crop) : "", r.cat ?? "", r.qty ?? 0, r.uom ?? "",
+        r.item, r.crop ? cropLabel(r.crop) : "", cropsJoin(r.scrops), cropsJoin(r.vcrops), r.cat ?? "", r.qty ?? 0, r.uom ?? "",
         Math.round(r.basic ?? 0), r.vseg ? segMeta(r.vseg).label : "", lsegKey ? segMeta(lsegKey).label : "",
       ]).commit();
     }
@@ -208,7 +212,7 @@ async function writeVisitsSheet(
   ws.addRow([
     "Visit ID", "Date", "Farmer", "Mobile", "Village", "Store", "RM", "District", "Officer", "Recorded by", "Emp code",
     "Visit type", "Visit mode", "GPS lat", "GPS lng", "Follow-up date", "Soil type", "Soil testing", "Water source",
-    "Main crop", "Crops", "Other crops", "Season", "Crop insured", "Land holding", "Products", "Product required",
+    "Main crop", "Crops", "Other crops", "Sales crops (all)", "Visit crops (all)", "Season", "Crop insured", "Land holding", "Products", "Product required",
     "Current problem", "Crop risk", "Danger zone", "Annual expense", "Purchase freq", "Other shops",
     "FPO member", "FPO name", "Contract farming", "Contract detail", "Dairy services", "Dairy detail",
     "WhatsApp", "WhatsApp number", "Photos", "Voice notes", "Notes", "Lifecycle stage", "Value segment", "Recorded at (UTC)",
@@ -226,7 +230,8 @@ async function writeVisitsSheet(
         COALESCE(v.type, v.purpose) AS visittype, v."visitMode" AS visitmode, v."gpsLat" AS lat, v."gpsLng" AS lng,
         v."followUpDate" AS followup, v."soilType" AS soiltype, v."soilTesting" AS soiltesting,
         array_to_string(v."waterSource", '; ') AS water, v."mainCrop" AS maincrop,
-        array_to_string(v.crops, '; ') AS crops, v."otherCrops" AS othercrops, v.season,
+        array_to_string(v.crops, '; ') AS crops, v."otherCrops" AS othercrops,
+        f."salesCropTags" AS scrops, f."visitCropTags" AS vcrops, v.season,
         v."cropInsured" AS insured, v."landHoldingUnit" AS land,
         array_to_string(v.products, '; ') AS products, array_to_string(v."productRequired", '; ') AS prodreq,
         array_to_string(v."currentProblem", '; ') AS problem, array_to_string(v."cropRisk", '; ') AS croprisk,
@@ -252,7 +257,7 @@ async function writeVisitsSheet(
         Number(r.id), s(r.date), s(r.farmer), s(r.mobile), s(r.village), s(r.store), s(r.rm), s(r.district),
         s(r.officer), s(r.recordedby), s(r.empcode), s(r.visittype), s(r.visitmode),
         r.lat ?? "", r.lng ?? "", s(r.followup), s(r.soiltype), s(r.soiltesting), s(r.water),
-        s(r.maincrop), s(r.crops), s(r.othercrops), s(r.season), yn(r.insured), s(r.land),
+        s(r.maincrop), s(r.crops), s(r.othercrops), cropsJoin(r.scrops), cropsJoin(r.vcrops), s(r.season), yn(r.insured), s(r.land),
         s(r.products), s(r.prodreq), s(r.problem), s(r.croprisk), s(r.danger), s(r.expense), s(r.freq), s(r.othershops),
         yn(r.fpo), s(r.fponame), yn(r.contract), s(r.contractdetail), yn(r.dairy), s(r.dairydetail),
         yn(r.wa), s(r.wanum), Number(r.photos ?? 0), Number(r.voices ?? 0), s(r.notes), segLabelSafe(r.lead), segLabelSafe(r.segment), s(r.createdat),
