@@ -269,6 +269,139 @@ async function writeVisitsSheet(
   return count;
 }
 
+/** The store-name cleaner used across the visit/lead sheets (drops the "(…)" suffix). */
+const STORE_NAME = Prisma.raw(`btrim(regexp_replace(st.name, '\\s*\\(.*?\\)\\s*', '', 'g'))`);
+
+/** Leads sheet: one row per LEAD farmer with their visit-derived analytics (crops, pests, visit activity). */
+async function writeLeadsSheet(wb: ExcelJS.stream.xlsx.WorkbookWriter, f: ExportFilters, storeIds?: number[], zones?: string[]): Promise<number> {
+  // Farmer-level conditions — leads carry visit data, so crop matches visitCropTags. No spend/value/lifecycle
+  // narrowing (a lead is always NO_SPEND / LEAD); applying those would just empty the sheet.
+  const c: Prisma.Sql[] = [Prisma.sql`f.source = 'REAL'`, Prisma.sql`f."lifecycleSegment" = 'LEAD'`];
+  if (storeIds?.length) c.push(Prisma.sql`f."storeId" = ANY(${storeIds})`);
+  if (f.storeStatus?.length) c.push(Prisma.sql`st."status" = ANY(${f.storeStatus})`);
+  if (zones?.length) c.push(Prisma.sql`st."zone" = ANY(${zones})`);
+  if (f.villages?.length) c.push(Prisma.sql`upper(btrim(f."village")) = ANY(${f.villages})`);
+  if (f.crops?.length) c.push(Prisma.sql`f."visitCropTags" && ${f.crops}::text[]`);
+  if (f.pests?.length) c.push(Prisma.sql`f."pestTags" && ${f.pests}::text[]`);
+  const vFrom = ymd(f.visitFrom), vTo = ymd(f.visitTo, true);
+  if (vFrom || vTo) {
+    const vp = [...(vFrom ? [Prisma.sql`v."visitedAt" >= ${vFrom}`] : []), ...(vTo ? [Prisma.sql`v."visitedAt" <= ${vTo}`] : [])];
+    c.push(Prisma.sql`EXISTS (SELECT 1 FROM "Visit" v WHERE v."farmerId" = f.id AND ${Prisma.join(vp, " AND ")})`);
+  }
+  const where = Prisma.join(c, " AND ");
+
+  const ws = wb.addWorksheet("Leads");
+  ws.addRow([
+    "Farmer", "Mobile", "Village", "Store", "RM", "District", "Registered on", "Value segment",
+    "Visit crops", "Sales crops", "Pests / diseases", "Visits", "First visit", "Last visit", "Last officer",
+    "Next follow-up", "Current problems", "WhatsApp opt-in",
+  ]).commit();
+  let cursor = 0, count = 0; const BATCH = 5000;
+  for (;;) {
+    const rows = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
+      SELECT f.id, f.name, f.mobile, f.village, ${STORE_NAME} AS store, st."regionalManager" AS rm, st.zone AS district,
+        to_char(f."createdAt", 'YYYY-MM-DD') AS registered, f."valueSegment" AS vseg,
+        f."visitCropTags" AS vcrops, f."salesCropTags" AS scrops, f."pestTags" AS pests, f."whatsappOptIn" AS wa,
+        va.visits, va.firstv, va.lastv, va.nextfollow,
+        (SELECT v2."officerName" FROM "Visit" v2 WHERE v2."farmerId" = f.id
+           ORDER BY COALESCE(to_char(v2."visitedAt",'YYYY-MM-DD'), v2."date") DESC NULLS LAST LIMIT 1) AS lastofficer,
+        (SELECT array_agg(DISTINCT p) FROM "Visit" v3, unnest(v3."currentProblem") p WHERE v3."farmerId" = f.id) AS problems
+      FROM "Farmer" f
+      LEFT JOIN "Store" st ON st.id = f."storeId"
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int visits,
+          MIN(COALESCE(to_char(v."visitedAt",'YYYY-MM-DD'), v."date")) firstv,
+          MAX(COALESCE(to_char(v."visitedAt",'YYYY-MM-DD'), v."date")) lastv,
+          MAX(v."followUpDate") nextfollow
+        FROM "Visit" v WHERE v."farmerId" = f.id) va ON TRUE
+      WHERE ${where} AND f.id > ${cursor}
+      ORDER BY f.id LIMIT ${BATCH}`);
+    if (!rows.length) break;
+    const s = (x: unknown) => (x == null ? "" : String(x));
+    for (const r of rows) {
+      cursor = Number(r.id); count++;
+      ws.addRow([
+        s(r.name), s(r.mobile), s(r.village), s(r.store), s(r.rm), s(r.district), s(r.registered), segLabelSafe(r.vseg),
+        cropsJoin(r.vcrops), cropsJoin(r.scrops), (Array.isArray(r.pests) ? (r.pests as string[]).map(tagLabel).join("; ") : ""),
+        Number(r.visits ?? 0), s(r.firstv), s(r.lastv), s(r.lastofficer), s(r.nextfollow),
+        (Array.isArray(r.problems) ? (r.problems as string[]).join("; ") : ""), r.wa ? "Yes" : "No",
+      ]).commit();
+    }
+    if (rows.length < BATCH) break;
+  }
+  await ws.commit();
+  return count;
+}
+
+/** Converted-leads sheet: farmers who registered as leads and later bought (wasLead=true), with when they
+ *  converted (leadConvertedAt = first sale after registration) and the first purchase. Sales-side filters apply;
+ *  FY / sale-date range bound the CONVERSION date (so "converted in FY26-27" works). */
+async function writeConvertedSheet(wb: ExcelJS.stream.xlsx.WorkbookWriter, f: ExportFilters, storeIds?: number[], zones?: string[]): Promise<number> {
+  const c: Prisma.Sql[] = [Prisma.sql`f.source = 'REAL'`, Prisma.sql`f."wasLead" = TRUE`, Prisma.sql`f."leadConvertedAt" IS NOT NULL`];
+  if (storeIds?.length) c.push(Prisma.sql`f."storeId" = ANY(${storeIds})`);
+  if (f.storeStatus?.length) c.push(Prisma.sql`st."status" = ANY(${f.storeStatus})`);
+  if (zones?.length) c.push(Prisma.sql`st."zone" = ANY(${zones})`);
+  if (f.villages?.length) c.push(Prisma.sql`upper(btrim(f."village")) = ANY(${f.villages})`);
+  if (f.crops?.length) c.push(Prisma.sql`f."salesCropTags" && ${f.crops}::text[]`); // clients now — match purchased crops
+  if (f.pests?.length) c.push(Prisma.sql`f."pestTags" && ${f.pests}::text[]`);
+  if (f.valueSegments?.length) c.push(Prisma.sql`f."valueSegment" = ANY(${f.valueSegments})`);
+  if (f.spendTiers?.length) {
+    const ors = f.spendTiers.map((i) => SPEND_TIERS[i]).filter(Boolean).map((t) => {
+      if (t.max === 0 && t.min == null) return Prisma.sql`(f."lifetimeSpend" IS NULL OR f."lifetimeSpend" <= 0)`;
+      const p: Prisma.Sql[] = [];
+      if (t.min != null) p.push(Prisma.sql`f."lifetimeSpend" >= ${t.min}`);
+      if (t.max != null) p.push(Prisma.sql`f."lifetimeSpend" < ${t.max}`);
+      return p.length ? Prisma.sql`(${Prisma.join(p, " AND ")})` : Prisma.sql`TRUE`;
+    });
+    if (ors.length) c.push(Prisma.sql`(${Prisma.join(ors, " OR ")})`);
+  }
+  // Conversion-date window from the FY and/or sale-date-range controls.
+  if (f.fyStarts?.length) {
+    const ors = f.fyStarts.map((y) => Prisma.sql`(f."leadConvertedAt" >= ${new Date(Date.UTC(y, 3, 1))} AND f."leadConvertedAt" < ${new Date(Date.UTC(y + 1, 3, 1))})`);
+    c.push(Prisma.sql`(${Prisma.join(ors, " OR ")})`);
+  }
+  const cFrom = ymd(f.salesFrom), cTo = ymd(f.salesTo, true);
+  if (cFrom) c.push(Prisma.sql`f."leadConvertedAt" >= ${cFrom}`);
+  if (cTo) c.push(Prisma.sql`f."leadConvertedAt" <= ${cTo}`);
+  const where = Prisma.join(c, " AND ");
+
+  const ws = wb.addWorksheet("Leads converted to clients");
+  ws.addRow([
+    "Farmer", "Mobile", "Village", "Store", "RM", "District", "Registered on", "Converted on", "Days to convert",
+    "Current value segment", "Current lifecycle", "Sales crops", "Visit crops", "Lifetime spend (Rs)", "Sale lines",
+    "First purchase item", "First purchase crop",
+  ]).commit();
+  let cursor = 0, count = 0; const BATCH = 5000;
+  for (;;) {
+    const rows = await prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
+      SELECT f.id, f.name, f.mobile, f.village, ${STORE_NAME} AS store, st."regionalManager" AS rm, st.zone AS district,
+        to_char(f."createdAt", 'YYYY-MM-DD') AS registered, to_char(f."leadConvertedAt", 'YYYY-MM-DD') AS converted,
+        GREATEST(0, (f."leadConvertedAt"::date - f."createdAt"::date))::int AS days,
+        f."valueSegment" AS vseg, f."lifecycleSegment" AS lseg, f."salesCropTags" AS scrops, f."visitCropTags" AS vcrops,
+        COALESCE(f."lifetimeSpend", 0)::bigint AS spend,
+        (SELECT COUNT(*)::int FROM "SaleLine" sl WHERE sl."farmerId" = f.id AND sl.source = 'REAL') AS lines,
+        (SELECT sl."itemRaw" FROM "SaleLine" sl WHERE sl."farmerId" = f.id AND sl.source = 'REAL' ORDER BY sl."soldAt" ASC NULLS LAST LIMIT 1) AS firstitem,
+        (SELECT sl."cropTag" FROM "SaleLine" sl WHERE sl."farmerId" = f.id AND sl.source = 'REAL' AND sl."cropTag" IS NOT NULL ORDER BY sl."soldAt" ASC NULLS LAST LIMIT 1) AS firstcrop
+      FROM "Farmer" f
+      LEFT JOIN "Store" st ON st.id = f."storeId"
+      WHERE ${where} AND f.id > ${cursor}
+      ORDER BY f.id LIMIT ${BATCH}`);
+    if (!rows.length) break;
+    const s = (x: unknown) => (x == null ? "" : String(x));
+    for (const r of rows) {
+      cursor = Number(r.id); count++;
+      ws.addRow([
+        s(r.name), s(r.mobile), s(r.village), s(r.store), s(r.rm), s(r.district), s(r.registered), s(r.converted),
+        Number(r.days ?? 0), segLabelSafe(r.vseg), segLabelSafe(r.lseg), cropsJoin(r.scrops), cropsJoin(r.vcrops),
+        Math.round(Number(r.spend ?? 0)), Number(r.lines ?? 0), s(r.firstitem), r.firstcrop ? cropLabel(String(r.firstcrop)) : "",
+      ]).commit();
+    }
+    if (rows.length < BATCH) break;
+  }
+  await ws.commit();
+  return count;
+}
+
 export async function GET(req: NextRequest) {
   const scope = await getScope();
   // Downloads of raw sales / visit data are restricted to system admins.
@@ -297,8 +430,14 @@ export async function GET(req: NextRequest) {
     try {
       let sales: { grandTotal: number; lineCount: number } | null = null;
       let visitCount: number | null = null;
+      let leadCount: number | null = null;
+      let convertedCount: number | null = null;
       if (wantSales) sales = await writeSalesSheets(wb, f, storeIds, zones, nameById, rmById);
       if (wantVisits) visitCount = await writeVisitsSheet(wb, f, scope);
+      // Leads sheet rides with the visit data (leads are visit-only, no sales).
+      if (wantVisits) leadCount = await writeLeadsSheet(wb, f, storeIds, zones);
+      // Converted-leads sheet rides with the sales data (they're clients now).
+      if (wantSales) convertedCount = await writeConvertedSheet(wb, f, storeIds, zones);
 
       // ── One combined "Filters applied" sheet covering everything in this file ──
       const fyLbl = (y: number) => `FY ${y}-${String((y + 1) % 100).padStart(2, "0")}`;
@@ -326,6 +465,7 @@ export async function GET(req: NextRequest) {
           ["Spend tier", list(f.spendTiers, (i) => SPEND_TIERS[i]?.label ?? String(i), "Any")],
           ["Farmers in matrix", sales?.grandTotal ?? 0],
           ["Sale lines in file", sales?.lineCount ?? 0],
+          ["Converted leads in file", convertedCount ?? 0],
           ["Money basis", "Base / pre-tax price (SaleLine.basic)"],
         );
       }
@@ -338,6 +478,7 @@ export async function GET(req: NextRequest) {
           ["Value segment", list(f.valueSegments, (s) => segMeta(s).label, "All")],
           ["Lifecycle", list(f.lifecycleSegments, (s) => segMeta(s).label, "All")],
           ["Visits in file", visitCount ?? 0],
+          ["Leads in file", leadCount ?? 0],
         );
       }
       fRows.push(["", ""], ["Exported (UTC)", new Date().toISOString().slice(0, 19).replace("T", " ")]);
