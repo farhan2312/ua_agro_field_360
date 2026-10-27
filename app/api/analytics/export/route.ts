@@ -193,6 +193,10 @@ async function writeVisitsSheet(
   if (f.villages?.length) vc.push(Prisma.sql`upper(btrim(f."village")) = ANY(${f.villages})`);
   if (f.crops?.length) vc.push(Prisma.sql`f."visitCropTags" && ${f.crops}::text[]`);
   if (f.pests?.length) vc.push(Prisma.sql`f."pestTags" && ${f.pests}::text[]`);
+  // Honour the farmer-level Value / Lifecycle segment filters too, so a "Lifecycle = Lead" export
+  // yields a Visits sheet of ONLY those farmers' visits (e.g. mustard leads) — matching the sales sheets.
+  if (f.valueSegments?.length) vc.push(Prisma.sql`f."valueSegment" = ANY(${f.valueSegments})`);
+  if (f.lifecycleSegments?.length) vc.push(Prisma.sql`f."lifecycleSegment" = ANY(${f.lifecycleSegments})`);
   if (f.problems?.length) vc.push(Prisma.sql`v."currentProblem" && ${f.problems}::text[]`);
   const vDateFrom = f.visitFrom && /^\d{4}-\d{2}-\d{2}$/.test(f.visitFrom) ? new Date(`${f.visitFrom}T00:00:00Z`) : null;
   const vDateTo = f.visitTo && /^\d{4}-\d{2}-\d{2}$/.test(f.visitTo) ? new Date(`${f.visitTo}T23:59:59Z`) : null;
@@ -326,6 +330,8 @@ export async function GET(req: NextRequest) {
           ["— Visit filters —", ""],
           ["Visit date range", f.visitFrom || f.visitTo ? `${f.visitFrom ?? "start"} to ${f.visitTo ?? "today"}` : "All dates"],
           ["Current problem", list(f.problems, (p) => String(p), "Any")],
+          ["Value segment", list(f.valueSegments, (s) => segMeta(s).label, "All")],
+          ["Lifecycle", list(f.lifecycleSegments, (s) => segMeta(s).label, "All")],
           ["Visits in file", visitCount ?? 0],
         );
       }
