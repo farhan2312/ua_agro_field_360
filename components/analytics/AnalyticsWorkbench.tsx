@@ -226,8 +226,14 @@ export function AnalyticsWorkbench({ initial, facets, canChain = false, canExpor
           </>
         )}
         {filters.lens === "visit" && (
-          <MultiSel ph="Any problem" options={facets.problems.map((p) => [p.problem, `${p.problem} (${n(p.count)})`])}
-            selected={filters.problems ?? []} onToggle={(v) => toggleStr("problems", v)} onClear={() => apply({ problems: undefined })} />
+          <>
+            <MultiSel ph={`All ${VALUE_TITLE.toLowerCase()}s`} options={VALUE_SEGMENTS.map((s) => [s, segMeta(s).label])} titleOf={segDef}
+              selected={filters.valueSegments ?? []} onToggle={(v) => toggleStr("valueSegments", v)} onClear={() => apply({ valueSegments: undefined })} />
+            <MultiSel ph={`All ${LIFECYCLE_TITLE.toLowerCase()}`} options={LIFECYCLE_SEGMENTS.map((s) => [s, segMeta(s).label])} titleOf={segDef}
+              selected={filters.lifecycleSegments ?? []} onToggle={(v) => toggleStr("lifecycleSegments", v)} onClear={() => apply({ lifecycleSegments: undefined })} />
+            <MultiSel ph="Any problem" options={facets.problems.map((p) => [p.problem, `${p.problem} (${n(p.count)})`])}
+              selected={filters.problems ?? []} onToggle={(v) => toggleStr("problems", v)} onClear={() => apply({ problems: undefined })} />
+          </>
         )}
         {activeFilterCount > 0 && <button type="button" onClick={clearAll} className="text-[12px] font-semibold text-[#C62828] hover:underline">Clear ({activeFilterCount})</button>}
       </div>
