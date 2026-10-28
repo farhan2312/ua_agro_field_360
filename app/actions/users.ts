@@ -191,6 +191,9 @@ export async function saveUser(
       workEmail: input.workEmail.trim() || null,
       territory: input.territory.trim() || null,
       active: input.active,
+      // Reactivating here must also clear a REJECTED approval flag — login refuses REJECTED accounts
+      // regardless of `active`, so without this a reactivated rejected account still couldn't sign in.
+      ...(input.active ? { approvalStatus: "APPROVED" as const } : {}),
     };
     if (isRoleKey(input.roleKey)) {
       const [gradA, gradB] = ROLE_GRAD[input.roleKey];
