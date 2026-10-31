@@ -10,6 +10,7 @@ import {
   parseCriteria, resolveClusterCount, resolveClusterIds, scopedCriteriaWhere,
   hasConditions, type ClusterCriteria,
 } from "@/lib/cluster-rules";
+import { clusterCampaignLock, clusterCampaignLocks } from "@/lib/cluster-locks";
 import { getScope, canManage, getActor, farmerScopeWhere } from "@/lib/scope";
 import { asCoupons } from "@/lib/campaign-phases";
 import { logAudit } from "@/lib/audit";
@@ -73,6 +74,9 @@ export interface ClusterVM {
   createdBy: string;
   createdByCode: string;
   createdAt: string; // ISO — when the cluster was created
+  criteria: ClusterCriteria | null; // the parsed filter rule (for the edit modal; null = legacy/unparseable)
+  locked: boolean; // frozen — feeds a live (non-CLOSED) campaign, so it can't be edited or deleted
+  lockedBy: string | null; // name of a campaign holding the lock (for the UI message)
 }
 
 /** All saved clusters with LIVE counts (dynamic clusters re-resolve their rule). */
@@ -89,6 +93,8 @@ export async function listClustersWithCounts(): Promise<ClusterVM[]> {
     take: 100,
     select: { id: true, name: true, description: true, criteria: true, mode: true, origin: true, farmerIds: true, createdBy: true, createdByCode: true, createdAt: true },
   });
+  // Which of these clusters are frozen by a live campaign (so the UI hides Edit/Delete). One query.
+  const locks = await clusterCampaignLocks(clusters.map((c) => c.id));
   const rows = await mapLimit(clusters, 8, async (c) => {
     const crit = c.mode === "dynamic" ? parseCriteria(c.criteria) : null;
     const base: Prisma.FarmerWhereInput = crit ? scopedCriteriaWhere(crit) : { source: "REAL", id: { in: c.farmerIds } };
@@ -107,6 +113,9 @@ export async function listClustersWithCounts(): Promise<ClusterVM[]> {
       createdBy: c.createdBy ?? "",
       createdByCode: c.createdByCode ?? "",
       createdAt: c.createdAt.toISOString(),
+      criteria: parseCriteria(c.criteria), // full parsed rule (any mode) so the edit modal can prefill
+      locked: locks.has(c.id),
+      lockedBy: locks.get(c.id) ?? null,
     };
   });
   return fScope ? rows.filter((r) => r.count > 0) : rows;
@@ -120,6 +129,9 @@ export async function previewClusterCount(criteria: ClusterCriteria): Promise<nu
 
 export async function deleteCluster(id: number): Promise<{ ok: boolean; error?: string }> {
   const perm = await requireManager(); if (!perm.ok) return perm; // RMs/officers may view clusters, not delete them
+  // A cluster feeding a live campaign is frozen — deleting it would leave the campaign pointing at nothing.
+  const lock = await clusterCampaignLock(id);
+  if (lock) return { ok: false, error: `This cluster is used by the active campaign “${lock}”. Close that campaign before deleting the cluster.` };
   try {
     await prisma.cluster.delete({ where: { id } });
     revalidatePath("/campaigns");

@@ -12,7 +12,7 @@ import type { CropOption, PestOption } from "./CampaignsScreen";
 import {
   listClustersWithCounts, deleteCluster, previewClusterCount, type ClusterVM,
 } from "@/app/actions/campaigns";
-import { createClusterFromCriteria } from "@/app/actions/cluster-builder";
+import { createClusterFromCriteria, updateClusterFromCriteria } from "@/app/actions/cluster-builder";
 import { ChainNext } from "@/components/ChainNext";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { getClusterFarmers, exportClusterFarmersXlsx } from "@/app/actions/clusters";
@@ -35,6 +35,7 @@ export function ClustersTab({ initial, zones, crops, pests, stores, canChain, ca
 }) {
   const [list, setList] = useState(initial);
   const [building, setBuilding] = useState(false);
+  const [editing, setEditing] = useState<ClusterVM | null>(null);
   const [viewing, setViewing] = useState<ClusterVM | null>(null);
   const [pending, start] = useTransition();
   const { confirm, dialog } = useConfirm();
@@ -79,8 +80,17 @@ export function ClustersTab({ initial, zones, crops, pests, stores, canChain, ca
             </div>
             <div className="text-[13px] font-bold text-[#2E7D32]">{n(c.count)}</div>
             <div className="text-[11px] text-[#9E9E9E]">farmers</div>
+            {canCreate && c.locked && (
+              <span title={`In the active campaign “${c.lockedBy ?? ""}” — close it to edit or delete this cluster`}
+                className="inline-flex items-center gap-1 rounded-full bg-[#FFF3E0] px-2.5 py-1 text-[11px] font-semibold text-[#E65100]">
+                🔒 In campaign
+              </span>
+            )}
             <button type="button" onClick={() => setViewing(c)} className="rounded-[8px] bg-[#F5F7F5] px-3 py-1.5 text-[12px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9]">View</button>
-            {canCreate && (
+            {canCreate && !c.locked && (
+              <button type="button" onClick={() => setEditing(c)} disabled={pending} className="rounded-[8px] bg-[#E8F0FE] px-3 py-1.5 text-[12px] font-semibold text-[#1565C0] hover:bg-[#D7E6FD] disabled:opacity-50">Edit</button>
+            )}
+            {canCreate && !c.locked && (
               <button type="button" onClick={() => askRemove(c)} disabled={pending} className="rounded-[8px] bg-[#FDECEA] px-3 py-1.5 text-[12px] font-semibold text-[#C62828] hover:bg-[#F9DCD8] disabled:opacity-50">Delete</button>
             )}
           </div>
@@ -88,6 +98,7 @@ export function ClustersTab({ initial, zones, crops, pests, stores, canChain, ca
       </div>
 
       {building && <RuleBuilder zones={zones} crops={crops} pests={pests} stores={stores} canChain={canChain} onClose={() => setBuilding(false)} onCreated={() => { setBuilding(false); refresh(); }} />}
+      {editing && <RuleBuilder zones={zones} crops={crops} pests={pests} stores={stores} canChain={false} editing={editing} onClose={() => setEditing(null)} onCreated={() => { setEditing(null); refresh(); }} />}
       {viewing && <MembersModal cluster={viewing} onClose={() => setViewing(null)} />}
     </div>
   );
@@ -156,19 +167,34 @@ function CheckDropdown({ placeholder, options, selected, onToggle, onSelectAll, 
   );
 }
 
-/* ── Rule builder ── */
-function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain, onClose, onCreated }: { zones: string[]; crops: CropOption[]; pests: PestOption[]; stores: StoreOption[]; canChain: boolean; onClose: () => void; onCreated: () => void }) {
-  const [name, setName] = useState("");
-  const [createdId, setCreatedId] = useState<number | null>(null); // chain: cluster → project
-  const [valueSegs, setValueSegs] = useState<string[]>([]);
-  const [lifecycleSegs, setLifecycleSegs] = useState<string[]>([]);
-  const [crops, setCrops] = useState<string[]>([]);
-  const [cropSource, setCropSource] = useState<"any" | "sales" | "visit">("any"); // which crop record to match
-  const [pests, setPests] = useState<string[]>([]);
-  const [zoneList, setZoneList] = useState<string[]>([]);
-  const [storeIds, setStoreIds] = useState<number[]>([]);
-  const [q, setQ] = useState("");
-  const [waOptIn, setWaOptIn] = useState(false);
+/* ── Rule builder ── (also the full-edit modal when `editing` is passed) */
+function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain, editing, onClose, onCreated }: { zones: string[]; crops: CropOption[]; pests: PestOption[]; stores: StoreOption[]; canChain: boolean; editing?: ClusterVM; onClose: () => void; onCreated: () => void }) {
+  const seed = editing?.criteria ?? null;
+  // Prefill the crop picker + its source toggle from whichever crop field the saved rule used.
+  const seedCropSource: "any" | "sales" | "visit" = seed?.salesCrops?.length ? "sales" : seed?.visitCrops?.length ? "visit" : "any";
+  const seedCrops = seed?.salesCrops?.length ? seed.salesCrops : seed?.visitCrops?.length ? seed.visitCrops : seed?.cropTags ?? [];
+  // Rule conditions this builder has no control for (spend tier, villages, category, legacy segments…)
+  // are carried through an edit untouched, so a "full edit" never silently drops them. explicitIds
+  // (hand-picked static membership) is intentionally not carried — editing re-defines the rule.
+  const carry = useMemo<Partial<ClusterCriteria>>(() => {
+    if (!seed) return {};
+    const { valueSegments, lifecycleSegments, salesCrops, visitCrops, cropTags, pestTags, zones: _z, zone, storeIds: _s, q: _q, whatsappOptIn, explicitIds, ...rest } = seed;
+    void valueSegments; void lifecycleSegments; void salesCrops; void visitCrops; void cropTags; void pestTags; void _z; void zone; void _s; void _q; void whatsappOptIn; void explicitIds;
+    return rest;
+  }, [seed]);
+  const hasCarry = Object.keys(carry).length > 0;
+
+  const [name, setName] = useState(editing?.name ?? "");
+  const [createdId, setCreatedId] = useState<number | null>(null); // chain: cluster → project (create only)
+  const [valueSegs, setValueSegs] = useState<string[]>(seed?.valueSegments ?? []);
+  const [lifecycleSegs, setLifecycleSegs] = useState<string[]>(seed?.lifecycleSegments ?? []);
+  const [crops, setCrops] = useState<string[]>(seedCrops);
+  const [cropSource, setCropSource] = useState<"any" | "sales" | "visit">(seedCropSource); // which crop record to match
+  const [pests, setPests] = useState<string[]>(seed?.pestTags ?? []);
+  const [zoneList, setZoneList] = useState<string[]>(seed?.zones ?? (seed?.zone ? [seed.zone] : []));
+  const [storeIds, setStoreIds] = useState<number[]>(seed?.storeIds ?? []);
+  const [q, setQ] = useState(seed?.q ?? "");
+  const [waOptIn, setWaOptIn] = useState(!!seed?.whatsappOptIn);
   const [count, setCount] = useState<number | null>(null);
   const [counting, setCounting] = useState(false);
   const [saving, start] = useTransition();
@@ -182,6 +208,7 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
   );
 
   const criteria = (): ClusterCriteria => ({
+    ...carry, // preserve edit-only conditions the builder can't show (spend tier, villages, …)
     valueSegments: valueSegs.length ? valueSegs : undefined,
     lifecycleSegments: lifecycleSegs.length ? lifecycleSegs : undefined,
     // Route the picked crops to the chosen source: sales bought / seen on a visit / either.
@@ -196,7 +223,7 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
     q: q.trim() || undefined,
     whatsappOptIn: waOptIn || undefined,
   });
-  const hasAny = valueSegs.length || lifecycleSegs.length || crops.length || pests.length || zoneList.length || storeIds.length || q.trim() || waOptIn;
+  const hasAny = valueSegs.length || lifecycleSegs.length || crops.length || pests.length || zoneList.length || storeIds.length || q.trim() || waOptIn || hasCarry;
 
   // Debounced live count preview.
   useEffect(() => {
@@ -219,10 +246,12 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
   const save = () => {
     setErr(null);
     start(async () => {
-      const res = await createClusterFromCriteria({ name, criteria: criteria(), origin: "segment", mode: "dynamic" });
+      const res = editing
+        ? await updateClusterFromCriteria({ id: editing.id, name, criteria: criteria() })
+        : await createClusterFromCriteria({ name, criteria: criteria(), origin: "segment", mode: "dynamic" });
       if (res.ok) {
-        // Chain: offer the hop to the next pipeline step (central/sysadmin only).
-        if (canChain && res.id != null) setCreatedId(res.id);
+        // Chain (create only): offer the hop to the next pipeline step (central/sysadmin only).
+        if (!editing && canChain && res.id != null) setCreatedId(res.id);
         else onCreated();
       } else setErr(res.error ?? "Failed");
     });
@@ -230,7 +259,7 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
 
   return (
     <Modal open onClose={createdId != null ? onCreated : onClose} className="max-w-[560px]">
-      <ModalHeader eyebrow="Cluster" eyebrowColor="#2E7D32" title="Build a cluster" subtitle="Pick filters — membership stays live" onClose={createdId != null ? onCreated : onClose} />
+      <ModalHeader eyebrow={editing ? "Cluster · Edit" : "Cluster"} eyebrowColor="#2E7D32" title={editing ? "Edit cluster" : "Build a cluster"} subtitle={editing ? "Change anything — the new rule saves live" : "Pick filters — membership stays live"} onClose={createdId != null ? onCreated : onClose} />
       <div className="max-h-[68vh] overflow-y-auto px-5 py-4">
         {createdId != null ? (
           <ChainNext message={`Cluster "${name.trim()}" created`} nextLabel="Next: create a project →"
@@ -333,7 +362,7 @@ function RuleBuilder({ zones, crops: cropOpts, pests: pestOpts, stores, canChain
         {err && <div className="mt-2 text-[12px] text-[#C62828]">{err}</div>}
         <div className="mt-4 flex justify-end gap-2">
           <button type="button" onClick={onClose} className="rounded-[10px] border border-[#E0E0E0] px-4 py-2 text-[13px] font-semibold text-[#616161]">Cancel</button>
-          <button type="button" onClick={save} disabled={saving || !name.trim() || !hasAny || !count} className="rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Create cluster"}</button>
+          <button type="button" onClick={save} disabled={saving || !name.trim() || !hasAny || !count} className="rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : editing ? "Save changes" : "Create cluster"}</button>
         </div>
         </>)}
       </div>
