@@ -845,6 +845,14 @@ model Visit {
   reviewedByName String?
   reviewedByCode String?
   reviewedByRole String? // roleKey of the reviewer at sign-off
+  reviewRating   Int? // optional 1–5 quality rating given at review
+  // First sign-off time — drives turnaround / SLA. Edits, un-review and re-review never move it.
+  firstReviewedAt DateTime?
+  // "Needs follow-up" flag raised at review. Raising it creates an Action (reviewFlagActionId); the flag
+  // stays OPEN until that Action is signed off in the Action Registry (completeAction clears it).
+  reviewFlagged        Boolean   @default(false)
+  reviewFlagActionId   Int?
+  reviewFlagResolvedAt DateTime?
 
   source    DataSource @default(DEMO)
   createdAt DateTime   @default(now())
@@ -853,6 +861,8 @@ model Visit {
   @@index([farmerId])
   @@index([storeId])
   @@index([visitedAt]) // recent-visit sorts (dashboard, visit repository)
+  @@index([reviewFlagged]) // review queue "Flagged" filter
+  @@index([reviewFlagActionId]) // action sign-off → resolve the visit's flag
   @@index([officerName]) // per-officer dashboard + repository filters
   @@index([reviewedAt]) // reviewed/unreviewed filter + pending-review counts
 }
@@ -886,6 +896,27 @@ model Action {
   @@index([storeId, status])
   @@index([status, dueDate])
   @@index([farmerId])
+}
+
+/// Immutable audit trail of visit review actions — one row per review / edit / un-review / flag change,
+/// holding the state AFTER that change (so any prior version is retrievable). Append-only: no code path
+/// updates or deletes these rows. visitId is a loose id (no FK) so the trail survives a visit deletion.
+model VisitReviewRevision {
+  id           Int      @id @default(autoincrement())
+  visitId      Int
+  // REVIEWED | EDITED | UNREVIEWED | FLAGGED | UNFLAGGED | FLAG_RESOLVED | FLAG_REOPENED
+  action       String
+  note         String?  @db.Text
+  rating       Int?
+  flagged      Boolean  @default(false)
+  flagActionId Int?
+  actorName    String?
+  actorCode    String?
+  actorRole    String?
+  createdAt    DateTime @default(now())
+
+  @@index([visitId])
+  @@index([createdAt])
 }
 
 /// Audit log of an action's working comments — every edit is a row (who + when + text).

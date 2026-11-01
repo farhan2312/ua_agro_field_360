@@ -152,7 +152,7 @@ export async function createUserAction(
 const EMPLOYEE_CODE_COLUMNS: [table: string, column: string][] = [
   ["Action", "createdByCode"], ["Action", "completedByCode"],
   ["ActionComment", "authorCode"],
-  ["Visit", "recordedByCode"], ["Visit", "reviewedByCode"],
+  ["Visit", "recordedByCode"], ["Visit", "reviewedByCode"], ["VisitReviewRevision", "actorCode"],
   ["CampaignMember", "reachedByCode"],
   ["CampaignCaller", "assignedByCode"], ["CampaignHelper", "assignedByCode"],
   ["CampaignPhaseAdvance", "byCode"],
