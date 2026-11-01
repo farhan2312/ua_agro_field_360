@@ -4,7 +4,7 @@ import type { ReportStats, ReportSummary, SummaryBullet, Tally, VisitRef } from 
 
 /** Full weekly report (server-rendered). Every cited visit links into the review queue drawer. */
 
-const CARD = "rounded-[14px] border border-black/[0.04] bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]";
+const CARD = "print-avoid rounded-[14px] border border-black/[0.04] bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]";
 const H = "mb-3 text-[14.5px] font-bold text-[#1A1C1A]";
 const pct = (n: number) => `${Math.round(n)}%`;
 const vid = (id: number) => `VIS-${String(id).padStart(4, "0")}`;

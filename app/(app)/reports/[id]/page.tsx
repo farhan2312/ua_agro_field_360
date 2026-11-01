@@ -7,7 +7,7 @@ import { canAccess } from "@/lib/roles";
 import { istYmd, weekFromStart } from "@/lib/weekly-report";
 import type { ReportStats, ReportSummary } from "@/lib/report-types";
 import { ReportView } from "@/components/reports/ReportView";
-import { RegenerateButton } from "@/components/reports/ReportAdminButtons";
+import { PrintButton, RegenerateButton } from "@/components/reports/ReportAdminButtons";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // "Regenerate" builds inline
@@ -30,14 +30,22 @@ export default async function ReportDetailPage({ params }: { params: { id: strin
 
   return (
     <div className="animate-[fadeUp_0.4s_ease-out]">
-      <Link href={role === "regional" ? "/reports" : `/reports?week=${week.startYmd}`} prefetch={false} className="mb-3 inline-flex items-center gap-1.5 text-[13px] text-[#757575] hover:text-[#2E7D32]">← All reports</Link>
+      <Link href={role === "regional" ? "/reports" : `/reports?week=${week.startYmd}`} prefetch={false} className="no-print mb-3 inline-flex items-center gap-1.5 text-[13px] text-[#757575] hover:text-[#2E7D32]">← All reports</Link>
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="text-[11px] font-bold uppercase tracking-[0.6px] text-[#2E7D32]">Weekly visit review report</div>
           <div className="text-[20px] font-bold text-[#1A1C1A]">{row.rmName}</div>
           <div className="text-[12.5px] text-[#757575]">{week.label}{row.stats ? ` · ${(row.stats as unknown as ReportStats).storeCount} stores` : ""}</div>
         </div>
-        {session.isAdmin && <RegenerateButton id={row.id} />}
+        <div className="no-print flex flex-wrap items-center gap-2">
+          {row.status === "DONE" && (
+            <>
+              <a href={`/api/reports/${row.id}/export`} className="rounded-[10px] bg-[#1B5E20] px-3.5 py-2 text-[12.5px] font-semibold text-white hover:bg-[#2E7D32]">⬇ Excel</a>
+              <PrintButton />
+            </>
+          )}
+          {session.isAdmin && <RegenerateButton id={row.id} />}
+        </div>
       </div>
 
       {row.status === "DONE" && row.stats ? (

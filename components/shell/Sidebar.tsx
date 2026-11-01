@@ -64,7 +64,7 @@ export function Sidebar({
   const { main, sales, admin, showSalesGroup, showAdminGroup } = visibleNav(role);
 
   return (
-    <nav className="fixed inset-y-0 left-0 z-20 hidden w-64 flex-col text-white shadow-sidebar bg-gradient-to-b from-brand-900 to-brand-950 lg:flex">
+    <nav className="no-print fixed inset-y-0 left-0 z-20 hidden w-64 flex-col text-white shadow-sidebar bg-gradient-to-b from-brand-900 to-brand-950 lg:flex">
       {/* Brand */}
       <div className="flex items-center gap-3.5 border-b border-white/[0.08] px-[22px] pt-6 pb-5">
         <img

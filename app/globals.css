@@ -66,3 +66,13 @@
   background: #e8efe6;
   font-family: var(--font-dm-sans), system-ui, sans-serif;
 }
+
+/* Print / "Save as PDF" (weekly reports): drop the app chrome, keep cards whole across pages. */
+@media print {
+  .no-print { display: none !important; }
+  .print-flat { margin-left: 0 !important; }
+  .print-flat main { padding: 0 !important; overflow: visible !important; }
+  .print-avoid { break-inside: avoid; }
+  body { background: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  @page { margin: 12mm; }
+}

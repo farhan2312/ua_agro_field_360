@@ -6,6 +6,11 @@ import { generateLastWeekNow, regenerateReport } from "@/app/actions/weekly-repo
 
 const BTN = "rounded-[10px] border border-[#2E7D32] px-3.5 py-2 text-[12.5px] font-semibold text-[#2E7D32] hover:bg-[#E8F5E9] disabled:opacity-50";
 
+/** Print / Save as PDF — the browser's print dialog; app chrome is hidden by the @media print rules. */
+export function PrintButton() {
+  return <button type="button" className={BTN} onClick={() => window.print()}>🖨 Print / Save as PDF</button>;
+}
+
 /** Admin: build last week's reports now. */
 export function GenerateNowButton() {
   const router = useRouter();

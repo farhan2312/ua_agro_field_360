@@ -38,7 +38,7 @@ export function Header({ role, counts, unreadNotifications }: { role: RoleKey; c
   const isAdmin = role === "sysadmin";
 
   return (
-    <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-3 border-b border-line-warm bg-white px-4 lg:px-8">
+    <header className="no-print sticky top-0 z-10 flex h-16 items-center justify-between gap-3 border-b border-line-warm bg-white px-4 lg:px-8">
       <div className="min-w-0">
         <div className="truncate text-lg font-bold text-ink lg:text-xl">{title}</div>
         {subtitle && <div className="mt-px truncate text-[11.5px] text-ink-muted">{subtitle}</div>}

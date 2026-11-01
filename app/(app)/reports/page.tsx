@@ -8,6 +8,7 @@ import { istYmd, weekFromStart } from "@/lib/weekly-report";
 import { getReviewSettings } from "@/lib/review-settings";
 import type { ReportStats } from "@/lib/report-types";
 import { GenerateNowButton } from "@/components/reports/ReportAdminButtons";
+import { ReportsTabs } from "@/components/reports/ReportsTabs";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // "Generate now" builds reports inline
@@ -75,6 +76,7 @@ export default async function ReportsPage({ searchParams }: { searchParams?: { w
     const rows = session ? (await prisma.weeklyReport.findMany({ where: { rmUserId: session.userId }, orderBy: { weekStart: "desc" }, take: 52 }).catch(() => [])) as unknown as Row[] : [];
     return (
       <div className="animate-[fadeUp_0.4s_ease-out]">
+        <ReportsTabs active="reports" showCompare={false} />
         <p className="mb-3 text-[12.5px] text-[#757575]">{schedule}</p>
         {rows.length ? <ReportTable rows={rows} showRm={false} /> : (
           <div className={`${CARD} px-4 py-12 text-center text-[13px] text-[#9E9E9E]`}>
@@ -99,6 +101,7 @@ export default async function ReportsPage({ searchParams }: { searchParams?: { w
 
   return (
     <div className="animate-[fadeUp_0.4s_ease-out]">
+      <ReportsTabs active="reports" showCompare />
       <div className="mb-3 flex flex-wrap items-center gap-2">
         {weeks.map((w) => (
           <Link key={w} href={`/reports?week=${w}`} prefetch={false}
@@ -106,7 +109,12 @@ export default async function ReportsPage({ searchParams }: { searchParams?: { w
             {weekFromStart(w).label}
           </Link>
         ))}
-        {session?.isAdmin && <span className="ml-auto"><GenerateNowButton /></span>}
+        <span className="ml-auto flex flex-wrap items-center gap-2">
+          {selected && rows.length > 0 && (
+            <a href={`/api/reports/week/${selected}/export`} className="rounded-[10px] bg-[#1B5E20] px-3.5 py-2 text-[12.5px] font-semibold text-white hover:bg-[#2E7D32]">⬇ Excel (all regions)</a>
+          )}
+          {session?.isAdmin && <GenerateNowButton />}
+        </span>
       </div>
       <p className="mb-3 text-[12.5px] text-[#757575]">{schedule}</p>
 
