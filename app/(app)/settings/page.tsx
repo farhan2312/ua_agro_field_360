@@ -14,6 +14,8 @@ import { SettingsTabs } from "@/components/settings/SettingsTabs";
 import { StoreTagsCard } from "@/components/settings/StoreTagsCard";
 import { listStoreTags, type StoreTagVM } from "@/app/actions/store-tags";
 import { countVars } from "@/lib/wa-template-presets";
+import { getReviewSettingsState, type ReviewSettingsState } from "@/app/actions/review-settings";
+import { ReviewsReportsTab } from "@/components/settings/ReviewsReportsTab";
 
 export const dynamic = "force-dynamic";
 
@@ -94,6 +96,10 @@ export default async function SettingsPage() {
   let storeTags: StoreTagVM[] = [];
   try { storeTags = await listStoreTags(); } catch { /* DB unavailable */ }
 
+  // Reviews & Reports (SLA, report/digest schedule, Resend email) — null for non-admins.
+  let reviewState: ReviewSettingsState | null = null;
+  try { reviewState = await getReviewSettingsState(); } catch { /* DB unavailable */ }
+
   // WhatsApp template manager (create/submit/track approval via the Business Management API).
   let tplInit: { ready: boolean; missing: string[]; templates: WaTemplate[] } = { ready: false, missing: [], templates: [] };
   try {
@@ -140,6 +146,14 @@ export default async function SettingsPage() {
             />
           ),
         },
+        ...(reviewState
+          ? [{
+              key: "reviews",
+              label: "Reviews & Reports",
+              icon: "📋",
+              content: <ReviewsReportsTab initial={reviewState} />,
+            }]
+          : []),
         {
           key: "store-tags",
           label: "Store Tags",

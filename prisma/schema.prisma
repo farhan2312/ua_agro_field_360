@@ -898,6 +898,26 @@ model Action {
   @@index([farmerId])
 }
 
+/// Every outbound email attempt (Resend), mirroring SmsLog. `dedupeKey` guards scheduled sends (digest,
+/// report-ready, SLA alert) so a retried cron run never emails the same person twice; it doubles as
+/// Resend's Idempotency-Key. Not unique — a failed attempt may be retried under the same key.
+model EmailLog {
+  id         Int      @id @default(autoincrement())
+  to         String
+  subject    String
+  type       String // TEST | DIGEST | REPORT_READY | SLA_BREACH | GENERIC
+  userId     Int? // recipient user, when known
+  ok         Boolean  @default(false)
+  providerId String? // Resend email id
+  error      String?
+  dedupeKey  String?
+  sentByName String? // who triggered it (manual sends); null for scheduled jobs
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([dedupeKey])
+}
+
 /// In-app notification inbox (the header bell). One row per recipient per item. "Rolling" items (e.g. an
 /// RM's daily "N new visits to review") reuse ONE row via dedupeKey: each new event bumps `count`,
 /// refreshes the body and resurfaces it as unread, so the inbox never floods.
