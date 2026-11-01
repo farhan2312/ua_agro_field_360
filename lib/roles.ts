@@ -111,6 +111,7 @@ export const NAV_VISIBILITY: Record<string, (r: RoleKey) => boolean> = {
   newVisit: (r) => r === "regional" || r === "officer" || r === "sysadmin",
   visitRepo: () => true,
   visitReviews: (r) => r === "regional" || r === "central" || r === "sysadmin", // RM review queue (R1/R4) — officers never
+  weeklyReports: (r) => r === "regional" || r === "central" || r === "sysadmin", // RM: own reports; Central/admin: all (R4)
   actionRegistry: () => true, // follow-ups; scoped per role (officer→store, RM→district)
   farmers: () => true, // Farmer 360 — scoped per role (officer→store, RM→region)
   stores: (r) => r === "regional" || r === "central" || r === "sysadmin", // Store 360 — RM (own stores) + admins
@@ -197,6 +198,11 @@ export function viewTitle(
       return [
         "Visit Reviews",
         role === "regional" ? "Review your officers’ visits — pending first" : "Review queue across all regions — pending first",
+      ];
+    case "weeklyReports":
+      return [
+        "Weekly Reports",
+        role === "regional" ? "Your weekly visit review reports" : "Weekly visit review reports for every region",
       ];
     case "actionRegistry":
       return ["Action Registry", "Follow-ups assigned to stores, with due dates"];
