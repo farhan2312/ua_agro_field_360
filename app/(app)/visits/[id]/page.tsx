@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getScope, visitScopeWhere, getActor, canReviewVisit } from "@/lib/scope";
-import { roleLabel } from "@/lib/roles";
+import { getScope, visitScopeWhere, getActor } from "@/lib/scope";
 import { initials, avatarColor } from "@/lib/format";
 import { shortStoreName, storeColor } from "@/lib/store-utils";
 import {
@@ -16,7 +15,7 @@ import {
   recommendationsFor,
 } from "@/lib/visit-types";
 import { VisitDetailView, type VisitDetailData } from "@/components/visit-detail/VisitDetailView";
-import { REVIEW_ACTION_LABEL } from "@/lib/visit-review-types";
+import { loadReviewState } from "@/lib/visit-review-state";
 
 export const dynamic = "force-dynamic";
 
@@ -109,15 +108,6 @@ function displayDate(dateStr: string | null, visitedAt: Date | null): string {
       timeZone: "Asia/Kolkata",
     });
   return "";
-}
-
-/** "20 Aug 2026" in IST (Action due dates are stored as UTC midnight — pass "UTC" for those). */
-function istDate(d: Date, timeZone = "Asia/Kolkata"): string {
-  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone });
-}
-/** YYYY-MM-DD for a moment, in IST. */
-function ymdIst(d: Date): string {
-  return d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 }
 
 /** An empty-but-valid detail record (used when the DB is unavailable pre-seed). */
@@ -300,55 +290,14 @@ export default async function VisitDetailPage({
     visit.landHoldingUnit ||
     (visit.farmer?.land != null ? `${visit.farmer.land} acres` : "");
 
-  // Review / sign-off: can the current user review this visit? (recorder / managing RM / admin)
+  // Review / sign-off state (eligibility, flag, history) — shared with the review-queue drawer.
   const actor = await getActor();
-  const canReview = canReviewVisit(scope, actor.code, { storeId: visit.storeId ?? visit.store?.id ?? null, byCode: visit.recordedByCode });
-  const reviewedBy = visit.reviewedByName
-    ? `${visit.reviewedByName}${visit.reviewedByCode ? ` (${visit.reviewedByCode})` : ""}${visit.reviewedByRole ? ` · ${roleLabel(visit.reviewedByRole as never)}` : ""}${visit.reviewedAt ? ` · ${istDate(visit.reviewedAt)}` : ""}`
-    : "";
-  // The review audit trail is for reviewers + admins only; the officer sees the current review state.
-  const showHistory = canReview || scope.role === "central" || scope.role === "sysadmin";
-  const [flagAction, revisions] = await Promise.all([
-    visit.reviewFlagActionId
-      ? prisma.action.findUnique({ where: { id: visit.reviewFlagActionId }, select: { id: true, dueDate: true } }).catch(() => null)
-      : Promise.resolve(null),
-    showHistory
-      ? prisma.visitReviewRevision.findMany({ where: { visitId: visit.id }, orderBy: { id: "desc" }, take: 100 }).catch(() => [])
-      : Promise.resolve(null),
-  ]);
-  // New-flag due date prefill: the officer's own follow-up date if it's still ahead, else a week out.
-  const todayIst = ymdIst(new Date());
-  const defaultFlagDue = visit.followUpDate && visit.followUpDate >= todayIst ? visit.followUpDate : ymdIst(new Date(Date.now() + 7 * 86_400_000));
+  const review = await loadReviewState({ ...visit, storeId: visit.storeId ?? visit.store?.id ?? null }, scope, actor.code);
 
   const data: VisitDetailData = {
     vid: `VIS-${String(visit.id).padStart(4, "0")}`,
     visitId: visit.id,
-    review: {
-      reviewed: visit.reviewedAt != null,
-      note: visit.reviewNote ?? "",
-      rating: visit.reviewRating,
-      reviewedBy,
-      canReview,
-      flag: {
-        open: visit.reviewFlagged,
-        actionId: visit.reviewFlagActionId,
-        due: flagAction ? istDate(flagAction.dueDate, "UTC") : "",
-        resolvedAt: visit.reviewFlagResolvedAt ? istDate(visit.reviewFlagResolvedAt) : "",
-      },
-      defaultFlagDue,
-      history: revisions
-        ? revisions.map((r) => ({
-            id: r.id,
-            action: r.action,
-            label: REVIEW_ACTION_LABEL[r.action] ?? r.action,
-            actor: `${r.actorName ?? "—"}${r.actorCode ? ` (${r.actorCode})` : ""}${r.actorRole ? ` · ${roleLabel(r.actorRole as never)}` : ""}`,
-            when: r.createdAt.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" }),
-            note: r.note ?? "",
-            rating: r.rating,
-            flagged: r.flagged,
-          }))
-        : null,
-    },
+    review,
     date: displayDate(visit.date, visit.visitedAt),
     followUpDate: visit.followUpDate
       ? (() => { const d = new Date(`${visit.followUpDate}T00:00:00`); return Number.isNaN(d.getTime()) ? visit.followUpDate! : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }); })()

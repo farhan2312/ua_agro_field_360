@@ -21,6 +21,7 @@ const SHORT: Record<NavId, string> = {
   dashboard: "Home",
   newVisit: "New",
   visitRepo: "Visits",
+  visitReviews: "Reviews",
   actionRegistry: "Actions",
   farmers: "Farmers",
   stores: "Stores",

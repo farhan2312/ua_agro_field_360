@@ -2,11 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { getScope, getActor, canReviewVisit } from "@/lib/scope";
+import { getScope, getActor, canReviewVisit, visitScopeWhere } from "@/lib/scope";
 import { logAudit } from "@/lib/audit";
 import { REVIEW_RATING_MAX, FLAG_ACTION_REASON, type ReviewInput } from "@/lib/visit-review-types";
-
-const RECENT_DAYS = 30; // window for the RM "pending reviews" badge — recent visits awaiting sign-off
 
 /**
  * Review a visit, or edit an existing review: optional comment, optional 1–5 rating, and the
@@ -102,6 +100,7 @@ export async function saveVisitReview(visitId: number, input: ReviewInput): Prom
   if (what) await logAudit("Visit", "UPDATE", `Visit #${visitId}: ${what}`, actor.name ?? undefined);
   revalidatePath(`/visits/${visitId}`);
   revalidatePath("/visits");
+  revalidatePath("/visit-reviews");
   if (raiseFlag || clearFlag) revalidatePath("/action-registry");
   return { ok: true };
 }
@@ -132,23 +131,20 @@ export async function unreviewVisit(visitId: number): Promise<{ ok: boolean; err
   await logAudit("Visit", "UPDATE", `Visit #${visitId}: removed review`, actor.name ?? undefined);
   revalidatePath(`/visits/${visitId}`);
   revalidatePath("/visits");
+  revalidatePath("/visit-reviews");
   return { ok: true };
 }
 
-/** RM badge: recent (last 30d) unreviewed visits in the manager's stores awaiting sign-off. */
+/**
+ * RM sidebar badge on "Visit Reviews": ALL unreviewed visits in the manager's stores (product decision:
+ * the whole backlog counts as pending, not just a recent window). Same scope as the queue itself.
+ */
 export async function pendingReviewCount(): Promise<number> {
   const scope = await getScope();
   if (scope.role !== "regional") return 0; // badge is for RMs
-  const ids = scope.managedStoreIds ?? [];
-  if (!ids.length) return 0;
-  const since = new Date(Date.now() - RECENT_DAYS * 86_400_000);
+  const vs = visitScopeWhere(scope);
+  if (vs === "none" || !vs) return 0;
   try {
-    return await prisma.visit.count({
-      where: {
-        reviewedAt: null,
-        OR: [{ storeId: { in: ids } }, { storeId: null, farmer: { storeId: { in: ids } } }],
-        AND: [{ OR: [{ visitedAt: { gte: since } }, { visitedAt: null, createdAt: { gte: since } }] }],
-      },
-    });
+    return await prisma.visit.count({ where: { AND: [{ reviewedAt: null }, vs] } });
   } catch { return 0; }
 }

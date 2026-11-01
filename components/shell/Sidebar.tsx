@@ -82,8 +82,8 @@ export function Sidebar({
       <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 py-4">
         {main.map((item) => (
           <NavLink key={item.id} item={item} active={active === item.href}
-            badge={item.id === "actionRegistry" ? overdueActions : item.id === "visitRepo" ? pendingReviews : item.id === "ghoshti" ? pendingGhoshti : undefined}
-            badgeTitle={item.id === "visitRepo" ? "awaiting review" : item.id === "ghoshti" ? "pending approval" : "overdue"} />
+            badge={item.id === "actionRegistry" ? overdueActions : item.id === "visitReviews" ? pendingReviews : item.id === "ghoshti" ? pendingGhoshti : undefined}
+            badgeTitle={item.id === "visitReviews" ? "awaiting review" : item.id === "ghoshti" ? "pending approval" : "overdue"} />
         ))}
 
         {showSalesGroup && (
