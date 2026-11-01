@@ -9,6 +9,7 @@ import { canAccess } from "@/lib/roles";
 import { SyncBadge } from "../ui";
 import { PlusIcon, ShieldIcon } from "../icons";
 import { ReportBugButton } from "./ReportBugButton";
+import { NotificationBell } from "./NotificationBell";
 
 export interface HeaderCounts {
   farmers: number;
@@ -17,7 +18,7 @@ export interface HeaderCounts {
   activeProjects: number;
 }
 
-export function Header({ role, counts }: { role: RoleKey; counts: HeaderCounts }) {
+export function Header({ role, counts, unreadNotifications }: { role: RoleKey; counts: HeaderCounts; unreadNotifications: number }) {
   const pathname = usePathname();
   const view = routeToView(pathname);
   let [title, subtitle] = viewTitle(view, role, {
@@ -58,6 +59,8 @@ export function Header({ role, counts }: { role: RoleKey; counts: HeaderCounts }
         </Link>
 
         <ReportBugButton />
+
+        <NotificationBell initialUnread={unreadNotifications} />
 
         {isAdmin && (
           <span className="inline-flex items-center gap-1.5 rounded-[20px] border border-gold-200 bg-orange-50 px-2.5 py-1.5 text-[11px] font-semibold text-orange lg:px-3.5">

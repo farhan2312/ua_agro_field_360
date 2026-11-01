@@ -898,6 +898,26 @@ model Action {
   @@index([farmerId])
 }
 
+/// In-app notification inbox (the header bell). One row per recipient per item. "Rolling" items (e.g. an
+/// RM's daily "N new visits to review") reuse ONE row via dedupeKey: each new event bumps `count`,
+/// refreshes the body and resurfaces it as unread, so the inbox never floods.
+model Notification {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  type      String // NEW_VISITS | REPORT_READY | SLA_BREACH | GENERIC
+  title     String
+  body      String?   @db.Text
+  href      String?
+  count     Int       @default(1)
+  dedupeKey String?   @unique
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @default(now()) // last EVENT time (rolling bumps set it) — deliberately not @updatedAt, so mark-read doesn't re-sort the inbox
+
+  @@index([userId, readAt])
+  @@index([userId, updatedAt])
+}
+
 /// Immutable audit trail of visit review actions — one row per review / edit / un-review / flag change,
 /// holding the state AFTER that change (so any prior version is retrievable). Append-only: no code path
 /// updates or deletes these rows. visitId is a loose id (no FK) so the trail survives a visit deletion.
