@@ -8,6 +8,11 @@ import { logAudit } from "@/lib/audit";
 import { checkEmail } from "@/lib/email-validate";
 import { emailConfig, emailLayout, esc, sendEmail, appUrl } from "@/lib/email";
 import { getReviewSettings, REVIEW_SETTING_KEYS, type ReviewSettings } from "@/lib/review-settings";
+import { rmReportEmail, rmDigestEmail, centralWeekEmail, centralSlaEmail } from "@/lib/review-emails";
+import { reviewBacklog } from "@/lib/review-jobs";
+import { istYmd, weekFromStart } from "@/lib/weekly-report";
+import type { ReportStats as Stats, ReportSummary as Summary } from "@/lib/report-types";
+import { SAMPLE_KINDS, type SampleKind } from "@/lib/review-sample-kinds";
 
 /** Settings → "Reviews & Reports". System Admin only (the real admin, even while viewing as a role). */
 async function requireAdmin(): Promise<boolean> {
@@ -82,6 +87,73 @@ export async function saveReviewSettings(input: ReviewSettings): Promise<{ ok: b
   revalidatePath("/settings");
   revalidatePath("/visit-reviews");
   return { ok: true };
+}
+
+/**
+ * Preview the real automatic emails: renders each chosen template from LIVE data (the latest week's
+ * reports, today's backlog) and sends it to the given addresses with a "[Sample]" subject. Ignores the
+ * on/off switch and never touches the dedupe keys, so it can't stop or duplicate a real send.
+ */
+export async function sendSampleEmails(addresses: string[], kinds: SampleKind[]): Promise<{ ok: boolean; sent?: number; results?: { to: string; label: string; ok: boolean; error?: string }[]; error?: string }> {
+  if (!(await requireAdmin())) return { ok: false, error: "Not authorised." };
+  const to: string[] = [];
+  for (const a of addresses.map((x) => x.trim()).filter(Boolean)) {
+    const c = checkEmail(a);
+    if (!c.ok || !c.normalized) return { ok: false, error: `${a}: ${c.error ?? "invalid address"}` };
+    if (!to.includes(c.normalized)) to.push(c.normalized);
+  }
+  if (!to.length) return { ok: false, error: "Enter at least one address." };
+  if (to.length > 5) return { ok: false, error: "Up to 5 addresses at a time." };
+  const want = SAMPLE_KINDS.filter((k) => kinds.includes(k.kind));
+  if (!want.length) return { ok: false, error: "Pick at least one email type." };
+
+  const s = await getReviewSettings();
+
+  // Latest week that has built reports; the sample RM = that week's busiest region.
+  const latest = await prisma.weeklyReport.findFirst({ where: { status: "DONE" }, orderBy: { weekStart: "desc" }, select: { weekStart: true } });
+  const weekRows = latest ? await prisma.weeklyReport.findMany({ where: { weekStart: latest.weekStart, status: "DONE" }, orderBy: { rmName: "asc" } }) : [];
+  const busiest = [...weekRows].sort((a, b) => (b.stats as unknown as Stats).totals.visits - (a.stats as unknown as Stats).totals.visits)[0];
+  const backlog = want.some((k) => k.kind === "RM_DIGEST" || k.kind === "CENTRAL_SLA") ? await reviewBacklog(s) : [];
+
+  const built: { label: string; subject: string; html: string }[] = [];
+  for (const k of want) {
+    if (k.kind === "RM_REPORT") {
+      if (!busiest) return { ok: false, error: "No weekly report has been built yet — generate one on Weekly Reports first." };
+      const m = rmReportEmail(busiest.stats as unknown as Stats, busiest.summary as unknown as Summary, busiest.id);
+      built.push({ label: k.label, ...m });
+    } else if (k.kind === "CENTRAL_WEEK") {
+      if (!weekRows.length) return { ok: false, error: "No weekly report has been built yet — generate one on Weekly Reports first." };
+      const ymd = istYmd(weekRows[0].weekStart);
+      const m = centralWeekEmail(weekFromStart(ymd).label, ymd, weekRows.map((d) => {
+        const t = (d.stats as unknown as Stats).totals;
+        return { rm: d.rmName, visits: t.visits, reviewedPct: t.reviewedPct, slaPct: t.slaPct, flagged: t.flagged, backlogOverdue: t.backlogOverdue };
+      }));
+      built.push({ label: k.label, ...m });
+    } else if (k.kind === "RM_DIGEST") {
+      const r = backlog.find((x) => busiest && x.userId === busiest.rmUserId && x.pending) ?? [...backlog].sort((a, b) => b.pending - a.pending)[0];
+      if (!r) return { ok: false, error: "No RM has stores mapped yet." };
+      const m = rmDigestEmail(r.rm, Math.max(r.pending, 1), r.overdue, s.slaHours, r.oldest);
+      built.push({ label: k.label, ...m });
+    } else {
+      const breached = backlog.filter((r) => r.overdue > 0).sort((a, b) => b.overdue - a.overdue);
+      const rows = breached.length ? breached : backlog.filter((r) => r.pending > 0).slice(0, 5).map((r) => ({ ...r, overdue: Math.max(r.overdue, 1) }));
+      if (!rows.length) return { ok: false, error: "No review backlog to show." };
+      const m = centralSlaEmail(rows, s.slaHours);
+      built.push({ label: k.label, ...m });
+    }
+  }
+
+  const actor = await getActor();
+  const results: { to: string; label: string; ok: boolean; error?: string }[] = [];
+  for (const addr of to)
+    for (const b of built) {
+      const res = await sendEmail({ to: addr, subject: `[Sample] ${b.subject}`, html: b.html, type: "TEST", sentByName: actor.name, force: true });
+      results.push({ to: addr, label: b.label, ok: res.ok, ...(res.ok ? {} : { error: res.error ?? "Send failed." }) });
+    }
+  await logAudit("Setting", "CONFIG", `Sent ${results.filter((r) => r.ok).length} sample review emails to ${to.join(", ")}`);
+  revalidatePath("/settings");
+  const sent = results.filter((r) => r.ok).length;
+  return { ok: sent > 0, sent, results, ...(sent ? {} : { error: results[0]?.error ?? "Send failed." }) };
 }
 
 /** Send one test email (ignores the on/off switch, so you can verify the setup before enabling). */

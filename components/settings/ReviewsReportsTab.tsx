@@ -3,7 +3,8 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { saveReviewSettings, sendTestEmail, type ReviewSettingsState } from "@/app/actions/review-settings";
+import { saveReviewSettings, sendTestEmail, sendSampleEmails, type ReviewSettingsState } from "@/app/actions/review-settings";
+import { SAMPLE_KINDS, type SampleKind } from "@/lib/review-sample-kinds";
 import type { ReviewSettings } from "@/lib/review-settings";
 
 const CARD = "rounded-[14px] border border-black/[0.04] bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]";
@@ -21,6 +22,10 @@ export function ReviewsReportsTab({ initial }: { initial: ReviewSettingsState })
   const [testTo, setTestTo] = useState(initial.myEmail);
   const [testing, startTest] = useTransition();
   const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [sampleTo, setSampleTo] = useState("");
+  const [sampleKinds, setSampleKinds] = useState<SampleKind[]>(SAMPLE_KINDS.map((k) => k.kind));
+  const [sampling, startSample] = useTransition();
+  const [sampleMsg, setSampleMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const { email, coverage, logs } = initial;
   const dirty = JSON.stringify(s) !== JSON.stringify(initial.settings);
   const set = <K extends keyof ReviewSettings>(k: K, v: ReviewSettings[K]) => { setS((p) => ({ ...p, [k]: v })); setSaveMsg(null); };
@@ -34,6 +39,15 @@ export function ReviewsReportsTab({ initial }: { initial: ReviewSettingsState })
     setTestMsg(null);
     const r = await sendTestEmail(testTo);
     setTestMsg(r.ok ? { ok: true, text: `Sent to ${testTo.trim()} — check the inbox (and spam).` } : { ok: false, text: r.error ?? "Send failed." });
+    router.refresh();
+  });
+  const sample = () => startSample(async () => {
+    setSampleMsg(null);
+    const r = await sendSampleEmails(sampleTo.split(/[,;\s]+/), sampleKinds);
+    const failed = r.results?.filter((x) => !x.ok) ?? [];
+    setSampleMsg(r.ok
+      ? { ok: !failed.length, text: `Sent ${r.sent} email${r.sent === 1 ? "" : "s"}${failed.length ? ` · ${failed.length} failed: ${failed[0].error}` : " — check the inboxes (and spam)."}` }
+      : { ok: false, text: r.error ?? "Send failed." });
     router.refresh();
   });
 
@@ -118,6 +132,26 @@ export function ReviewsReportsTab({ initial }: { initial: ReviewSettingsState })
           </div>
           {testMsg && <p className={`mt-1.5 text-[12px] font-semibold ${testMsg.ok ? "text-[#2E7D32]" : "text-[#C62828]"}`}>{testMsg.text}</p>}
           <p className="mt-1 text-[11px] text-[#9E9E9E]">Works even while automatic emails are off.</p>
+        </div>
+
+        <div className="mt-5 border-t border-[#F0F0F0] pt-4">
+          <label className={LABEL}>Preview the real emails</label>
+          <p className="mb-2 text-[11.5px] text-[#757575]">Sends the actual RM and Central emails, filled with live data (latest weekly reports, today’s backlog), marked “[Sample]”. Nobody else receives anything.</p>
+          <input className={INPUT} value={sampleTo} onChange={(e) => setSampleTo(e.target.value)} placeholder="Addresses, comma-separated (up to 5)" />
+          <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+            {SAMPLE_KINDS.map((k) => (
+              <label key={k.kind} className="flex cursor-pointer items-center gap-2 text-[12.5px] text-[#1A1C1A]">
+                <input type="checkbox" checked={sampleKinds.includes(k.kind)} className="h-4 w-4 accent-[#2E7D32]"
+                  onChange={() => setSampleKinds((cur) => (cur.includes(k.kind) ? cur.filter((x) => x !== k.kind) : [...cur, k.kind]))} />
+                {k.label}
+              </label>
+            ))}
+          </div>
+          <button type="button" onClick={sample} disabled={!email.ready || sampling || !sampleTo.trim() || !sampleKinds.length}
+            className="mt-2.5 rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#1B5E20] disabled:opacity-50">
+            {sampling ? "Sending…" : "Send sample emails"}
+          </button>
+          {sampleMsg && <p className={`mt-1.5 text-[12px] font-semibold ${sampleMsg.ok ? "text-[#2E7D32]" : "text-[#C62828]"}`}>{sampleMsg.text}</p>}
         </div>
       </div>
 

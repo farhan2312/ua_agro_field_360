@@ -121,8 +121,8 @@ export async function announceReports(now = new Date()): Promise<{ announced: nu
   return { announced, centralMailed };
 }
 
-/** RM pending digest (email) + Central SLA-breach alert (bell + email). Once per IST day. */
-export async function runDailyDigests(s: ReviewSettings, today: string): Promise<{ digests: number; slaRms: number }> {
+/** Every report RM's review backlog right now: pending, past-SLA, oldest pending date. */
+export async function reviewBacklog(s: ReviewSettings): Promise<(SlaRow & { userId: number; email: string | null })[]> {
   const rms = await listReportRms();
   const cutoff = new Date(Date.now() - s.slaHours * 3_600_000);
   const fmt = (d: Date) => d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
@@ -136,7 +136,12 @@ export async function runDailyDigests(s: ReviewSettings, today: string): Promise
     ]);
     rows.push({ rm: rm.name, userId: rm.userId, email: rm.workEmail, pending, overdue, oldest: oldest ? fmt(oldest.createdAt) : null });
   }
+  return rows;
+}
 
+/** RM pending digest (email) + Central SLA-breach alert (bell + email). Once per IST day. */
+export async function runDailyDigests(s: ReviewSettings, today: string): Promise<{ digests: number; slaRms: number }> {
+  const rows = await reviewBacklog(s);
   let digests = 0;
   for (const r of rows) {
     if (!r.pending || !r.email) continue;
