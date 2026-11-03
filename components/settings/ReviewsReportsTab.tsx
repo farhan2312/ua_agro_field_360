@@ -90,12 +90,12 @@ export function ReviewsReportsTab({ initial }: { initial: ReviewSettingsState })
         {email.ready ? (
           <dl className="mb-4 grid gap-x-6 gap-y-1.5 text-[12.5px] sm:grid-cols-[110px_1fr]">
             <dt className="text-[#9E9E9E]">Sends from</dt><dd className="font-semibold text-[#1A1C1A]">{email.from}</dd>
-            <dt className="text-[#9E9E9E]">Replies go to</dt><dd className="text-[#1A1C1A]">{email.replyTo || <span className="text-[#E65100]">not set — replies will be lost (set EMAIL_REPLY_TO)</span>}</dd>
+            <dt className="text-[#9E9E9E]">Replies go to</dt><dd className="text-[#1A1C1A]">{email.replyTo || <span className="text-[#757575]">No-reply — emails say “please do not reply”</span>}</dd>
             <dt className="text-[#9E9E9E]">Links open</dt><dd className="text-[#1A1C1A]">{email.appUrl}</dd>
           </dl>
         ) : (
           <p className="mb-4 rounded-[10px] bg-[#FFF8E1] px-3.5 py-2.5 text-[12.5px] text-[#8D6E00]">
-            Add <b>{email.missing.join(" and ")}</b> in Vercel → Project → Settings → Environment Variables, then redeploy. Optional: <b>EMAIL_REPLY_TO</b>.
+            Add <b>{email.missing.join(" and ")}</b> in Vercel → Project → Settings → Environment Variables, then redeploy (e.g. EMAIL_FROM = UA Field360 &lt;noreply@field360.uaagro.in&gt;).
           </p>
         )}
 

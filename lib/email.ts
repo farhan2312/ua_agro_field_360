@@ -5,8 +5,8 @@ import { getReviewSettings } from "@/lib/review-settings";
 /**
  * Outbound email via Resend (REST, no SDK). Env-only config, like ZapSMS / WhatsApp:
  *   RESEND_API_KEY   — Resend API key (sending access, restricted to the verified domain)
- *   EMAIL_FROM       — e.g. "Field360 <reports@field360.uaagro.in>" (domain must be verified in Resend)
- *   EMAIL_REPLY_TO   — optional; a monitored mailbox (the From address can't receive)
+ *   EMAIL_FROM       — e.g. "UA Field360 <noreply@field360.uaagro.in>" (domain must be verified in Resend)
+ *   EMAIL_REPLY_TO   — optional; leave unset for no-reply (the footer tells readers not to reply)
  *   APP_URL          — optional; links in emails (default https://field360.uaagro.in)
  * Automatic/scheduled email also needs the Settings switch (`email.enabled`) — off by default.
  * Every attempt is written to EmailLog. Plain module (not "use server").
@@ -119,6 +119,6 @@ export function emailLayout(o: { title: string; preheader?: string; bodyHtml: st
 <tr><td style="padding:24px 28px 6px;font-size:19px;font-weight:700">${esc(o.title)}</td></tr>
 <tr><td style="padding:6px 28px 14px;font-size:14px;line-height:1.55;color:#33373A">${o.bodyHtml}</td></tr>
 ${cta}
-<tr><td style="padding:22px 28px;font-size:11.5px;color:#8A8F8A;border-top:1px solid #EEF1EE">Automated message from Field360. Times are IST.</td></tr>
+<tr><td style="padding:22px 28px;font-size:11.5px;color:#8A8F8A;border-top:1px solid #EEF1EE">Automated message from Field360 — please do not reply; this inbox isn’t monitored. Times are IST.</td></tr>
 </table></td></tr></table></body></html>`;
 }

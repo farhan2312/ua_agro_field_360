@@ -333,7 +333,7 @@ export const TRAINING: TrainingTopic[] = [
     minutes: 4,
     steps: [
       { text: "Open Settings → “📋 Reviews & Reports”. Set the review SLA in hours (default 48), the day the reporting week starts, when the weekly report runs, and when the daily digest and SLA alert go out. All times are India time. Press “Save settings”." },
-      { text: "The Email card shows whether email is connected. If it says “Not configured”, add RESEND_API_KEY, EMAIL_FROM and EMAIL_REPLY_TO in Vercel’s Environment Variables and redeploy.", warn: "Email only works once the sending domain (field360.uaagro.in) is verified in Resend — the DNS records are added in Hostinger." },
+      { text: "The Email card shows whether email is connected. If it says “Not configured”, add RESEND_API_KEY and EMAIL_FROM (a no-reply address such as noreply@field360.uaagro.in) in Vercel’s Environment Variables and redeploy.", warn: "Email only works once the sending domain (field360.uaagro.in) is verified in Resend — the DNS records are added in Hostinger." },
       { text: "Send yourself a test email. Check it arrives in the inbox (not spam); in Gmail, “Show original” should show SPF, DKIM and DMARC all as PASS." },
       { text: "Then tick “Send automatic emails” and save. It’s off by default so nothing goes out until you’ve confirmed the setup works." },
       { text: "“Who can receive email” shows how many RMs, Central and Admin users have a valid Work email — use “Fix missing emails in Users” to fill the gaps. “Recent emails” lists the last sends and any failures." },
