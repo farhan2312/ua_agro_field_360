@@ -1,5 +1,13 @@
 import { emailLayout, esc, appUrl } from "@/lib/email";
+import { istYmd } from "@/lib/weekly-report";
 import type { ReportStats, ReportSummary } from "@/lib/report-types";
+
+/** Backlog numbers in emails/alerts count only visits logged in this many days (the queue still shows all). */
+export const EMAIL_WINDOW_DAYS = 30;
+const WINDOW = EMAIL_WINDOW_DAYS;
+/** Queue link limited to the same window (the queue's date filter is by visit date). */
+const queueHref = (status: "pending" | "overdue") =>
+  appUrl(`/visit-reviews?status=${status}&sort=oldest&from=${istYmd(new Date(Date.now() - WINDOW * 86_400_000))}`);
 
 /** HTML bodies for the Visit Review emails (all wrapped in the shared Field360 layout). */
 
@@ -40,7 +48,7 @@ export function centralWeekEmail(weekLabel: string, weekYmd: string, rows: Centr
   const totalVisits = rows.reduce((a, r) => a + r.visits, 0);
   const body = `<p style="margin:0 0 10px">Weekly visit review reports for <b>${esc(weekLabel)}</b> are ready for ${rows.length} region${rows.length === 1 ? "" : "s"} (${totalVisits.toLocaleString("en-IN")} visits).</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:12.5px;border-collapse:collapse">
-<tr style="background:#F5F8F5;color:#6B706B"><th align="left" style="padding:7px 8px">Regional Manager</th><th align="right" style="padding:7px 8px">Visits</th><th align="right" style="padding:7px 8px">Reviewed</th><th align="right" style="padding:7px 8px">Within SLA</th><th align="right" style="padding:7px 8px">Follow-ups</th><th align="right" style="padding:7px 8px">Overdue now</th></tr>${tr}</table>`;
+<tr style="background:#F5F8F5;color:#6B706B"><th align="left" style="padding:7px 8px">Regional Manager</th><th align="right" style="padding:7px 8px">Visits</th><th align="right" style="padding:7px 8px">Reviewed</th><th align="right" style="padding:7px 8px">Within SLA</th><th align="right" style="padding:7px 8px">Follow-ups</th><th align="right" style="padding:7px 8px">Overdue now (last ${WINDOW}d)</th></tr>${tr}</table>`;
   return {
     subject: `Weekly visit review reports · ${weekLabel}`,
     html: emailLayout({ title: "Weekly reports are ready", preheader: `${rows.length} regions · ${totalVisits} visits`, bodyHtml: body, cta: { label: "Open all reports", href: appUrl(`/reports?week=${weekYmd}`) } }),
@@ -49,12 +57,14 @@ export function centralWeekEmail(weekLabel: string, weekYmd: string, rows: Centr
 
 /** RM: daily pending digest. */
 export function rmDigestEmail(rmName: string, pending: number, overdue: number, slaHours: number, oldest: string | null) {
-  const body = `<p style="margin:0 0 8px">Hi ${esc(rmName.split(" ")[0] ?? rmName)}, you have <b>${pending.toLocaleString("en-IN")} visit${pending === 1 ? "" : "s"}</b> waiting for your review${overdue ? ` — <b style="color:#C62828">${overdue.toLocaleString("en-IN")} past the ${slaHours}h SLA</b>` : ""}.</p>
-${oldest ? `<p style="margin:0 0 8px;color:#6B706B">The oldest is from ${esc(oldest)}.</p>` : ""}
+  const body = `<p style="margin:0 0 8px">Hi ${esc(rmName.split(" ")[0] ?? rmName)}, you have <b>${pending.toLocaleString("en-IN")} visit${pending === 1 ? "" : "s"}</b> from the last ${WINDOW} days waiting for your review${overdue ? ` — <b style="color:#C62828">${overdue.toLocaleString("en-IN")} past the ${slaHours}h SLA</b>` : ""}.</p>
+${oldest ? `<p style="margin:0 0 8px;color:#6B706B">The oldest of these was logged on ${esc(oldest)}.</p>` : ""}
 <p style="margin:0">A few minutes a day keeps the queue clear and gives your officers timely feedback.</p>`;
   return {
-    subject: overdue ? `${overdue} visit${overdue === 1 ? "" : "s"} past review SLA · ${pending} pending` : `${pending} visit${pending === 1 ? "" : "s"} awaiting your review`,
-    html: emailLayout({ title: "Visits awaiting your review", preheader: `${pending} pending, ${overdue} overdue`, bodyHtml: body, cta: { label: overdue ? "Review overdue visits" : "Open Visit Reviews", href: appUrl(`/visit-reviews?status=${overdue ? "overdue" : "pending"}&sort=oldest`) } }),
+    subject: overdue
+      ? `${overdue.toLocaleString("en-IN")} visit${overdue === 1 ? "" : "s"} past review SLA · ${pending.toLocaleString("en-IN")} pending (last ${WINDOW} days)`
+      : `${pending.toLocaleString("en-IN")} visit${pending === 1 ? "" : "s"} awaiting your review`,
+    html: emailLayout({ title: "Visits awaiting your review", preheader: `${pending} pending, ${overdue} overdue`, bodyHtml: body, cta: { label: overdue ? "Review overdue visits" : "Open Visit Reviews", href: queueHref(overdue ? "overdue" : "pending") } }),
   };
 }
 
@@ -65,11 +75,11 @@ export function centralSlaEmail(rows: SlaRow[], slaHours: number) {
   const total = rows.reduce((a, r) => a + r.overdue, 0);
   const tr = rows.map((r) =>
     `<tr><td style="padding:7px 8px;border-bottom:1px solid #EEF1EE">${esc(r.rm)}</td><td style="padding:7px 8px;border-bottom:1px solid #EEF1EE;text-align:right;color:#C62828;font-weight:700">${r.overdue}</td><td style="padding:7px 8px;border-bottom:1px solid #EEF1EE;text-align:right">${r.pending}</td><td style="padding:7px 8px;border-bottom:1px solid #EEF1EE">${esc(r.oldest ?? "—")}</td></tr>`).join("");
-  const body = `<p style="margin:0 0 10px"><b>${total.toLocaleString("en-IN")} visit${total === 1 ? "" : "s"}</b> across ${rows.length} region${rows.length === 1 ? "" : "s"} ${total === 1 ? "is" : "are"} past the ${slaHours}h review SLA.</p>
+  const body = `<p style="margin:0 0 10px"><b>${total.toLocaleString("en-IN")} visit${total === 1 ? "" : "s"}</b> logged in the last ${WINDOW} days across ${rows.length} region${rows.length === 1 ? "" : "s"} ${total === 1 ? "is" : "are"} past the ${slaHours}h review SLA.</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:12.5px;border-collapse:collapse">
 <tr style="background:#F5F8F5;color:#6B706B"><th align="left" style="padding:7px 8px">Regional Manager</th><th align="right" style="padding:7px 8px">Overdue</th><th align="right" style="padding:7px 8px">Pending</th><th align="left" style="padding:7px 8px">Oldest</th></tr>${tr}</table>`;
   return {
-    subject: `Review SLA: ${total} overdue visit${total === 1 ? "" : "s"} across ${rows.length} region${rows.length === 1 ? "" : "s"}`,
-    html: emailLayout({ title: "Visits past the review SLA", preheader: `${total} overdue`, bodyHtml: body, cta: { label: "Open the review queue", href: appUrl("/visit-reviews?status=overdue&sort=oldest") } }),
+    subject: `Review SLA: ${total.toLocaleString("en-IN")} overdue visit${total === 1 ? "" : "s"} across ${rows.length} region${rows.length === 1 ? "" : "s"} (last ${WINDOW} days)`,
+    html: emailLayout({ title: "Visits past the review SLA", preheader: `${total} overdue`, bodyHtml: body, cta: { label: "Open the review queue", href: queueHref("overdue") } }),
   };
 }

@@ -9,7 +9,7 @@ import { checkEmail } from "@/lib/email-validate";
 import { emailConfig, emailLayout, esc, sendEmail, appUrl } from "@/lib/email";
 import { getReviewSettings, REVIEW_SETTING_KEYS, type ReviewSettings } from "@/lib/review-settings";
 import { rmReportEmail, rmDigestEmail, centralWeekEmail, centralSlaEmail } from "@/lib/review-emails";
-import { reviewBacklog } from "@/lib/review-jobs";
+import { reviewBacklog, centralWeekRows } from "@/lib/review-jobs";
 import { istYmd, weekFromStart } from "@/lib/weekly-report";
 import type { ReportStats as Stats, ReportSummary as Summary } from "@/lib/report-types";
 import { SAMPLE_KINDS, type SampleKind } from "@/lib/review-sample-kinds";
@@ -124,10 +124,7 @@ export async function sendSampleEmails(addresses: string[], kinds: SampleKind[])
     } else if (k.kind === "CENTRAL_WEEK") {
       if (!weekRows.length) return { ok: false, error: "No weekly report has been built yet — generate one on Weekly Reports first." };
       const ymd = istYmd(weekRows[0].weekStart);
-      const m = centralWeekEmail(weekFromStart(ymd).label, ymd, weekRows.map((d) => {
-        const t = (d.stats as unknown as Stats).totals;
-        return { rm: d.rmName, visits: t.visits, reviewedPct: t.reviewedPct, slaPct: t.slaPct, flagged: t.flagged, backlogOverdue: t.backlogOverdue };
-      }));
+      const m = centralWeekEmail(weekFromStart(ymd).label, ymd, await centralWeekRows(weekRows));
       built.push({ label: k.label, ...m });
     } else if (k.kind === "RM_DIGEST") {
       const r = backlog.find((x) => busiest && x.userId === busiest.rmUserId && x.pending) ?? [...backlog].sort((a, b) => b.pending - a.pending)[0];

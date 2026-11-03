@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getReviewSettings, type ReviewSettings } from "@/lib/review-settings";
 import { sendEmail } from "@/lib/email";
@@ -6,7 +7,7 @@ import {
   ensureReportRows, processPendingReports, lastCompletedWeek, lastReportMoment, listReportRms, visitsInStores,
   istYmd, istHour, weekFromStart,
 } from "@/lib/weekly-report";
-import { rmReportEmail, centralWeekEmail, rmDigestEmail, centralSlaEmail, type CentralRow, type SlaRow } from "@/lib/review-emails";
+import { rmReportEmail, centralWeekEmail, rmDigestEmail, centralSlaEmail, EMAIL_WINDOW_DAYS, type CentralRow, type SlaRow } from "@/lib/review-emails";
 import type { ReportStats, ReportSummary } from "@/lib/report-types";
 
 /**
@@ -24,6 +25,7 @@ const K_LAST_WEEK = "job.report.lastWeek";
 const K_LAST_DIGEST = "job.digest.lastDay";
 /** Don't email about reports older than this (e.g. email was switched on days later) — bell only. */
 const EMAIL_FRESH_MS = 48 * 3_600_000;
+export const emailWindowStart = (now = new Date()) => new Date(now.getTime() - EMAIL_WINDOW_DAYS * 86_400_000);
 
 async function getMarker(key: string): Promise<string | null> {
   return (await prisma.setting.findUnique({ where: { key } }).catch(() => null))?.value ?? null;
@@ -110,10 +112,7 @@ export async function announceReports(now = new Date()): Promise<{ announced: nu
     const done = await prisma.weeklyReport.findMany({ where: { weekStart: wk.start, status: "DONE" }, orderBy: { rmName: "asc" } });
     const freshest = Math.max(...done.map((d) => d.generatedAt?.getTime() ?? 0));
     if (!done.length || now.getTime() - freshest > EMAIL_FRESH_MS) continue;
-    const tableRows: CentralRow[] = done.map((d) => {
-      const st = d.stats as unknown as ReportStats;
-      return { rm: d.rmName, visits: st.totals.visits, reviewedPct: st.totals.reviewedPct, slaPct: st.totals.slaPct, flagged: st.totals.flagged, backlogOverdue: st.totals.backlogOverdue };
-    });
+    const tableRows = await centralWeekRows(done);
     const m = centralWeekEmail(wk.label, ymd, tableRows);
     for (const c of central) if (c.workEmail) await sendEmail({ to: c.workEmail, subject: m.subject, html: m.html, type: "REPORT_READY", userId: c.id, dedupeKey: `REPORTS_WEEK:${c.id}:${ymd}` });
     centralMailed.push(ymd);
@@ -121,14 +120,27 @@ export async function announceReports(now = new Date()): Promise<{ announced: nu
   return { announced, centralMailed };
 }
 
-/** Every report RM's review backlog right now: pending, past-SLA, oldest pending date. */
+/** Central roll-up rows for a week's reports; "Overdue now" uses the same last-30-days backlog as the alerts. */
+export async function centralWeekRows(done: { rmUserId: number; rmName: string; stats: unknown }[]): Promise<CentralRow[]> {
+  const backlog = new Map((await reviewBacklog(await getReviewSettings())).map((b) => [b.userId, b.overdue]));
+  return done.map((d) => {
+    const t = (d.stats as ReportStats).totals;
+    return { rm: d.rmName, visits: t.visits, reviewedPct: t.reviewedPct, slaPct: t.slaPct, flagged: t.flagged, backlogOverdue: backlog.get(d.rmUserId) ?? 0 };
+  });
+}
+
+/**
+ * Every report RM's review backlog right now — counting only visits LOGGED in the last EMAIL_WINDOW_DAYS
+ * (the old pre-launch backlog would swamp the emails): pending, past-SLA, oldest pending date.
+ */
 export async function reviewBacklog(s: ReviewSettings): Promise<(SlaRow & { userId: number; email: string | null })[]> {
   const rms = await listReportRms();
   const cutoff = new Date(Date.now() - s.slaHours * 3_600_000);
+  const since = emailWindowStart();
   const fmt = (d: Date) => d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
   const rows: (SlaRow & { userId: number; email: string | null })[] = [];
   for (const rm of rms) {
-    const scope = visitsInStores(rm.storeIds);
+    const scope: Prisma.VisitWhereInput = { AND: [visitsInStores(rm.storeIds), { createdAt: { gte: since } }] };
     const [pending, overdue, oldest] = await Promise.all([
       prisma.visit.count({ where: { AND: [scope, { reviewedAt: null }] } }),
       prisma.visit.count({ where: { AND: [scope, { reviewedAt: null, createdAt: { lt: cutoff } }] } }),
@@ -156,7 +168,7 @@ export async function runDailyDigests(s: ReviewSettings, today: string): Promise
     const total = breached.reduce((a, r) => a + r.overdue, 0);
     await notifyUsers(central.map((c) => c.id), {
       type: "SLA_BREACH",
-      title: `${total.toLocaleString("en-IN")} visits past the ${s.slaHours}h review SLA`,
+      title: `${total.toLocaleString("en-IN")} visits past the ${s.slaHours}h review SLA (last ${EMAIL_WINDOW_DAYS} days)`,
       body: breached.slice(0, 4).map((r) => `${r.rm} ${r.overdue}`).join(" · ") + (breached.length > 4 ? ` · +${breached.length - 4} more` : ""),
       href: "/visit-reviews?status=overdue&sort=oldest",
     });
