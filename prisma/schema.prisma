@@ -416,6 +416,25 @@ model Campaign {
   phaseAdvances  CampaignPhaseAdvance[]
   callers        CampaignCaller[]
   helpers        CampaignHelper[]
+  // true = officer access comes from the picked team (CampaignWorker); false = legacy workedBy rule.
+  teamExplicit   Boolean          @default(false)
+  workers        CampaignWorker[]
+}
+
+/// A store officer picked to work a campaign ("Who works this campaign?"). Only for campaigns with
+/// teamExplicit; RMs always see their own stores and campaigners use CampaignCaller.
+model CampaignWorker {
+  id             Int      @id @default(autoincrement())
+  campaignId     Int
+  userId         Int // the officer (ASR / STORE_MANAGER)
+  allStores      Boolean  @default(false) // true = sees the whole TEST group; false = only their own store's farmers
+  assignedByName String?
+  assignedByCode String?
+  createdAt      DateTime @default(now())
+  campaign       Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, userId])
+  @@index([userId])
 }
 
 /// Assigns a Campaigner (part-time call-team user) to a campaign. A campaigner only sees + calls the

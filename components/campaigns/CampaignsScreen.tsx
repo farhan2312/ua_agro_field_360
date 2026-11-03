@@ -13,13 +13,15 @@ import { PhasesPanel } from "./phases/PhasesPanel";
 import { PhaseOutreachPanel } from "./phases/PhaseOutreachPanel";
 import { HelpersModal } from "./HelpersModal";
 import { ClusterMultiSelect } from "./ClusterMultiSelect";
+import { TeamPicker, type TeamValue } from "./TeamPicker";
+import type { TeamOfficer, TeamCampaigner } from "@/lib/campaign-team";
 import { WA_VAR_TOKENS, SAMPLE_VARS, fillNamedTemplate, countDltVars, fillDltTemplate } from "@/lib/campaign-vars";
 import { listTemplates, type WaTemplate } from "@/app/actions/whatsapp-templates";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { cropLabel } from "@/lib/crops";
 import { inr } from "@/lib/format";
 import {
-  saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, previewCampaignAudience, getCampaignTracker, extendCampaign, updateCampaignCommPlans, setCampaignWorkedBy, deleteCampaign, getCampaignMembers, markCampaignMember, getCampaignAnalytics, exportCampaignAudienceXlsx, exportCampaignTrackerXlsx, getSmsTemplates,
+  saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, previewCampaignAudience, getTeamCandidates, getCampaignTeam, setCampaignTeam, getCampaignTracker, extendCampaign, updateCampaignCommPlans, deleteCampaign, getCampaignMembers, markCampaignMember, getCampaignAnalytics, exportCampaignAudienceXlsx, exportCampaignTrackerXlsx, getSmsTemplates,
   type CampaignListItem, type CampaignTracker, type ProjectVM, type CampaignMemberVM, type CampaignAnalytics, type SmsTemplateVM, type TrackerScope, type SegRow, type MatchView,
 } from "@/app/actions/campaigns";
 import { downloadB64 } from "@/lib/download";
@@ -506,10 +508,14 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
   const [name, setName] = useState("");
   const [projectId, setProjectId] = useState<number | null>(defaultProject?.id ?? null);
   const [clusterIds, setClusterIds] = useState<number[]>(() => defaultProject?.clusters.map((c) => c.id) ?? []); // all = whole project
-  const [preview, setPreview] = useState<{ key: string; audience: number; already: number } | null>(null);
+  const [preview, setPreview] = useState<{ key: string; audience: number; already: number; storeIds: number[] } | null>(null);
   const [commPlans, setCommPlans] = useState<string[]>([]); // every campaign must be tagged with ≥1 comm plan (by name)
   const [testPct, setTestPct] = useState(75); // % of the audience that goes into the contacted TEST group (rest = control)
-  const [workedBy, setWorkedBy] = useState<"STORE" | "CAMPAIGNERS" | "BOTH">("STORE"); // who sees + works the campaign
+  // Who works it: officers of the audience's stores are ticked by default; the maker adds/removes people.
+  const [cands, setCands] = useState<{ officers: TeamOfficer[]; campaigners: TeamCampaigner[] } | null>(null);
+  const [offAdded, setOffAdded] = useState<number[]>([]);
+  const [offRemoved, setOffRemoved] = useState<number[]>([]);
+  const [camPicked, setCamPicked] = useState<number[]>([]);
   const [startDate, setStart] = useState(defaultProject?.startDate ?? "");
   const [endDate, setEnd] = useState(defaultProject?.endDate ?? "");
   const [pending, start] = useTransition();
@@ -543,13 +549,28 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
   useEffect(() => {
     if (!creating || !projectId || !clusterIds.length) return;
     const t = setTimeout(() => {
-      previewCampaignAudience(projectId, clusterIds).then((r) => { if (r.ok) setPreview({ key: previewKey, audience: r.audience ?? 0, already: r.already ?? 0 }); });
+      previewCampaignAudience(projectId, clusterIds).then((r) => { if (r.ok) setPreview({ key: previewKey, audience: r.audience ?? 0, already: r.already ?? 0, storeIds: r.storeIds ?? [] }); });
     }, 350);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewKey, creating]);
   const fresh = preview?.key === previewKey ? preview : null;
   const audience = !clusterIds.length ? 0 : fresh ? fresh.audience : wholeProject ? project?.audienceCount ?? 0 : null;
+
+  useEffect(() => {
+    if (creating && !cands) getTeamCandidates().then((r) => { if (r.ok) setCands({ officers: r.officers ?? [], campaigners: r.campaigners ?? [] }); });
+  }, [creating, cands]);
+  const audienceStores = preview?.storeIds ?? []; // last known (avoids the team flickering while a new count loads)
+  const storeSet = new Set(audienceStores);
+  const defaultOfficerIds = (cands?.officers ?? []).filter((o) => o.storeId != null && storeSet.has(o.storeId)).map((o) => o.id);
+  const removedSet = new Set(offRemoved);
+  const team = { officerIds: [...new Set([...defaultOfficerIds.filter((id) => !removedSet.has(id)), ...offAdded])], campaignerIds: camPicked };
+  const setTeam = (v: { officerIds: number[]; campaignerIds: number[] }) => {
+    const def = new Set(defaultOfficerIds), sel = new Set(v.officerIds);
+    setOffAdded(v.officerIds.filter((id) => !def.has(id)));
+    setOffRemoved(defaultOfficerIds.filter((id) => !sel.has(id)));
+    setCamPicked(v.campaignerIds);
+  };
 
   const pickProject = (id: number) => {
     const p = projects.find((x) => x.id === id) ?? null;
@@ -565,14 +586,16 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
     if (!name.trim()) { setMsg("Name the campaign."); return; }
     if (clusterIds.length === 0) { setMsg("Pick at least one cluster."); return; }
     if (commPlans.length === 0) { setMsg("Tag at least one comm plan."); return; }
+    if (!fresh || !cands) { setMsg("Still working out the audience and team — try again in a moment."); return; }
+    if (!team.officerIds.length && !team.campaignerIds.length) { setMsg("Pick at least one person to work this campaign."); return; }
     setMsg(null);
     start(async () => {
-      const res = await createCampaign({ name, startDate, endDate, projectId, clusterIds: wholeProject ? [] : clusterIds, commPlans, testPct, workedBy });
+      const res = await createCampaign({ name, startDate, endDate, projectId, clusterIds: wholeProject ? [] : clusterIds, commPlans, testPct, team });
       if (res.ok) {
         setMsg(`Created "${name}" · ${n(res.members ?? 0)} enrolled${res.skipped ? ` · ${n(res.skipped)} skipped (already in another campaign of this project)` : ""}.`);
         // Close + reset the form, then soft-refresh so the new campaign appears in the list.
         setCreating(false);
-        setName(""); setClusterIds(project?.clusters.map((c) => c.id) ?? []); setCommPlans([]); setTestPct(75); setWorkedBy("STORE");
+        setName(""); setClusterIds(project?.clusters.map((c) => c.id) ?? []); setCommPlans([]); setTestPct(75); setOffAdded([]); setOffRemoved([]); setCamPicked([]);
         // Drop ?forProject= — otherwise the chain deep link re-opens the form on refresh.
         if (initialProjectId != null) router.replace("/campaigns");
         router.refresh();
@@ -666,27 +689,17 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
             </div>
             <div className="mt-1 text-[10.5px] text-[#9E9E9E]">The <b>test</b> group is contacted; <b>control</b> is held back as the no-contact baseline for uplift. 100/0 = contact everyone (no control); 0/100 = hold everyone back. Default 75 / 25.</div>
           </div>
-          {/* Who works this campaign — gates whether store officers/RMs can see & call it */}
+          {/* Who works this campaign — the picked team (officers of the audience's stores pre-ticked) */}
           <div className="mt-3 rounded-[10px] bg-[#F5F7F5] px-4 py-3">
             <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Who works this campaign?</label>
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {([["STORE", "Store officers", "Agri officers & RMs call their own store's farmers (default)"],
-                 ["CAMPAIGNERS", "Campaigners only", "Only assigned campaigners (+ managers) — hidden from store officers"],
-                 ["BOTH", "Both", "Store officers/RMs and campaigners both work it"]] as const).map(([k, label, desc]) => (
-                <button key={k} type="button" title={desc} onClick={() => setWorkedBy(k)}
-                  className="rounded-full border-[1.5px] px-3 py-1 text-[12px] font-semibold"
-                  style={{ background: workedBy === k ? "#E0F7FA" : "#fff", color: workedBy === k ? "#00838F" : "#616161", borderColor: workedBy === k ? "#00838F" : "#E0E0E0" }}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div className="mt-1.5 text-[10.5px] text-[#9E9E9E]">
-              {workedBy === "CAMPAIGNERS" ? "Store officers & RMs won't see this campaign — assign campaigners (or lend a helper) to work it."
-                : workedBy === "BOTH" ? "Store officers/RMs and any assigned campaigners both see and work this campaign."
-                : "Store officers & RMs see and call the farmers in their own store."}
-            </div>
+            {!cands || !preview ? (
+              <div className="mt-1.5 text-[12px] text-[#9E9E9E]">Loading officers and campaigners…</div>
+            ) : (
+              <TeamPicker officers={cands.officers} campaigners={cands.campaigners} storeIds={audienceStores}
+                value={team} onChange={setTeam} defaultOfficerIds={defaultOfficerIds} />
+            )}
           </div>
-          <button type="button" onClick={submit} disabled={pending || !name.trim() || commPlans.length === 0} className="mt-4 rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{pending ? "Creating…" : "Create & enrol"}</button>
+          <button type="button" onClick={submit} disabled={pending || !name.trim() || commPlans.length === 0 || !fresh || !cands} className="mt-4 rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{pending ? "Creating…" : "Create & enrol"}</button>
         </div>
       )}
       {msg && <div className="mb-3 rounded-[10px] border border-[#A5D6A7] bg-[#E8F5E9] px-3.5 py-2.5 text-[12.5px] font-medium text-[#2E7D32]">{msg}</div>}
@@ -887,7 +900,19 @@ function ExtendModal({ campaign, project, onClose }: { campaign: CampaignListIte
 /** Edit which comm plans a campaign is tagged with — add/remove by toggling; must keep at least one. */
 function EditCommPlansModal({ campaign, commPlanNames, onClose }: { campaign: CampaignListItem; commPlanNames: string[]; onClose: () => void }) {
   const [selected, setSelected] = useState<string[]>(campaign.commPlans ?? []);
-  const [workedBy, setWorkedBy] = useState<string>(campaign.workedBy ?? "STORE");
+  // Team: loaded on open (legacy campaigns come back reconstructed from the old store rule).
+  const [teamData, setTeamData] = useState<{ officers: TeamOfficer[]; campaigners: TeamCampaigner[]; storeIds: number[]; initial: TeamValue } | null>(null);
+  const [teamVal, setTeamVal] = useState<TeamValue | null>(null);
+  useEffect(() => {
+    Promise.all([getTeamCandidates(), getCampaignTeam(campaign.id)]).then(([c, t]) => {
+      if (!c.ok || !t.ok) return;
+      const initial = { officerIds: t.officerIds ?? [], campaignerIds: t.campaignerIds ?? [] };
+      setTeamData({ officers: c.officers ?? [], campaigners: c.campaigners ?? [], storeIds: t.storeIds ?? [], initial });
+      setTeamVal(initial);
+    });
+  }, [campaign.id]);
+  const sameSet = (a: number[], b: number[]) => a.length === b.length && a.every((x) => b.includes(x));
+  const teamChanged = !!teamData && !!teamVal && (!sameSet(teamVal.officerIds, teamData.initial.officerIds) || !sameSet(teamVal.campaignerIds, teamData.initial.campaignerIds));
   const [saving, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState(false);
@@ -907,16 +932,16 @@ function EditCommPlansModal({ campaign, commPlanNames, onClose }: { campaign: Ca
     start(async () => {
       const res = await updateCampaignCommPlans(campaign.id, selected);
       if (!res.ok) { setErr(res.error ?? "Failed"); return; }
-      if (workedBy !== (campaign.workedBy ?? "STORE")) {
-        const w = await setCampaignWorkedBy(campaign.id, workedBy);
+      if (teamChanged && teamVal) {
+        const w = await setCampaignTeam(campaign.id, teamVal.officerIds, teamVal.campaignerIds);
         if (!w.ok) { setErr(w.error ?? "Failed to update who works it"); return; }
       }
       location.reload();
     });
   };
   return (
-    <Modal open onClose={onClose} className="max-w-[520px]">
-      <ModalHeader eyebrow="Edit campaign · comm plans" eyebrowColor="#455A64" title={campaign.name} subtitle="Add or remove the comm plans this campaign is tagged with" onClose={onClose} />
+    <Modal open onClose={onClose} className="max-w-[640px]">
+      <ModalHeader eyebrow="Edit campaign" eyebrowColor="#455A64" title={campaign.name} subtitle="Comm plans and who works this campaign" onClose={onClose} />
       <div className="px-5 py-4">
         <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Comm plans <span className="normal-case text-[#C62828]">*</span> — tag one or more</label>
         {options.length === 0 ? (
@@ -936,10 +961,24 @@ function EditCommPlansModal({ campaign, commPlanNames, onClose }: { campaign: Ca
           </div>
         )}
         <div className="mt-1 text-[11px] text-[#2E7D32]">{selected.length} tagged</div>
+
+        <div className="mt-4">
+          <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Who works this campaign?</label>
+          {!teamData || !teamVal ? (
+            <div className="mt-1.5 text-[12px] text-[#9E9E9E]">Loading the team…</div>
+          ) : (
+            <>
+              {!campaign.team && <div className="mt-1 text-[11px] text-[#8D6E00]">This campaign uses the old “{campaign.workedBy === "CAMPAIGNERS" ? "campaigners only" : campaign.workedBy === "BOTH" ? "both" : "store officers"}” rule — shown here as the people it currently reaches. Change anyone below and it switches to a picked team.</div>}
+              <TeamPicker officers={teamData.officers} campaigners={teamData.campaigners} storeIds={teamData.storeIds} value={teamVal} onChange={setTeamVal}
+                defaultOfficerIds={teamData.officers.filter((o) => o.storeId != null && teamData.storeIds.includes(o.storeId)).map((o) => o.id)} />
+            </>
+          )}
+        </div>
+
         {err && <div className="mt-2 text-[12px] text-[#C62828]">{err}</div>}
         <div className="mt-4 flex justify-end gap-2">
           <button type="button" onClick={onClose} className="rounded-[10px] border border-[#E0E0E0] px-4 py-2 text-[13px] font-semibold text-[#616161]">Cancel</button>
-          <button type="button" onClick={save} disabled={saving || selected.length === 0} className="rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Save comm plans"}</button>
+          <button type="button" onClick={save} disabled={saving || selected.length === 0 || (!!teamVal && !teamVal.officerIds.length && !teamVal.campaignerIds.length)} className="rounded-[10px] bg-[#2E7D32] px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Save changes"}</button>
         </div>
 
         {/* Danger zone — delete the whole campaign (two-step confirm) */}
