@@ -12,13 +12,14 @@ import { BroadcastHistory } from "./BroadcastHistory";
 import { PhasesPanel } from "./phases/PhasesPanel";
 import { PhaseOutreachPanel } from "./phases/PhaseOutreachPanel";
 import { HelpersModal } from "./HelpersModal";
+import { ClusterMultiSelect } from "./ClusterMultiSelect";
 import { WA_VAR_TOKENS, SAMPLE_VARS, fillNamedTemplate, countDltVars, fillDltTemplate } from "@/lib/campaign-vars";
 import { listTemplates, type WaTemplate } from "@/app/actions/whatsapp-templates";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { cropLabel } from "@/lib/crops";
 import { inr } from "@/lib/format";
 import {
-  saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, getCampaignTracker, extendCampaign, updateCampaignCommPlans, setCampaignWorkedBy, deleteCampaign, getCampaignMembers, markCampaignMember, getCampaignAnalytics, exportCampaignAudienceXlsx, exportCampaignTrackerXlsx, getSmsTemplates,
+  saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, previewCampaignAudience, getCampaignTracker, extendCampaign, updateCampaignCommPlans, setCampaignWorkedBy, deleteCampaign, getCampaignMembers, markCampaignMember, getCampaignAnalytics, exportCampaignAudienceXlsx, exportCampaignTrackerXlsx, getSmsTemplates,
   type CampaignListItem, type CampaignTracker, type ProjectVM, type CampaignMemberVM, type CampaignAnalytics, type SmsTemplateVM, type TrackerScope, type SegRow, type MatchView,
 } from "@/app/actions/campaigns";
 import { downloadB64 } from "@/lib/download";
@@ -504,7 +505,8 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
   const [creating, setCreating] = useState(canManage && initialProject != null);
   const [name, setName] = useState("");
   const [projectId, setProjectId] = useState<number | null>(defaultProject?.id ?? null);
-  const [clusterId, setClusterId] = useState<number | null>(null); // null = whole project
+  const [clusterIds, setClusterIds] = useState<number[]>(() => defaultProject?.clusters.map((c) => c.id) ?? []); // all = whole project
+  const [preview, setPreview] = useState<{ key: string; audience: number; already: number } | null>(null);
   const [commPlans, setCommPlans] = useState<string[]>([]); // every campaign must be tagged with ≥1 comm plan (by name)
   const [testPct, setTestPct] = useState(75); // % of the audience that goes into the contacted TEST group (rest = control)
   const [workedBy, setWorkedBy] = useState<"STORE" | "CAMPAIGNERS" | "BOTH">("STORE"); // who sees + works the campaign
@@ -535,11 +537,23 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
   const scripts = membersOf ? templates.filter((t) => membersOf.commPlans.includes(t.name)) : [];
 
   const project = projects.find((p) => p.id === projectId) ?? null;
-  const audience = clusterId ? project?.clusters.find((c) => c.id === clusterId)?.count ?? 0 : project?.audienceCount ?? 0;
+  const wholeProject = !!project && clusterIds.length === project.clusters.length;
+  // Exact de-duplicated audience for the chosen set (debounced server count); whole project is known up front.
+  const previewKey = `${projectId}:${[...clusterIds].sort((a, b) => a - b).join(",")}`;
+  useEffect(() => {
+    if (!creating || !projectId || !clusterIds.length) return;
+    const t = setTimeout(() => {
+      previewCampaignAudience(projectId, clusterIds).then((r) => { if (r.ok) setPreview({ key: previewKey, audience: r.audience ?? 0, already: r.already ?? 0 }); });
+    }, 350);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewKey, creating]);
+  const fresh = preview?.key === previewKey ? preview : null;
+  const audience = !clusterIds.length ? 0 : fresh ? fresh.audience : wholeProject ? project?.audienceCount ?? 0 : null;
 
   const pickProject = (id: number) => {
     const p = projects.find((x) => x.id === id) ?? null;
-    setProjectId(id); setClusterId(null);
+    setProjectId(id); setClusterIds(p?.clusters.map((c) => c.id) ?? []);
     setStart(p?.startDate ?? ""); setEnd(p?.endDate ?? "");
   };
 
@@ -549,15 +563,16 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
   const submit = () => {
     if (!projectId) { setMsg("Pick a project first."); return; }
     if (!name.trim()) { setMsg("Name the campaign."); return; }
+    if (clusterIds.length === 0) { setMsg("Pick at least one cluster."); return; }
     if (commPlans.length === 0) { setMsg("Tag at least one comm plan."); return; }
     setMsg(null);
     start(async () => {
-      const res = await createCampaign({ name, startDate, endDate, projectId, clusterId, commPlans, testPct, workedBy });
+      const res = await createCampaign({ name, startDate, endDate, projectId, clusterIds: wholeProject ? [] : clusterIds, commPlans, testPct, workedBy });
       if (res.ok) {
         setMsg(`Created "${name}" · ${n(res.members ?? 0)} enrolled${res.skipped ? ` · ${n(res.skipped)} skipped (already in another campaign of this project)` : ""}.`);
         // Close + reset the form, then soft-refresh so the new campaign appears in the list.
         setCreating(false);
-        setName(""); setClusterId(null); setCommPlans([]); setTestPct(75); setWorkedBy("STORE");
+        setName(""); setClusterIds(project?.clusters.map((c) => c.id) ?? []); setCommPlans([]); setTestPct(75); setWorkedBy("STORE");
         // Drop ?forProject= — otherwise the chain deep link re-opens the form on refresh.
         if (initialProjectId != null) router.replace("/campaigns");
         router.refresh();
@@ -574,7 +589,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
       <div className="mb-3 flex items-center justify-between">
         <div className="text-[13px] text-[#757575]">
           {canManage
-            ? "Run a campaign on a project (all its clusters) or one cluster inside it. Farmers already in another campaign of the same project are skipped — no double-contact."
+            ? "Run a campaign on a project — all its clusters, or any set of them you pick. Farmers already in another campaign of the same project are skipped — no double-contact."
             : "Your campaigns — showing only the farmers enrolled from your store / district."}
         </div>
         {canManage && <button type="button" onClick={() => setCreating((v) => !v)} disabled={projects.length === 0} className="rounded-[10px] bg-[#2E7D32] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50">{creating ? "Close" : "+ New campaign"}</button>}
@@ -601,11 +616,8 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
               </select>
             </div>
             <div>
-              <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Scope</label>
-              <select className="mt-1 w-full rounded-lg border border-[#E0E0E0] bg-white px-2.5 py-2 text-[13px]" value={clusterId ?? ""} onChange={(e) => setClusterId(e.target.value ? Number(e.target.value) : null)}>
-                <option value="">Whole project ({project.clusters.length} clusters)</option>
-                {project.clusters.map((c) => <option key={c.id} value={c.id}>{c.name} · {n(c.count)}</option>)}
-              </select>
+              <label className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Scope — clusters</label>
+              <ClusterMultiSelect options={project.clusters} value={clusterIds} onChange={setClusterIds} />
             </div>
           </div>
           <div className="mt-2 text-[11px] text-[#9E9E9E]">Campaign dates must fall within the project window{project.endDate ? ` (${project.startDate} → ${project.endDate})` : ""}. To run past the project end, extend the project first.</div>
@@ -631,8 +643,11 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
             {commPlans.length > 0 && <div className="mt-1 text-[11px] text-[#2E7D32]">{commPlans.length} tagged</div>}
           </div>
           <div className="mt-3 flex items-center justify-between rounded-[10px] bg-[#F5F7F5] px-4 py-3">
-            <div className="text-[12px] text-[#616161]">Audience {clusterId ? "(cluster)" : "(project, de-duplicated)"} · before cross-campaign de-dup</div>
-            <div className="text-[18px] font-bold text-[#2E7D32]">{n(audience)}</div>
+            <div className="text-[12px] text-[#616161]">
+              Audience ({wholeProject ? "whole project" : `${clusterIds.length} cluster${clusterIds.length === 1 ? "" : "s"}`}, de-duplicated)
+              {fresh && fresh.already > 0 && <div className="text-[11px] text-[#8D6E00]">{n(fresh.already)} already in another campaign of this project — they’ll be skipped (~{n(fresh.audience - fresh.already)} enrolled)</div>}
+            </div>
+            <div className="text-[18px] font-bold text-[#2E7D32]">{audience == null ? "…" : n(audience)}</div>
           </div>
           {/* Test / Control split — the maker chooses how much of the audience is contacted (test) vs held back (control) */}
           <div className="mt-3 rounded-[10px] bg-[#F5F7F5] px-4 py-3">
@@ -646,8 +661,8 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
               </div>
             </div>
             <div className="mt-1.5 flex justify-between text-[11px]">
-              <span className="font-semibold text-[#2E7D32]">~{n(Math.round(audience * testPct / 100))} contacted (test)</span>
-              <span className="font-semibold text-[#C62828]">~{n(audience - Math.round(audience * testPct / 100))} holdout (control)</span>
+              <span className="font-semibold text-[#2E7D32]">~{audience == null ? "…" : n(Math.round(audience * testPct / 100))} contacted (test)</span>
+              <span className="font-semibold text-[#C62828]">~{audience == null ? "…" : n(audience - Math.round(audience * testPct / 100))} holdout (control)</span>
             </div>
             <div className="mt-1 text-[10.5px] text-[#9E9E9E]">The <b>test</b> group is contacted; <b>control</b> is held back as the no-contact baseline for uplift. 100/0 = contact everyone (no control); 0/100 = hold everyone back. Default 75 / 25.</div>
           </div>

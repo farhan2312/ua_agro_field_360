@@ -11,6 +11,7 @@ import {
   hasConditions, type ClusterCriteria,
 } from "@/lib/cluster-rules";
 import { clusterCampaignLock, clusterCampaignLocks } from "@/lib/cluster-locks";
+import { explicitClusterIds, resolveCampaignClusters } from "@/lib/campaign-clusters";
 import { getScope, canManage, getActor, farmerScopeWhere } from "@/lib/scope";
 import { asCoupons } from "@/lib/campaign-phases";
 import { logAudit } from "@/lib/audit";
@@ -207,6 +208,27 @@ export async function listProjects(): Promise<ProjectVM[]> {
   }));
 }
 
+/**
+ * Live audience for a campaign being set up on a chosen set of a project's clusters (empty = all):
+ * `audience` = de-duplicated union; `already` = of those, farmers already in another campaign of this
+ * project (createCampaign skips them).
+ */
+export async function previewCampaignAudience(projectId: number, clusterIds: number[]): Promise<{ ok: boolean; audience?: number; already?: number; error?: string }> {
+  const perm = await requireManager(); if (!perm.ok) return perm;
+  const project = await prisma.project.findUnique({ where: { id: projectId }, include: { clusters: { select: CLUSTER_SELECT } } });
+  if (!project) return { ok: false, error: "Project not found." };
+  const picked = new Set(clusterIds);
+  const chosen = picked.size ? project.clusters.filter((c) => picked.has(c.id)) : project.clusters;
+  if (!chosen.length) return { ok: true, audience: 0, already: 0 };
+  const union: Prisma.FarmerWhereInput = { OR: chosen.map(clusterWhere) };
+  const enrolled = await prisma.campaignMember.findMany({ where: { campaign: { projectId } }, select: { farmerId: true }, distinct: ["farmerId"] });
+  const [audience, already] = await Promise.all([
+    prisma.farmer.count({ where: union }),
+    enrolled.length ? prisma.farmer.count({ where: { AND: [union, { id: { in: enrolled.map((e) => e.farmerId) } }] } }) : Promise.resolve(0),
+  ]);
+  return { ok: true, audience, already };
+}
+
 export async function createProject(name: string, clusterIds: number[], startDate?: string, endDate?: string): Promise<{ ok: boolean; id?: number; error?: string }> {
   const perm = await requireManager(); if (!perm.ok) return perm;
   const t = name.trim();
@@ -326,7 +348,7 @@ export interface CreateCampaignInput {
   startDate: string; // ISO date
   endDate: string;
   projectId: number; // Step 3: campaign runs on a project…
-  clusterId?: number | null; // …or one specific cluster within it (null = whole project)
+  clusterIds?: number[]; // …or any set of its clusters (empty / every cluster = whole project)
   commPlans: string[]; // comm-plan names this campaign is tagged with (1+ required)
   testPct?: number;
   workedBy?: "STORE" | "CAMPAIGNERS" | "BOTH"; // who sees + works the campaign (default STORE)
@@ -357,17 +379,14 @@ export async function createCampaign(input: CreateCampaignInput): Promise<{ ok: 
     if (project.startDate && cs < project.startDate) return { ok: false, error: `Campaign can't start before the project (${iso(project.startDate)}).` };
     if (project.endDate && ce > project.endDate) return { ok: false, error: `Campaign can't end after the project (${iso(project.endDate)}). Extend the project first.` };
 
-    // Resolve the audience id-set — a single segment, or the union of the project's segments.
-    let ids: number[];
-    if (input.clusterId) {
-      const c = project.clusters.find((x) => x.id === input.clusterId);
-      if (!c) return { ok: false, error: "That cluster is not part of the selected project." };
-      ids = await clusterIdsOf(c);
-    } else {
-      if (!project.clusters.length) return { ok: false, error: "This project has no clusters." };
-      const sets = await Promise.all(project.clusters.map((c) => clusterIdsOf(c)));
-      ids = [...new Set(sets.flat())]; // de-duplicate farmers shared across segments
-    }
+    // Resolve the audience id-set — the union of the chosen clusters (or all of the project's).
+    if (!project.clusters.length) return { ok: false, error: "This project has no clusters." };
+    const picked = [...new Set(input.clusterIds ?? [])];
+    if (picked.some((id) => !project.clusters.some((c) => c.id === id))) return { ok: false, error: "A selected cluster is not part of this project." };
+    const wholeProject = picked.length === 0 || picked.length === project.clusters.length;
+    const chosen = wholeProject ? project.clusters : project.clusters.filter((c) => picked.includes(c.id));
+    const sets = await mapLimit(chosen, 4, (c) => clusterIdsOf(c));
+    let ids = [...new Set(sets.flat())]; // de-duplicate farmers shared across clusters
     if (!ids.length) return { ok: false, error: "The selected audience is empty right now." };
 
     // Cross-campaign de-dup: never enrol a farmer already in ANOTHER campaign of this project
@@ -384,7 +403,8 @@ export async function createCampaign(input: CreateCampaignInput): Promise<{ ok: 
     if (ids.length >= ENROLL_CAP) return { ok: false, error: `Audience is too large to enrol in one campaign (${ENROLL_CAP.toLocaleString("en-IN")}+). Narrow the project first.` };
 
     const camp = await prisma.campaign.create({
-      data: { name: input.name.trim(), startDate: cs, endDate: ce, projectId: input.projectId, clusterId: input.clusterId ?? null, commPlans, testPct: input.testPct ?? 75, status: "ACTIVE", workedBy: ["STORE", "CAMPAIGNERS", "BOTH"].includes(input.workedBy ?? "") ? input.workedBy! : "STORE" },
+      data: { name: input.name.trim(), startDate: cs, endDate: ce, projectId: input.projectId,
+        clusterIds: wholeProject ? [] : chosen.map((c) => c.id), clusterId: !wholeProject && chosen.length === 1 ? chosen[0].id : null, commPlans, testPct: input.testPct ?? 75, status: "ACTIVE", workedBy: ["STORE", "CAMPAIGNERS", "BOTH"].includes(input.workedBy ?? "") ? input.workedBy! : "STORE" },
     });
 
     // Enrol snapshot; store/zone denormalized so officers/RMs see only their own farmers.
@@ -602,21 +622,25 @@ export async function listCampaigns(): Promise<CampaignListItem[]> {
   });
   // Batch-resolve target names (loose ids — campaigns don't relation-load project/cluster).
   const projIds = [...new Set(camps.map((c) => c.projectId).filter((x): x is number => x != null))];
-  const clusIds = [...new Set(camps.map((c) => c.clusterId).filter((x): x is number => x != null))];
+  const clusIds = [...new Set(camps.flatMap((c) => explicitClusterIds(c) ?? []))];
   const [projs, clus] = await Promise.all([
     projIds.length ? prisma.project.findMany({ where: { id: { in: projIds } }, select: { id: true, title: true } }) : Promise.resolve([]),
     clusIds.length ? prisma.cluster.findMany({ where: { id: { in: clusIds } }, select: { id: true, name: true } }) : Promise.resolve([]),
   ]);
   const pName = new Map(projs.map((p) => [p.id, p.title]));
   const cName = new Map(clus.map((c) => [c.id, c.name]));
+  const clusterLabel = (ids: number[]) => {
+    const names = ids.map((id) => cName.get(id) ?? "removed");
+    return ids.length === 1 ? `Cluster · ${names[0]}` : `${ids.length} clusters · ${names.slice(0, 3).join(", ")}${names.length > 3 ? ` +${names.length - 3} more` : ""}`;
+  };
   return camps.map((c) => ({
     id: c.id, name: c.name, status: c.status,
     startDate: c.startDate.toISOString().slice(0, 10),
     endDate: c.endDate.toISOString().slice(0, 10),
     commPlans: c.commPlans,
     workedBy: c.workedBy,
-    target: c.clusterId
-      ? `Cluster · ${cName.get(c.clusterId) ?? "removed"}`
+    target: explicitClusterIds(c)
+      ? clusterLabel(explicitClusterIds(c)!)
       : c.projectId
         ? `Project · ${pName.get(c.projectId) ?? "removed"}`
         : c.targetSegments.map((s) => segMeta(s).label).join(", ") || "—", // legacy segment campaigns
@@ -1336,12 +1360,8 @@ export async function getCampaignTracker(campaignId: number): Promise<CampaignTr
   const camp = await prisma.campaign.findUnique({ where: { id: campaignId } });
   if (!camp) return null;
 
-  // Resolve the campaign's segment criteria (one cluster, or every cluster in its project).
-  let clusterIds: number[] = camp.clusterId ? [camp.clusterId] : [];
-  if (!clusterIds.length && camp.projectId) {
-    const proj = await prisma.project.findUnique({ where: { id: camp.projectId }, include: { clusters: { select: { id: true } } } });
-    clusterIds = proj?.clusters.map((c) => c.id) ?? [];
-  }
+  // Resolve the campaign's segment criteria (its chosen clusters, or every cluster in its project).
+  const clusterIds = (await resolveCampaignClusters([camp])).get(camp) ?? [];
   const clusterRows = clusterIds.length ? await prisma.cluster.findMany({ where: { id: { in: clusterIds } }, select: { criteria: true } }) : [];
   const criteria = clusterRows.map((c) => parseCriteria(c.criteria)).filter((x): x is ClusterCriteria => !!x);
   const pf = productFilterOf(criteria);

@@ -403,7 +403,8 @@ model Campaign {
   // BOTH = officers/RMs AND campaigners. An explicit helper grant always overrides this.
   workedBy       String           @default("STORE")
   projectId      Int? // Step 3: campaign runs on a project (all its clusters)…
-  clusterId      Int? // …or one specific cluster within it
+  clusterId      Int? // …or one specific cluster within it (legacy single pick; set too when exactly one is chosen)
+  clusterIds     Int[]            @default([]) // …or any chosen set of the project's clusters (empty = whole project)
   // Rounds status mapping (which product-catalogue categories count as fertiliser vs combo — combo is
   // campaign-specific). Used by the status engine to auto-derive member purchase flags.
   fertiliserCategories String[]    @default([])
