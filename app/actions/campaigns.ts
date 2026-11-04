@@ -736,7 +736,7 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
 
   const [farmers, stores, phases, smsLogs, waLogs, camp] = await Promise.all([
     prisma.farmer.findMany({ where: { id: { in: members.map((m) => m.farmerId) } }, select: { id: true, name: true, mobile: true, village: true } }),
-    prisma.store.findMany({ select: { id: true, name: true, regionalManager: true } }),
+    prisma.store.findMany({ select: { id: true, code: true, name: true, regionalManager: true } }),
     prisma.campaignPhase.findMany({ where: { campaignId }, orderBy: { ordinal: "asc" }, select: { ordinal: true, name: true, type: true, defaultStart: true, defaultEnd: true, coupons: true } }),
     prisma.smsLog.findMany({ where: { campaignId, memberId: { not: null } }, select: { memberId: true, createdAt: true } }),
     prisma.whatsAppLog.findMany({ where: { campaignId, memberId: { not: null } }, select: { memberId: true, createdAt: true } }),
@@ -745,6 +745,7 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
   const fMap = new Map(farmers.map((f) => [f.id, f]));
   const sMap = new Map(stores.map((s) => [s.id, shortStoreName(s.name) || s.name]));
   const rmMap = new Map(stores.map((s) => [s.id, (s.regionalManager ?? "").trim()]));
+  const codeMap = new Map(stores.map((s) => [s.id, s.code]));
 
   const MED: Record<string, string> = { CALL: "Call", WHATSAPP: "WhatsApp", SMS: "SMS", IN_PERSON: "In-person", UNREACHABLE: "Unreachable" };
   const RESP: Record<string, string> = { INTERESTED: "Interested", NOT_INTERESTED: "Not interested", OTHER_CROP: "Other crop" };
@@ -752,6 +753,7 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
   const fmtDay = (d: Date) => new Date(d.getTime() + 330 * 60_000).toISOString().slice(0, 10);
   const store = (id: number | null) => (id != null ? sMap.get(id) ?? "" : "");
   const rm = (id: number | null) => (id != null ? rmMap.get(id) ?? "" : "");
+  const storeCode = (id: number | null) => (id != null ? codeMap.get(id) ?? "" : "");
 
   // Round attribution for timestamped sends: which phase window contains a send/date.
   const roundOf = (d: Date): number | null => phases.find((p) => d >= p.defaultStart && d <= p.defaultEnd)?.ordinal ?? null;
@@ -900,13 +902,13 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
       : [];
     // Test rows first, then control (Excel autofilter still lets them slice either way).
     txns.sort((a, b) => (memMeta.get(a.farmerId!)?.group === memMeta.get(b.farmerId!)?.group ? 0 : memMeta.get(a.farmerId!)?.group === "TEST" ? -1 : 1));
-    const txnHeader = ["Group", "Reached", "Farmer", "Mobile", "Store", "RM", "Value segment", "Lifecycle", "Date", "Order No", "Item", "Crop", "Qty", "UOM", "Base value (₹)", "Coupon"];
+    const txnHeader = ["Group", "Reached", "Farmer", "Mobile", "Store code", "Store", "RM", "Value segment", "Lifecycle", "Date", "Order No", "Item", "Crop", "Qty", "UOM", "Base value (₹)", "Coupon"];
     const txnRows: (string | number)[][] = txns.map((r) => {
       const f = r.farmerId != null ? fMap.get(r.farmerId) : undefined;
       const meta = r.farmerId != null ? memMeta.get(r.farmerId) : undefined;
       const coupon = (r.itemCouponCode && r.itemCouponCode !== "0" ? r.itemCouponCode : "") || (r.invoiceCouponCode && r.invoiceCouponCode !== "0" ? r.invoiceCouponCode : "");
       return [
-        meta?.group ?? "", meta?.reached ?? "", f?.name ?? (r.farmerId != null ? `Farmer #${r.farmerId}` : "—"), f?.mobile ?? "", store(r.storeId), rm(r.storeId), meta?.vseg ?? "", meta?.lseg ?? "",
+        meta?.group ?? "", meta?.reached ?? "", f?.name ?? (r.farmerId != null ? `Farmer #${r.farmerId}` : "—"), f?.mobile ?? "", storeCode(r.storeId), store(r.storeId), rm(r.storeId), meta?.vseg ?? "", meta?.lseg ?? "",
         r.soldAt ? fmtDay(r.soldAt) : "", r.orderNo ?? "", r.itemRaw ?? "", r.cropTag ? cropLabel(r.cropTag) : "",
         r.qty ?? 0, r.uom ?? "", Math.round(r.basic ?? 0), coupon,
       ];
