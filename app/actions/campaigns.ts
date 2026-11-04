@@ -887,6 +887,7 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
     const memMeta = new Map(members.map((m) => [m.farmerId, {
       group: m.group ?? "",
       vseg: m.valueSegment ? segMeta(m.valueSegment).label : (m.segment ? segMeta(m.segment).label : ""),
+      lseg: m.lifecycleSegment ? segMeta(m.lifecycleSegment).label : "",
       reached: m.reached ? "Yes" : "No",
     }]));
     const txns = memberIds.length
@@ -899,13 +900,13 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
       : [];
     // Test rows first, then control (Excel autofilter still lets them slice either way).
     txns.sort((a, b) => (memMeta.get(a.farmerId!)?.group === memMeta.get(b.farmerId!)?.group ? 0 : memMeta.get(a.farmerId!)?.group === "TEST" ? -1 : 1));
-    const txnHeader = ["Group", "Reached", "Farmer", "Mobile", "Store", "RM", "Value segment", "Date", "Order No", "Item", "Crop", "Qty", "UOM", "Base value (₹)", "Coupon"];
+    const txnHeader = ["Group", "Reached", "Farmer", "Mobile", "Store", "RM", "Value segment", "Lifecycle", "Date", "Order No", "Item", "Crop", "Qty", "UOM", "Base value (₹)", "Coupon"];
     const txnRows: (string | number)[][] = txns.map((r) => {
       const f = r.farmerId != null ? fMap.get(r.farmerId) : undefined;
       const meta = r.farmerId != null ? memMeta.get(r.farmerId) : undefined;
       const coupon = (r.itemCouponCode && r.itemCouponCode !== "0" ? r.itemCouponCode : "") || (r.invoiceCouponCode && r.invoiceCouponCode !== "0" ? r.invoiceCouponCode : "");
       return [
-        meta?.group ?? "", meta?.reached ?? "", f?.name ?? (r.farmerId != null ? `Farmer #${r.farmerId}` : "—"), f?.mobile ?? "", store(r.storeId), rm(r.storeId), meta?.vseg ?? "",
+        meta?.group ?? "", meta?.reached ?? "", f?.name ?? (r.farmerId != null ? `Farmer #${r.farmerId}` : "—"), f?.mobile ?? "", store(r.storeId), rm(r.storeId), meta?.vseg ?? "", meta?.lseg ?? "",
         r.soldAt ? fmtDay(r.soldAt) : "", r.orderNo ?? "", r.itemRaw ?? "", r.cropTag ? cropLabel(r.cropTag) : "",
         r.qty ?? 0, r.uom ?? "", Math.round(r.basic ?? 0), coupon,
       ];
