@@ -682,7 +682,7 @@ export async function listCampaigns(): Promise<CampaignListItem[]> {
 
 /** Scoped enrolled-farmer list for a campaign — TEST group only (the CONTROL holdout is never contacted). */
 export interface CampaignMemberVM {
-  id: number; name: string; mobile: string | null; village: string | null; store: string | null;
+  id: number; name: string; mobile: string | null; village: string | null; storeId: number | null; store: string | null;
   segment: string; valueSegment: string | null; reached: boolean; mediums: string[]; comment: string | null; reachedAt: string | null;
   reachedBy: string | null; reachedByCode: string | null;
   response: string | null; responseCrop: string | null; // interest outcome + the crop when OTHER_CROP
@@ -711,7 +711,7 @@ export async function getCampaignMembers(campaignId: number, limit = 25000): Pro
     const f = fMap.get(m.farmerId);
     return {
       id: m.id, name: f?.name ?? `Farmer #${m.farmerId}`, mobile: f?.mobile ?? null, village: f?.village ?? null,
-      store: m.storeId != null ? sMap.get(m.storeId) ?? null : null,
+      storeId: m.storeId, store: m.storeId != null ? sMap.get(m.storeId) ?? null : null,
       segment: m.segment, valueSegment: m.valueSegment, reached: m.reached, mediums: m.mediums, comment: m.comment, reachedAt: iso(m.reachedAt),
       reachedBy: m.reachedBy, reachedByCode: m.reachedByCode, response: m.response, responseCrop: m.responseCrop,
       broadcastMediums: m.broadcastMediums,

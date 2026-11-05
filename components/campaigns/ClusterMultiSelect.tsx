@@ -9,9 +9,11 @@ const n = (x: number) => x.toLocaleString("en-IN");
 /**
  * Searchable multi-select for a campaign's clusters. Trigger shows a summary; the panel has a search box,
  * Select all / Clear (acting on the filtered list), and a checkbox list with each cluster's live count.
- * Picked clusters also show as removable chips under the trigger.
+ * Picked clusters also show as removable chips under the trigger. `noun` + the labels let it filter other lists (e.g. stores).
  */
-export function ClusterMultiSelect({ options, value, onChange }: { options: ClusterOption[]; value: number[]; onChange: (ids: number[]) => void }) {
+export function ClusterMultiSelect({ options, value, onChange, noun = "clusters", emptyLabel = "Pick clusters…", allLabel }: {
+  options: ClusterOption[]; value: number[]; onChange: (ids: number[]) => void; noun?: string; emptyLabel?: string; allLabel?: string;
+}) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const box = useRef<HTMLDivElement>(null);
@@ -35,7 +37,7 @@ export function ClusterMultiSelect({ options, value, onChange }: { options: Clus
   const clearShown = () => { const drop = new Set(shown.map((o) => o.id)); onChange(value.filter((id) => !drop.has(id))); };
 
   const all = options.length > 0 && value.length === options.length;
-  const summary = value.length === 0 ? "Pick clusters…" : all ? `Whole project · all ${options.length} clusters` : `${value.length} of ${options.length} clusters`;
+  const summary = value.length === 0 ? emptyLabel : all ? allLabel ?? `Whole project · all ${options.length} ${noun}` : `${value.length} of ${options.length} ${noun}`;
   const chips = options.filter((o) => picked.has(o.id));
 
   return (
@@ -49,7 +51,7 @@ export function ClusterMultiSelect({ options, value, onChange }: { options: Clus
       {open && (
         <div className="absolute left-0 right-0 z-30 mt-1 overflow-hidden rounded-[10px] border border-[#E0E0E0] bg-white shadow-[0_8px_24px_rgba(0,0,0,0.12)]">
           <div className="border-b border-[#F0F0F0] p-2">
-            <input ref={search} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search clusters…"
+            <input ref={search} value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${noun}…`}
               className="w-full rounded-md border border-[#E0E0E0] px-2.5 py-1.5 text-[13px] outline-none focus:border-[#2E7D32]" />
             <div className="mt-1.5 flex items-center gap-3 text-[11.5px] font-semibold">
               <button type="button" onClick={selectShown} disabled={!shown.length} className="text-[#2E7D32] disabled:opacity-40">{terms.length ? `Select ${shown.length} shown` : "Select all"}</button>
@@ -70,7 +72,7 @@ export function ClusterMultiSelect({ options, value, onChange }: { options: Clus
                 </li>
               );
             })}
-            {!shown.length && <li className="px-3 py-3 text-center text-[12.5px] text-[#9E9E9E]">No cluster matches “{q}”.</li>}
+            {!shown.length && <li className="px-3 py-3 text-center text-[12.5px] text-[#9E9E9E]">No {noun} match “{q}”.</li>}
           </ul>
         </div>
       )}
