@@ -7,7 +7,7 @@
  *  - num      a numeric column you aggregate (Sum / Average / Min / Max)
  *  - measure  a ready-made business number (Sales ₹, % reviewed…) — no aggregation to pick
  */
-import type { Agg } from "./types";
+import type { Agg, DateGrain } from "./types";
 
 export type FieldKind = "dim" | "num" | "measure";
 export type FieldFormat = "text" | "date" | "inr" | "int" | "num" | "pct" | "crop" | "segment" | "rating";
@@ -31,6 +31,7 @@ export interface DatasetMeta {
   icon: string;
   description: string;
   dateLabel: string | null; // what the page date filter applies to (null = no date)
+  dateField: string | null; // the table's main date field — the shared "Date" link to other tables
   fields: FieldMeta[];
 }
 
@@ -47,7 +48,7 @@ const STORE_DIMS = [
 
 export const DATASETS: DatasetMeta[] = [
   {
-    id: "sales", label: "Sales", icon: "🧾", dateLabel: "Sale date",
+    id: "sales", label: "Sales", icon: "🧾", dateLabel: "Sale date", dateField: "sale_date",
     description: "Every sale line (base / pre-tax price) with the buying farmer and store.",
     fields: [
       m("sales_value", "Sales ₹ (base)", "inr", "Sum of base (pre-tax) value"),
@@ -71,7 +72,7 @@ export const DATASETS: DatasetMeta[] = [
     ],
   },
   {
-    id: "farmers", label: "Farmers", icon: "👨‍🌾", dateLabel: "Date added",
+    id: "farmers", label: "Farmers", icon: "👨‍🌾", dateLabel: "Date added", dateField: "added",
     description: "Every farmer with their segments, crops and spend.",
     fields: [
       m("farmers", "Farmers", "int"),
@@ -96,7 +97,7 @@ export const DATASETS: DatasetMeta[] = [
     ],
   },
   {
-    id: "visits", label: "Visits", icon: "🚜", dateLabel: "Visit date",
+    id: "visits", label: "Visits", icon: "🚜", dateLabel: "Visit date", dateField: "visit_date",
     description: "Field visits with review status, crops, problems and pests.",
     fields: [
       m("visits", "Visits", "int"),
@@ -122,7 +123,7 @@ export const DATASETS: DatasetMeta[] = [
     ],
   },
   {
-    id: "campaigns", label: "Campaigns & outreach", icon: "📣", dateLabel: "Campaign start",
+    id: "campaigns", label: "Campaigns & outreach", icon: "📣", dateLabel: "Campaign start", dateField: "start_date",
     description: "Every enrolled farmer: group, reach, channel and response.",
     fields: [
       m("members", "Enrolled farmers", "int"),
@@ -145,7 +146,7 @@ export const DATASETS: DatasetMeta[] = [
     ],
   },
   {
-    id: "actions", label: "Follow-ups", icon: "✅", dateLabel: "Due date",
+    id: "actions", label: "Follow-ups", icon: "✅", dateLabel: "Due date", dateField: "due_date",
     description: "Action Registry follow-ups — open, overdue and done.",
     fields: [
       m("actions", "Follow-ups", "int"),
@@ -163,7 +164,7 @@ export const DATASETS: DatasetMeta[] = [
     ],
   },
   {
-    id: "ghoshti", label: "Ghoshti", icon: "🌾", dateLabel: "Meetup date",
+    id: "ghoshti", label: "Ghoshti", icon: "🌾", dateLabel: "Meetup date", dateField: "meetup_date",
     description: "Farmer meetups and their attendees.",
     fields: [
       m("meetups", "Meetups", "int"),
@@ -178,7 +179,7 @@ export const DATASETS: DatasetMeta[] = [
     ],
   },
   {
-    id: "stores", label: "Stores", icon: "🏪", dateLabel: null,
+    id: "stores", label: "Stores", icon: "🏪", dateLabel: null, dateField: null,
     description: "Store attributes — region, RM, status, crops and farmer counts.",
     fields: [
       m("stores", "Stores", "int"),
@@ -196,6 +197,24 @@ export function fieldMeta(dataset: string | null | undefined, field: string): Fi
   return dataset ? DATASET_BY_ID[dataset]?.fields.find((f) => f.id === field) : undefined;
 }
 
+/**
+ * The same dimension in another table, so values from different tables can share one visual. Tables link on
+ * their shared fields (store, region, RM, value segment, lifecycle) and on their main dates (same grain).
+ * null = these two tables can't be lined up by this field.
+ */
+export function mapDim(fromDs: string, ref: { field: string; grain?: DateGrain }, toDs: string): { field: string; grain?: DateGrain } | null {
+  if (fromDs === toDs) return ref;
+  const meta = fieldMeta(fromDs, ref.field);
+  const to = DATASET_BY_ID[toDs];
+  if (!meta || !to) return null;
+  if (meta.common) { const f = to.fields.find((x) => x.common === meta.common && x.kind === "dim"); return f ? { field: f.id } : null; }
+  if (meta.date && DATASET_BY_ID[fromDs]?.dateField === ref.field && to.dateField) return { field: to.dateField, grain: ref.grain };
+  return null;
+}
+
+/** Labels of the fields two tables can be joined on (for messages). */
+export const LINK_FIELDS_LABEL = "Store, Region, RM, Value segment, Lifecycle or their main date";
+
 /** Aggregations offered for a value: measures have none; numbers Sum/Avg/Min/Max/Count; dims Count/Distinct. */
 export function aggsFor(f: FieldMeta | undefined): Agg[] {
   if (!f || f.kind === "measure") return [];
@@ -204,8 +223,8 @@ export function aggsFor(f: FieldMeta | undefined): Agg[] {
 }
 
 /** Label for a value well item, e.g. "Sum of Base value ₹" / "Bills". */
-export function valueLabel(dataset: string | null, v: { field: string; agg?: Agg }): string {
-  const f = fieldMeta(dataset, v.field);
+export function valueLabel(dataset: string | null, v: { field: string; agg?: Agg; dataset?: string }): string {
+  const f = fieldMeta(v.dataset ?? dataset, v.field);
   if (!f) return v.field;
   if (f.kind === "measure") return f.label;
   const agg = v.agg ?? (f.kind === "num" ? f.defaultAgg ?? "sum" : "distinct");
@@ -213,8 +232,8 @@ export function valueLabel(dataset: string | null, v: { field: string; agg?: Agg
 }
 
 /** The display format of a value (counts are always integers). */
-export function valueFormat(dataset: string | null, v: { field: string; agg?: Agg }): FieldFormat {
-  const f = fieldMeta(dataset, v.field);
+export function valueFormat(dataset: string | null, v: { field: string; agg?: Agg; dataset?: string }): FieldFormat {
+  const f = fieldMeta(v.dataset ?? dataset, v.field);
   if (!f) return "num";
   if (f.kind === "measure") return f.format;
   const agg = v.agg ?? (f.kind === "num" ? f.defaultAgg ?? "sum" : "distinct");

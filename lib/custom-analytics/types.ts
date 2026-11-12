@@ -10,8 +10,11 @@ export type DateGrain = "day" | "week" | "month" | "quarter" | "year" | "fy";
 
 /** A dimension placed on a visual (axis / split / table row). Date fields carry a grain. */
 export interface FieldRef { field: string; grain?: DateGrain }
-/** A value placed on a visual: a ready-made measure (no agg) or a field + aggregation. */
-export interface ValueRef { field: string; agg?: Agg }
+/**
+ * A value placed on a visual: a ready-made measure (no agg) or a field + aggregation. `dataset` = the table it
+ * comes from when that differs from the visual's own (tables join on their shared dimensions).
+ */
+export interface ValueRef { field: string; agg?: Agg; dataset?: string }
 
 export interface Layout { x: number; y: number; w: number; h: number }
 

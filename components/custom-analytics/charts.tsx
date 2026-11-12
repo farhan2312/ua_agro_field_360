@@ -132,7 +132,7 @@ export function BarChart({ cats, series, format, stacked, height, onPick, horizo
             let acc = 0;
             return (
               <g key={i}>
-                <text x={labelW - 6} y={y0 + groupH / 2} textAnchor="end" dominantBaseline="middle" fontSize={11} fill={INK2}>{trunc(c, Math.floor(labelW / 6.2))}</text>
+                <text x={labelW - 6} y={y0 + groupH / 2} textAnchor="end" dominantBaseline="middle" fontSize={11} fill={INK2}>{trunc(c, Math.max(6, Math.floor((labelW - 10) / 7.4)))}</text>
                 {series.map((s, si) => {
                   const v = Math.max(0, s.values[i] ?? 0);
                   const w = xs(v);

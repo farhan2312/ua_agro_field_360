@@ -10,7 +10,7 @@ import { prisma } from "@/lib/prisma";
 import type { Scope } from "@/lib/scope";
 import { startOfToday } from "@/lib/action-constants";
 import { SQL, type DatasetSql } from "./sql";
-import { DATASET_BY_ID, fieldMeta, aggsFor, FILTER_SUPPORT, type FieldMeta } from "./model";
+import { DATASET_BY_ID, fieldMeta, aggsFor, mapDim, FILTER_SUPPORT, LINK_FIELDS_LABEL, type FieldMeta } from "./model";
 import type { Visual, PageFilters, CrossFilter, FieldRef, ValueRef, VisualResult, DateGrain, Agg } from "./types";
 
 /** Bound-parameter collector → "$1", "$2"… */
@@ -182,53 +182,79 @@ function shape(v: Visual): { dims: FieldRef[]; caps: (number | null)[]; values: 
 
 export interface RunOpts { page?: number; sortKey?: string; sortDir?: "asc" | "desc"; exportAll?: boolean }
 
+interface Group { ds: string; dims: FieldRef[]; idx: number[] }
+
 export async function runVisual(scope: Scope, v: Visual, filters: PageFilters, cf: CrossFilter | null, opts: RunOpts = {}): Promise<VisualResult> {
-  const ds = v.dataset;
-  if (!ds || !SQL[ds] || !DATASET_BY_ID[ds]) return { ok: false, error: "Add a field from the Data panel to start.", rows: [] };
-  const def = SQL[ds];
+  const ds0 = v.dataset;
+  if (!ds0 || !SQL[ds0] || !DATASET_BY_ID[ds0]) return { ok: false, error: "Add a field from the Data panel to start.", rows: [] };
   const { dims, caps, values } = shape(v);
 
-  // Validate every field against the model (unknown ids are rejected, never interpolated).
-  for (const d of dims) if (!d || typeof d.field !== "string" || !dimField(ds, d)) return { ok: false, error: "Unknown field on this visual.", rows: [] };
-  for (const x of values) if (!x || typeof x.field !== "string" || !fieldMeta(ds, x.field)) return { ok: false, error: "Unknown value on this visual.", rows: [] };
+  // Validate every field against the model (unknown ids are rejected, never interpolated). Dimensions belong to
+  // the visual's table; each value may come from its own table.
+  for (const d of dims) if (!d || typeof d.field !== "string" || !dimField(ds0, d)) return { ok: false, error: "Unknown field on this visual.", rows: [] };
+  const vds = values.map((x) => (x && typeof x.dataset === "string" ? x.dataset : ds0));
+  for (let i = 0; i < values.length; i++) {
+    const x = values[i];
+    if (!x || typeof x.field !== "string" || !SQL[vds[i]] || !fieldMeta(vds[i], x.field)) return { ok: false, error: "Unknown value on this visual.", rows: [] };
+  }
   if (v.type !== "table" && !values.length) return { ok: false, error: "Add a value (a number to show).", rows: [] };
   if (v.type === "table" && !values.length && !dims.length) return { ok: false, error: "Add fields to the table.", rows: [] };
   if (v.type === "matrix" && dims.length < 2) return { ok: false, error: "A matrix needs Rows and Columns.", rows: [] };
   if (["column", "bar", "line", "area", "donut", "treemap"].includes(v.type) && !dims.length) return { ok: false, error: "Add a field to the axis.", rows: [] };
 
-  const isDate = dims.map((d) => !!fieldMeta(ds, d.field)?.date);
+  // One query per table, each grouped by the SAME dimensions mapped into that table (shared fields / main date).
+  const groups: Group[] = [];
+  for (let i = 0; i < values.length; i++) {
+    let g = groups.find((x) => x.ds === vds[i]);
+    if (!g) {
+      const mapped = dims.map((d) => mapDim(ds0, d, vds[i]));
+      const bad = mapped.findIndex((m) => !m);
+      if (bad >= 0) return { ok: false, error: `${DATASET_BY_ID[vds[i]].label} can’t be split by “${fieldMeta(ds0, dims[bad].field)?.label}” — tables only line up on ${LINK_FIELDS_LABEL}.`, rows: [] };
+      g = { ds: vds[i], dims: mapped as FieldRef[], idx: [] };
+      groups.push(g);
+    }
+    g.idx.push(i);
+  }
+  if (!groups.length) groups.push({ ds: ds0, dims, idx: [] });
+  const isDate = dims.map((d) => !!fieldMeta(ds0, d.field)?.date);
 
-  /** Build every SQL piece with a FRESH parameter list (Postgres rejects bound params a query doesn't use). */
-  const prep = (foldKeys: (string[] | null)[] = []) => {
+  /** Build every SQL piece for one table with a FRESH parameter list (Postgres rejects unused bound params). */
+  const prep = (g: Group, foldKeys: (string[] | null)[] = []) => {
+    const def = SQL[g.ds];
     const q = new Params();
     const laterals = new Set<string>();
-    const base = buildBase(ds, def, scope, filters, cf, q, laterals);
-    const dimExprs = dims.map((d) => dimSql(def, ds, d, laterals));
-    const valExprs = values.map((x) => valueSql(def, ds, x, laterals));
+    const base = buildBase(g.ds, def, scope, filters, cf, q, laterals);
+    const dimExprs = g.dims.map((d) => dimSql(def, g.ds, d, laterals));
+    const valExprs = g.idx.map((i) => valueSql(def, g.ds, values[i], laterals));
     const folded = dimExprs.map((e, i) => (foldKeys[i] ? `CASE WHEN ${e} = ANY(${q.p(foldKeys[i], "::text[]")}) THEN ${e} ELSE '${OTHER}' END` : e));
     const from = `${base.from} ${[...laterals].join(" ")}`;
     const finish = (sql: string) => (sql.includes(":today") ? sql.replaceAll(":today", q.p(startOfToday(), "::timestamp")) : sql);
-    return { q, base, dimExprs, valExprs, folded, from, finish };
+    const sel = [...folded.map((e, i) => `${e} AS d${i}`), ...valExprs.map((e, i) => `${e} AS m${i}`)];
+    return { q, base, dimExprs, valExprs, folded, from, finish, sel };
   };
 
   try {
-    // Fold long category lists into "Other" (top N by the first value). Date axes are never folded;
-    // a full table export is never folded.
+    // Fold long category lists into "Other" (top N by the first value, in its table). Date axes are never
+    // folded; a full table export is never folded. Category text is the same in every table, so the keys apply to all.
     let truncated = false;
+    const lead = groups[0];
     const foldKeys: (string[] | null)[] = dims.map(() => null);
     if (!(opts.exportAll && v.type === "table")) {
       for (let i = 0; i < dims.length; i++) {
         const cap = caps[i];
         if (cap == null || isDate[i]) continue;
-        const P = prep();
+        const P = prep(lead);
         const primary = P.valExprs[0] ?? "COUNT(*)";
         const top = await run<{ k: string | null }>(P.finish(`SELECT ${P.dimExprs[i]} AS k FROM ${P.from} ${P.base.where} GROUP BY 1 ORDER BY ${primary} DESC NULLS LAST LIMIT ${cap + 1}`), P.q.list);
         if (top.length > cap) { truncated = true; foldKeys[i] = top.slice(0, cap).map((t) => t.k ?? ""); }
       }
     }
+    const group = dims.length ? `GROUP BY ${dims.map((_, i) => i + 1).join(", ")}` : "";
 
-    const P = prep(foldKeys);
-    const sel = [...P.folded.map((e, i) => `${e} AS d${i}`), ...P.valExprs.map((e, i) => `${e} AS m${i}`)];
+    if (groups.length > 1) return { ...(await runJoined(groups, prep, foldKeys, group, dims.length, values.length, isDate, v.type, opts)), truncated };
+
+    const P = prep(lead, foldKeys);
+    const sel = P.sel;
 
     if (v.type === "matrix") {
       const [a, b] = P.folded;
@@ -247,7 +273,6 @@ export async function runVisual(scope: Scope, v: Visual, filters: PageFilters, c
       const dir = opts.sortDir === "asc" ? "ASC" : "DESC";
       const page = Math.max(0, Math.min(100_000, Math.floor(Number(opts.page) || 0)));
       const limit = opts.exportAll ? EXPORT_CAP : TABLE_PAGE;
-      const group = dims.length ? `GROUP BY ${dims.map((_, i) => i + 1).join(", ")}` : "";
       const sql = `SELECT ${sel.join(", ")}, COUNT(*) OVER () AS __total FROM ${P.from} ${P.base.where} ${group}
         ORDER BY ${sortKey} ${dir} NULLS LAST LIMIT ${limit} OFFSET ${opts.exportAll ? 0 : page * TABLE_PAGE}`;
       const rows = await run<Record<string, unknown>>(P.finish(sql), P.q.list);
@@ -255,7 +280,6 @@ export async function runVisual(scope: Scope, v: Visual, filters: PageFilters, c
     }
 
     // KPI + charts. Wrapped so the outer ORDER BY can use the output names (Other last).
-    const group = dims.length ? `GROUP BY ${dims.map((_, i) => i + 1).join(", ")}` : "";
     const inner = `SELECT ${sel.join(", ")} FROM ${P.from} ${P.base.where} ${group}`;
     const order = !dims.length ? "" : isDate[0] ? "ORDER BY d0 ASC" : `ORDER BY (d0 = '${OTHER}'), m0 DESC NULLS LAST`;
     const limit = dims.length && isDate[0] ? `LIMIT ${MAX_DATE_POINTS * (dims.length > 1 ? 9 : 1)}` : "";
@@ -265,6 +289,52 @@ export async function runVisual(scope: Scope, v: Visual, filters: PageFilters, c
     const msg = e instanceof Error ? e.message : String(e);
     return { ok: false, error: /statement timeout|canceling statement/i.test(msg) ? "This visual took too long — add a filter or pick fewer categories." : "Couldn’t load this visual.", rows: [] };
   }
+}
+
+const JOIN_CAP = 20_000;
+const KEY_SEP = "\u0001";
+
+/**
+ * Values from several tables: run each table's query grouped by the shared dimensions, then line the rows up
+ * by those dimension values (a full outer join in memory). Tables sort / page here instead of in SQL.
+ */
+async function runJoined(
+  groups: Group[],
+  prep: (g: Group, foldKeys?: (string[] | null)[]) => { q: Params; base: Built; from: string; finish: (s: string) => string; sel: string[] },
+  foldKeys: (string[] | null)[], group: string, nd: number, nv: number, isDate: boolean[], type: Visual["type"], opts: RunOpts,
+): Promise<VisualResult> {
+  const merged = new Map<string, Record<string, string | number | null>>();
+  const ignored = new Set<string>();
+  for (const g of groups) {
+    const P = prep(g, foldKeys);
+    P.base.ignored.forEach((x) => ignored.add(`${x} (${DATASET_BY_ID[g.ds].label})`));
+    const rows = await run<Record<string, unknown>>(P.finish(`SELECT ${P.sel.join(", ")} FROM ${P.from} ${P.base.where} ${group} LIMIT ${JOIN_CAP}`), P.q.list);
+    for (const r of rows) {
+      const key = Array.from({ length: nd }, (_, i) => String(r[`d${i}`] ?? "")).join(KEY_SEP);
+      let row = merged.get(key);
+      if (!row) {
+        row = {};
+        for (let i = 0; i < nd; i++) row[`d${i}`] = (r[`d${i}`] as string | null) ?? null;
+        for (let i = 0; i < nv; i++) row[`m${i}`] = null;
+        merged.set(key, row);
+      }
+      const target = row;
+      g.idx.forEach((vi, j) => { target[`m${vi}`] = toNum(r[`m${j}`]); });
+    }
+  }
+  let rows = [...merged.values()];
+  const num = (x: unknown) => (typeof x === "number" ? x : -Infinity);
+  if (type === "table") {
+    const keys = [...Array.from({ length: nd }, (_, i) => `d${i}`), ...Array.from({ length: nv }, (_, i) => `m${i}`)];
+    const sortKey = opts.sortKey && keys.includes(opts.sortKey) ? opts.sortKey : nv ? "m0" : "d0";
+    const dir = opts.sortDir === "asc" ? 1 : -1;
+    rows.sort((a, b) => (sortKey.startsWith("m") ? num(a[sortKey]) - num(b[sortKey]) : String(a[sortKey] ?? "").localeCompare(String(b[sortKey] ?? ""))) * dir);
+    const total = rows.length;
+    if (!opts.exportAll) { const page = Math.max(0, Math.min(100_000, Math.floor(Number(opts.page) || 0))); rows = rows.slice(page * TABLE_PAGE, page * TABLE_PAGE + TABLE_PAGE); }
+    return { ok: true, total, rows, ignoredFilters: [...ignored] };
+  }
+  rows.sort((a, b) => (isDate[0] ? String(a.d0 ?? "").localeCompare(String(b.d0 ?? "")) : a.d0 === OTHER ? 1 : b.d0 === OTHER ? -1 : num(b.m0) - num(a.m0)));
+  return { ok: true, rows, ignoredFilters: [...ignored] };
 }
 
 function clean(r: Record<string, unknown>, nd: number, nv: number): Record<string, string | number | null> {

@@ -4,8 +4,8 @@ import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { saveReport, type ReportFull } from "@/app/actions/custom-analytics";
-import { DATASETS, DATASET_BY_ID, fieldMeta, aggsFor, valueLabel, type FieldMeta } from "@/lib/custom-analytics/model";
-import { placeField, changeType, typeForField, normalize, type Well } from "@/lib/custom-analytics/placement";
+import { DATASETS, DATASET_BY_ID, fieldMeta, aggsFor, valueLabel, mapDim, LINK_FIELDS_LABEL, type FieldMeta } from "@/lib/custom-analytics/model";
+import { placeField, changeType, typeForField, normalize, removeAt, valueDs, visualDims, type Well } from "@/lib/custom-analytics/placement";
 import { VISUAL_META, AGG_LABEL, GRAIN_LABEL, emptyDoc, uid, type ReportDoc, type Visual, type VisualType, type CrossFilter, type FieldRef, type Agg, type DateGrain, type Layout } from "@/lib/custom-analytics/types";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { GridCanvas, bottomRow } from "./GridCanvas";
@@ -13,6 +13,8 @@ import { PageFiltersBar } from "./PageFiltersBar";
 import { visualTitle } from "./VisualCard";
 
 const DRAG_MIME = "application/x-ca-field";
+/** What a drag carries: a field (from the Data panel) or a placed chip (`from` = where it sits now). */
+type DragPayload = { ds: string; field: string; from?: { vid: string; well: Well; index: number } };
 const KIND_ICON: Record<string, string> = { measure: "Σ", num: "#", dim: "Aa" };
 
 /** Full-screen report builder: canvas + pages on the left, Visuals / Build / Data panel on the right. */
@@ -79,6 +81,31 @@ export function ReportBuilder({ initial }: { initial: ReportFull | null }) {
     else { updateVisual(v.id, () => r.visual); setSelectedId(v.id); }
   };
 
+  /**
+   * A dropped payload: a field from the Data panel (`from` empty) or a chip dragged out of a well (`from` set →
+   * move it: take it off the source, place it on the target; null target = a new visual on empty canvas).
+   */
+  const handleDrop = (p: DragPayload, targetId: string | null, well?: Well) => {
+    if (!p.from) { applyField(p.ds, p.field, targetId, well); return; }
+    const from = p.from;
+    const src = page.visuals.find((x) => x.id === from.vid);
+    if (!src) return;
+    if (targetId === from.vid && well === from.well) return; // dropped back where it was
+    const srcAfter = removeAt(src, from.well, from.index);
+    const tgt = targetId == null ? newVisual(typeForField(p.ds, p.field)) : targetId === from.vid ? srcAfter : page.visuals.find((x) => x.id === targetId);
+    if (!tgt) return;
+    const r = placeField(tgt, p.ds, p.field, well);
+    if ("error" in r) { flash(false, r.error); return; }
+    mutatePage((pg) => {
+      let visuals = pg.visuals.map((x) => (x.id === r.visual.id ? r.visual : x.id === src.id ? srcAfter : x));
+      if (targetId == null) visuals = [...visuals, r.visual];
+      return { ...pg, visuals };
+    });
+    setSelectedId(r.visual.id);
+  };
+  /** A chip dropped somewhere that isn't a well or a visual (e.g. back on the Data panel) is removed. */
+  const removeChip = (from: NonNullable<DragPayload["from"]>) => updateVisual(from.vid, (v) => removeAt(v, from.well, from.index));
+
   const onLayout = (layouts: Record<string, Layout>) => mutatePage((p) => ({ ...p, visuals: p.visuals.map((v) => (layouts[v.id] ? { ...v, layout: layouts[v.id] } : v)) }));
 
   const save = (thenView = false) => start(async () => {
@@ -122,9 +149,9 @@ export function ReportBuilder({ initial }: { initial: ReportFull | null }) {
     const raw = e.dataTransfer.getData(DRAG_MIME);
     if (!raw) return;
     e.preventDefault();
-    const { ds, field } = JSON.parse(raw) as { ds: string; field: string };
+    const payload = JSON.parse(raw) as DragPayload;
     const el = (e.target as HTMLElement).closest("[data-vid]") as HTMLElement | null;
-    applyField(ds, field, el?.dataset.vid ?? null);
+    handleDrop(payload, el?.dataset.vid ?? null);
   };
 
   const terms = search.trim().toLowerCase();
@@ -202,15 +229,18 @@ export function ReportBuilder({ initial }: { initial: ReportFull | null }) {
           </div>
         </Section>
 
-        {selected && <BuildPanel v={selected} onChange={(fn) => updateVisual(selected.id, fn)} onDropField={(ds, f, well) => applyField(ds, f, selected.id, well)} onRemove={() => removeVisual(selected.id)} />}
+        {selected && <BuildPanel v={selected} onChange={(fn) => updateVisual(selected.id, fn)} onDropPayload={(p, well) => handleDrop(p, selected.id, well)} onRemoveChip={removeChip} onRemove={() => removeVisual(selected.id)} />}
 
-        <Section title="Data" hint="Click a field to add it, or drag it onto a visual / a well">
+        <Section title="Data" hint="Click or drag fields in · drag a placed field back here to remove it">
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search fields…" className="mb-2 w-full rounded-lg border border-[#E0E0E0] px-2.5 py-1.5 text-[12.5px]" />
           {DATASETS.map((d) => {
             const fields = d.fields.filter((f) => !terms || f.label.toLowerCase().includes(terms) || d.label.toLowerCase().includes(terms));
             if (!fields.length) return null;
             const isOpen = !!terms || open.has(d.id);
-            const locked = !!selected?.dataset && selected.dataset !== d.id;
+            // Another table can join the selected visual only if every dimension on it is a shared one.
+            const sel = selected?.dataset ? selected : null;
+            const linkable = !sel || sel.dataset === d.id || visualDims(sel).every((dim) => !!mapDim(sel.dataset!, dim, d.id));
+            const locked = !linkable;
             return (
               <div key={d.id} className="mb-1">
                 <button type="button" onClick={() => setOpen((s) => { const x = new Set(s); if (x.has(d.id)) x.delete(d.id); else x.add(d.id); return x; })}
@@ -222,7 +252,11 @@ export function ReportBuilder({ initial }: { initial: ReportFull | null }) {
                 </button>
                 {isOpen && (
                   <div className="ml-4 border-l border-[#EEE] pl-2">
-                    {fields.map((f) => <FieldRow key={f.id} ds={d.id} f={f} locked={locked} onClick={() => applyField(d.id, f.id)} />)}
+                    {fields.map((f) => {
+                      // From another table, a category only works if it's one the tables share (store, region, …).
+                      const fLocked = locked || (!!sel && sel.dataset !== d.id && f.kind === "dim" && !mapDim(d.id, { field: f.id }, sel.dataset!));
+                      return <FieldRow key={f.id} ds={d.id} f={f} locked={fLocked} onClick={() => applyField(d.id, f.id)} />;
+                    })}
                   </div>
                 )}
               </div>
@@ -249,7 +283,7 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
 function FieldRow({ ds, f, locked, onClick }: { ds: string; f: FieldMeta; locked: boolean; onClick: () => void }) {
   return (
     <div draggable={!locked} onDragStart={(e) => { e.dataTransfer.setData(DRAG_MIME, JSON.stringify({ ds, field: f.id })); e.dataTransfer.effectAllowed = "copy"; }}
-      onClick={locked ? undefined : onClick} title={locked ? "The selected visual uses another table" : f.hint ?? "Click to add · drag onto a visual or well"}
+      onClick={locked ? undefined : onClick} title={locked ? `Can’t be combined with the selected visual — tables only line up on ${LINK_FIELDS_LABEL}` : f.hint ?? "Click to add · drag onto a visual or well"}
       className={`flex items-center gap-2 rounded-md px-1.5 py-1 text-[12.5px] ${locked ? "cursor-not-allowed text-[#C4C4C0]" : "cursor-grab text-[#333] hover:bg-[#F1F8F1] active:cursor-grabbing"}`}>
       <span className={`w-[20px] shrink-0 text-center text-[10px] font-bold ${f.kind === "measure" ? "text-[#E65100]" : f.kind === "num" ? "text-[#1565C0]" : "text-[#757575]"}`}>{f.date ? "📅" : KIND_ICON[f.kind]}</span>
       <span className="min-w-0 flex-1 truncate">{f.label}</span>
@@ -258,20 +292,36 @@ function FieldRow({ ds, f, locked, onClick }: { ds: string; f: FieldMeta; locked
 }
 
 /** The selected visual's wells (drop targets), title and options. */
-function BuildPanel({ v, onChange, onDropField, onRemove }: { v: Visual; onChange: (fn: (v: Visual) => Visual) => void; onDropField: (ds: string, field: string, well: Well) => void; onRemove: () => void }) {
+function BuildPanel({ v, onChange, onDropPayload, onRemoveChip, onRemove }: {
+  v: Visual; onChange: (fn: (v: Visual) => Visual) => void; onDropPayload: (p: DragPayload, well: Well) => void;
+  onRemoveChip: (from: NonNullable<DragPayload["from"]>) => void; onRemove: () => void;
+}) {
   const meta = VISUAL_META[v.type];
   const ds = v.dataset;
   const [over, setOver] = useState<Well | null>(null);
   const drop = (well: Well) => ({
     onDragOver: (e: React.DragEvent) => { if (e.dataTransfer.types.includes(DRAG_MIME)) { e.preventDefault(); e.stopPropagation(); setOver(well); } },
     onDragLeave: () => setOver(null),
-    onDrop: (e: React.DragEvent) => { const raw = e.dataTransfer.getData(DRAG_MIME); setOver(null); if (!raw) return; e.preventDefault(); e.stopPropagation(); const { ds: d, field } = JSON.parse(raw); onDropField(d, field, well); },
+    onDrop: (e: React.DragEvent) => { const raw = e.dataTransfer.getData(DRAG_MIME); setOver(null); if (!raw) return; e.preventDefault(); e.stopPropagation(); onDropPayload(JSON.parse(raw) as DragPayload, well); },
   });
   const wellCls = (w: Well) => `min-h-[36px] rounded-[8px] border border-dashed p-1.5 ${over === w ? "border-[#2E7D32] bg-[#F1F8F1]" : "border-[#DADAD4] bg-[#FAFAF8]"}`;
-  const dimChip = (ref: FieldRef, onRemoveChip: () => void, onGrain: (g: DateGrain) => void) => {
+  /** Placed chips can be dragged to another well / visual (move) or anywhere else, e.g. back to Data (remove). */
+  const chipDrag = (well: Well, index: number, field: string, fromDs: string | null) => ({
+    draggable: true,
+    title: "Drag to another slot or visual to move it — or drop it outside (e.g. on the Data panel) to remove it",
+    onDragStart: (e: React.DragEvent) => {
+      e.stopPropagation();
+      e.dataTransfer.setData(DRAG_MIME, JSON.stringify({ ds: fromDs ?? ds ?? "", field, from: { vid: v.id, well, index } } satisfies DragPayload));
+      e.dataTransfer.effectAllowed = "move";
+    },
+    onDragEnd: (e: React.DragEvent) => { if (e.dataTransfer.dropEffect === "none") onRemoveChip({ vid: v.id, well, index }); },
+  });
+  const dimChip = (ref: FieldRef, well: Well, index: number, onGrain: (g: DateGrain) => void) => {
     const f = fieldMeta(ds, ref.field);
+    const onRemoveChip = () => onChange((x) => removeAt(x, well, index));
     return (
-      <div key={ref.field} className="mb-1 flex items-center gap-1 rounded-md bg-white px-2 py-1 text-[12px] shadow-[0_0_0_1px_#E5E5E0]">
+      <div key={`${ref.field}-${index}`} {...chipDrag(well, index, ref.field, ds)} className="mb-1 flex cursor-grab items-center gap-1 rounded-md bg-white px-2 py-1 text-[12px] shadow-[0_0_0_1px_#E5E5E0] active:cursor-grabbing">
+        <span className="text-[10px] text-[#BDBDBD]">⠿</span>
         <span className="min-w-0 flex-1 truncate font-semibold text-[#1A1C1A]">{f?.label ?? ref.field}</span>
         {f?.date && (
           <select value={ref.grain ?? "month"} onChange={(e) => onGrain(e.target.value as DateGrain)} className="rounded border border-[#E0E0E0] bg-white px-1 py-0.5 text-[11px]">
@@ -283,7 +333,7 @@ function BuildPanel({ v, onChange, onDropField, onRemove }: { v: Visual; onChang
     );
   };
   const empty = (txt: string) => <div className="px-1 py-1 text-[11px] text-[#ABABA5]">{txt}</div>;
-  const setDims = (dims: FieldRef[]) => onChange((x) => normalize({ ...x, dims }));
+  const setDims = (dims: FieldRef[]) => onChange((x) => normalize({ ...x, dims }, false));
 
   return (
     <div className="border-b border-[#F0F0EC] bg-[#FBFCFA] px-3.5 py-3">
@@ -300,7 +350,7 @@ function BuildPanel({ v, onChange, onDropField, onRemove }: { v: Visual; onChang
         <div className="mb-2.5">
           <div className="mb-1 text-[11px] font-semibold text-[#757575]">{meta.axis}</div>
           <div className={wellCls("axis")} {...drop("axis")}>
-            {v.axis ? dimChip(v.axis, () => onChange((x) => normalize({ ...x, axis: null })), (g) => onChange((x) => ({ ...x, axis: { ...x.axis!, grain: g } }))) : empty("Drop a category or date")}
+            {v.axis ? dimChip(v.axis, "axis", 0, (g) => onChange((x) => ({ ...x, axis: { ...x.axis!, grain: g } }))) : empty("Drop a category or date")}
           </div>
         </div>
       )}
@@ -308,7 +358,7 @@ function BuildPanel({ v, onChange, onDropField, onRemove }: { v: Visual; onChang
         <div className="mb-2.5">
           <div className="mb-1 text-[11px] font-semibold text-[#757575]">{meta.split} <span className="font-normal text-[#ABABA5]">(optional)</span></div>
           <div className={wellCls("split")} {...drop("split")}>
-            {v.split ? dimChip(v.split, () => onChange((x) => normalize({ ...x, split: null })), (g) => onChange((x) => ({ ...x, split: { ...x.split!, grain: g } }))) : empty("Drop a category to split by")}
+            {v.split ? dimChip(v.split, "split", 0, (g) => onChange((x) => ({ ...x, split: { ...x.split!, grain: g } }))) : empty("Drop a category to split by")}
           </div>
         </div>
       )}
@@ -316,7 +366,7 @@ function BuildPanel({ v, onChange, onDropField, onRemove }: { v: Visual; onChang
         <div className="mb-2.5">
           <div className="mb-1 text-[11px] font-semibold text-[#757575]">Rows <span className="font-normal text-[#ABABA5]">(up to 4)</span></div>
           <div className={wellCls("dims")} {...drop("dims")}>
-            {(v.dims ?? []).length ? (v.dims ?? []).map((d, i) => dimChip(d, () => setDims((v.dims ?? []).filter((_, k) => k !== i)), (g) => setDims((v.dims ?? []).map((x, k) => (k === i ? { ...x, grain: g } : x))))) : empty("Drop categories / dates")}
+            {(v.dims ?? []).length ? (v.dims ?? []).map((d, i) => dimChip(d, "dims", i, (g) => setDims((v.dims ?? []).map((x, k) => (k === i ? { ...x, grain: g } : x))))) : empty("Drop categories / dates")}
           </div>
         </div>
       )}
@@ -324,18 +374,24 @@ function BuildPanel({ v, onChange, onDropField, onRemove }: { v: Visual; onChang
         <div className="mb-1 text-[11px] font-semibold text-[#757575]">Values <span className="font-normal text-[#ABABA5]">(up to {meta.maxValues})</span></div>
         <div className={wellCls("values")} {...drop("values")}>
           {v.values.length ? v.values.map((x, i) => {
-            const f = fieldMeta(ds, x.field);
+            const xds = valueDs(v, x);
+            const f = fieldMeta(xds, x.field);
             const aggs = aggsFor(f);
+            const foreign = !!xds && xds !== ds;
             return (
-              <div key={`${x.field}-${i}`} className="mb-1 flex items-center gap-1 rounded-md bg-white px-2 py-1 text-[12px] shadow-[0_0_0_1px_#E5E5E0]">
-                <span className="min-w-0 flex-1 truncate font-semibold text-[#1A1C1A]" title={valueLabel(ds, x)}>{f?.label ?? x.field}</span>
+              <div key={`${x.field}-${i}`} {...chipDrag("values", i, x.field, xds)} className="mb-1 flex cursor-grab items-center gap-1 rounded-md bg-white px-2 py-1 text-[12px] shadow-[0_0_0_1px_#E5E5E0] active:cursor-grabbing">
+                <span className="text-[10px] text-[#BDBDBD]">⠿</span>
+                <span className="min-w-0 flex-1 truncate font-semibold text-[#1A1C1A]" title={valueLabel(ds, x)}>
+                  {f?.label ?? x.field}
+                  {foreign && <span className="ml-1 rounded bg-[#F3E5F5] px-1 text-[9.5px] font-semibold text-[#6A1B9A]">{DATASET_BY_ID[xds!]?.icon} {DATASET_BY_ID[xds!]?.label}</span>}
+                </span>
                 {aggs.length > 0 && (
                   <select value={x.agg ?? aggs[0]} onChange={(e) => onChange((vv) => ({ ...vv, values: vv.values.map((y, k) => (k === i ? { ...y, agg: e.target.value as Agg } : y)) }))}
                     className="rounded border border-[#E0E0E0] bg-white px-1 py-0.5 text-[11px]">
                     {aggs.map((a) => <option key={a} value={a}>{AGG_LABEL[a]}</option>)}
                   </select>
                 )}
-                <button type="button" onClick={() => onChange((vv) => ({ ...vv, values: vv.values.filter((_, k) => k !== i) }))} aria-label="Remove" className="px-1 text-[#9E9E9E] hover:text-[#C62828]">×</button>
+                <button type="button" onClick={() => onChange((vv) => removeAt(vv, "values", i))} aria-label="Remove" className="px-1 text-[#9E9E9E] hover:text-[#C62828]">×</button>
               </div>
             );
           }) : empty("Drop a number (Σ measures, # columns)")}
