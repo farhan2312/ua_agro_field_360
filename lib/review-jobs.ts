@@ -33,8 +33,9 @@ async function getMarker(key: string): Promise<string | null> {
 async function setMarker(key: string, value: string) {
   await prisma.setting.upsert({ where: { key }, update: { value }, create: { key, value } });
 }
+/** Central-team recipients (weekly roll-up, SLA alert, bell): Central admins + System admins. */
 const centralUsers = () =>
-  prisma.user.findMany({ where: { role: "CENTRAL", active: true, approvalStatus: "APPROVED" }, select: { id: true, workEmail: true } });
+  prisma.user.findMany({ where: { role: { in: ["CENTRAL", "SYSADMIN"] }, active: true, approvalStatus: "APPROVED" }, select: { id: true, workEmail: true } });
 
 export interface JobLog { scheduledWeek?: string; created?: number; built?: number; failed?: number; remaining?: number; announced?: number; centralMailed?: string[]; digests?: number; slaAlert?: number; skipped?: string[] }
 
