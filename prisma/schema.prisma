@@ -69,6 +69,7 @@ model Store {
   lat             Float?
   lng             Float?
   tagIds          Int[]      @default([]) // StoreTag ids assigned to this store (RM/admin managed) — many-to-many
+  cropTags        String[]   @default([]) // crops generally grown around this store (sysadmin, Settings) — farmers inherit live via Farmer.store
   source          DataSource @default(REAL)
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
