@@ -438,6 +438,23 @@ export const TRAINING: TrainingTopic[] = [
     related: ["analytics-basics", "store-360"],
   },
   {
+    id: "custom-analytics",
+    title: "Building your own reports (My analytics)",
+    summary: "Drag-and-drop dashboards from sales, farmers, visits, campaigns, follow-ups, Ghoshti and stores — then share or pin them.",
+    section: "Analytics",
+    roles: ["officer", "regional", "central", "sysadmin"],
+    minutes: 6,
+    steps: [
+      { text: "On Analytics, open “My analytics”. Start from a template (Sales overview, Visit quality, Campaign reach, Follow-ups & meetups) or press “+ New report”. Your reports are listed below the templates; reports others shared with you are under “Shared with me”." },
+      { text: "In the builder, pick a visual on the right — KPI card, Column, Bar, Line, Area, Donut, Treemap, Table or Matrix. Then click fields in the Data panel (or drag them onto the visual or onto a slot like Axis, Split by, Rows or Values). Σ fields are ready-made numbers (Sales ₹, % reviewed…); # fields you can Sum / Average; categories and 📅 dates go on the axis. Drag a field onto empty canvas and a suitable chart is created for you.", tip: "Each visual uses one table (e.g. Sales). Pick the table’s own fields; for another table, add a new visual." },
+      { text: "Drag a visual by ⠿ to move it and pull its bottom-right corner to resize — the others make room. Use “+ Page” at the bottom for more pages (double-click a page name to rename it). Set the page filters at the top (date, region, store, RM, value segment, lifecycle) — they’re saved as that page’s defaults." },
+      { text: "Press “Save”, or “Save & view” to see the finished report. In the report, click any bar, slice or row to filter the other visuals on the page by it (click again, or × on the blue chip, to clear). “⋯” on a visual shows it as a table or exports its data to Excel." },
+      { text: "“👥 Share” sends the report to people you pick (they get a 🔔 and find it under “Shared with me”). They can view it and “⧉ Make a copy”, but not change yours. “📌 Pin to Analytics” makes Analytics open on that report.", warn: "Everyone always sees only their own data: an RM opening a report shared by an admin sees just their stores’ numbers." },
+    ],
+    outcome: "Managers get the exact dashboards they want, kept live, without asking for a new screen to be built.",
+    related: ["analytics-basics", "performance-boards"],
+  },
+  {
     id: "analytics-export",
     title: "Exporting analytics to Excel",
     summary: "Download the matrix + every sale line or visit, at any size (System Admin).",

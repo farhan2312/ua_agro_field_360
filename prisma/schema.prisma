@@ -964,6 +964,36 @@ model EmailLog {
   @@index([dedupeKey])
 }
 
+/// A user-built analytics report (Analytics → My analytics): pages of visuals laid out on a grid. `doc` is
+/// the whole report spec (lib/custom-analytics/types.ts ReportDoc). Data is always resolved in the VIEWER's
+/// own scope, so sharing never widens anyone's access.
+model CustomReport {
+  id          Int                 @id @default(autoincrement())
+  ownerId     Int // User.id of the creator (only they can edit / share / delete)
+  ownerName   String?
+  title       String
+  description String?
+  doc         Json // { version, pages: [{ id, name, filters, visuals: [...] }] }
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  shares      CustomReportShare[]
+
+  @@index([ownerId])
+}
+
+/// View-only share of a CustomReport with one existing user (shows under "Shared with me").
+model CustomReportShare {
+  id           Int          @id @default(autoincrement())
+  reportId     Int
+  userId       Int
+  sharedByName String?
+  createdAt    DateTime     @default(now())
+  report       CustomReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, userId])
+  @@index([userId])
+}
+
 /// In-app notification inbox (the header bell). One row per recipient per item. "Rolling" items (e.g. an
 /// RM's daily "N new visits to review") reuse ONE row via dedupeKey: each new event bumps `count`,
 /// refreshes the body and resurfaces it as unread, so the inbox never floods.
