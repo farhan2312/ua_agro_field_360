@@ -29,6 +29,8 @@ export function appUrl(path = "/"): string {
 
 export interface SendEmailInput {
   to: string;
+  /** Extra recipients on the same message (invalid ones and duplicates of `to` are dropped). */
+  cc?: string[];
   subject: string;
   html: string;
   text?: string;
@@ -52,6 +54,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
   const chk = checkEmail(input.to);
   if (!chk.ok || !chk.normalized) return { ok: false, skipped: "bad-address", error: chk.error ?? "No address." };
   const to = chk.normalized;
+  const cc = [...new Set((input.cc ?? []).map((a) => { const k = checkEmail(a); return k.ok ? k.normalized : null; }).filter((a): a is string => !!a && a !== to))];
 
   if (input.dedupeKey) {
     const dup = await prisma.emailLog.findFirst({ where: { dedupeKey: input.dedupeKey, ok: true }, select: { id: true } }).catch(() => null);
@@ -71,6 +74,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
         body: JSON.stringify({
           from: cfg.from,
           to: [to],
+          ...(cc.length ? { cc } : {}),
           subject: input.subject.slice(0, 250),
           html: input.html,
           ...(input.text != null ? { text: input.text } : {}),
@@ -91,7 +95,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
 
   await prisma.emailLog.create({
     data: {
-      to, subject: input.subject.slice(0, 250), type: input.type, userId: input.userId ?? null, ok,
+      to: cc.length ? `${to} · cc ${cc.join(", ")}` : to, subject: input.subject.slice(0, 250), type: input.type, userId: input.userId ?? null, ok,
       providerId: providerId ?? null, error: error?.slice(0, 500) ?? null, dedupeKey: input.dedupeKey ?? null,
       sentByName: input.sentByName ?? null,
     },
