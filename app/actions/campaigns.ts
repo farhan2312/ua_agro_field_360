@@ -18,6 +18,7 @@ import { asCoupons } from "@/lib/campaign-phases";
 import { logAudit } from "@/lib/audit";
 import { getSession } from "@/lib/auth";
 import { cropLabel } from "@/lib/crops";
+import { locVal, locMatcher, locItemsOf, sanitizeLoc, locSummary, locLabel, type LocFilter, type LocItem } from "@/lib/campaign-location";
 import { buildWorkbookB64, type Cell } from "@/lib/xlsx-export";
 import { buildStyledWorkbookB64 } from "@/lib/xlsx-styled";
 import { sendSms, zapConfig, listSmsTemplates, type SmsTemplate } from "@/lib/zapsms";
@@ -688,6 +689,7 @@ export async function listCampaigns(): Promise<CampaignListItem[]> {
 /** Scoped enrolled-farmer list for a campaign — TEST group only (the CONTROL holdout is never contacted). */
 export interface CampaignMemberVM {
   id: number; name: string; mobile: string | null; village: string | null; storeId: number | null; store: string | null;
+  district: string | null; region: string | null; // region = enrolled store's zone; district/village from the farmer (normalised)
   segment: string; valueSegment: string | null; reached: boolean; mediums: string[]; comment: string | null; reachedAt: string | null;
   reachedBy: string | null; reachedByCode: string | null;
   response: string | null; responseCrop: string | null; // interest outcome + the crop when OTHER_CROP
@@ -707,15 +709,17 @@ export async function getCampaignMembers(campaignId: number, limit = 25000): Pro
   });
   if (!members.length) return [];
   const [farmers, stores] = await Promise.all([
-    prisma.farmer.findMany({ where: { id: { in: members.map((m) => m.farmerId) } }, select: { id: true, name: true, mobile: true, village: true } }),
-    prisma.store.findMany({ select: { id: true, name: true } }),
+    prisma.farmer.findMany({ where: { id: { in: members.map((m) => m.farmerId) } }, select: { id: true, name: true, mobile: true, village: true, district: true } }),
+    prisma.store.findMany({ select: { id: true, name: true, zone: true } }),
   ]);
   const fMap = new Map(farmers.map((f) => [f.id, f]));
   const sMap = new Map(stores.map((s) => [s.id, shortStoreName(s.name)]));
+  const zMap = new Map(stores.map((s) => [s.id, locVal(s.zone)]));
   return members.map((m) => {
     const f = fMap.get(m.farmerId);
     return {
-      id: m.id, name: f?.name ?? `Farmer #${m.farmerId}`, mobile: f?.mobile ?? null, village: f?.village ?? null,
+      id: m.id, name: f?.name ?? `Farmer #${m.farmerId}`, mobile: f?.mobile ?? null, village: locVal(f?.village),
+      district: locVal(f?.district), region: m.storeId != null ? zMap.get(m.storeId) ?? null : null,
       storeId: m.storeId, store: m.storeId != null ? sMap.get(m.storeId) ?? null : null,
       segment: m.segment, valueSegment: m.valueSegment, reached: m.reached, mediums: m.mediums, comment: m.comment, reachedAt: iso(m.reachedAt),
       reachedBy: m.reachedBy, reachedByCode: m.reachedByCode, response: m.response, responseCrop: m.responseCrop,
@@ -729,19 +733,20 @@ export async function getCampaignMembers(campaignId: number, limit = 25000): Pro
  * with everything done to them: channels (call/SMS/WhatsApp/in-person), interest response, mass-send
  * delivery, actual SMS/WhatsApp send counts, who reached them + when, and the working comment.
  */
-export async function exportCampaignTrackerXlsx(campaignId: number, campaignName: string): Promise<{ ok: boolean; filename?: string; b64?: string; error?: string }> {
+export async function exportCampaignTrackerXlsx(campaignId: number, campaignName: string, locIn?: LocFilter): Promise<{ ok: boolean; filename?: string; b64?: string; error?: string }> {
   const perm = await requireManager(); if (!perm.ok) return perm;
-  const members = await prisma.campaignMember.findMany({
+  const loc = sanitizeLoc(locIn); // optional Region/District/Village filter (same as the tracker screen)
+  const allMembers = await prisma.campaignMember.findMany({
     where: { campaignId },
     orderBy: [{ group: "asc" }, { id: "asc" }],
     select: { id: true, farmerId: true, group: true, segment: true, valueSegment: true, lifecycleSegment: true, storeId: true, reached: true, mediums: true, response: true, responseCrop: true, comment: true, reachedBy: true, reachedByCode: true, reachedAt: true, broadcastMediums: true },
     take: 100000,
   });
-  if (!members.length) return { ok: false, error: "No enrolled farmers to export." };
+  if (!allMembers.length) return { ok: false, error: "No enrolled farmers to export." };
 
   const [farmers, stores, phases, smsLogs, waLogs, camp] = await Promise.all([
-    prisma.farmer.findMany({ where: { id: { in: members.map((m) => m.farmerId) } }, select: { id: true, name: true, mobile: true, village: true } }),
-    prisma.store.findMany({ select: { id: true, code: true, name: true, regionalManager: true } }),
+    prisma.farmer.findMany({ where: { id: { in: allMembers.map((m) => m.farmerId) } }, select: { id: true, name: true, mobile: true, village: true, district: true } }),
+    prisma.store.findMany({ select: { id: true, code: true, name: true, regionalManager: true, zone: true } }),
     prisma.campaignPhase.findMany({ where: { campaignId }, orderBy: { ordinal: "asc" }, select: { ordinal: true, name: true, type: true, defaultStart: true, defaultEnd: true, coupons: true } }),
     prisma.smsLog.findMany({ where: { campaignId, memberId: { not: null } }, select: { memberId: true, createdAt: true } }),
     prisma.whatsAppLog.findMany({ where: { campaignId, memberId: { not: null } }, select: { memberId: true, createdAt: true } }),
@@ -751,6 +756,16 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
   const sMap = new Map(stores.map((s) => [s.id, shortStoreName(s.name) || s.name]));
   const rmMap = new Map(stores.map((s) => [s.id, (s.regionalManager ?? "").trim()]));
   const codeMap = new Map(stores.map((s) => [s.id, s.code]));
+  const zoneMap = new Map(stores.map((s) => [s.id, locVal(s.zone)]));
+  // Location of a member: village + district from the farmer, region = enrolled store's zone.
+  const locOf = (m: { farmerId: number; storeId: number | null }) => {
+    const f = fMap.get(m.farmerId);
+    return { village: locVal(f?.village), district: locVal(f?.district), region: m.storeId != null ? zoneMap.get(m.storeId) ?? null : null };
+  };
+  const inLoc = locMatcher(loc);
+  const members = loc ? allMembers.filter((m) => inLoc(locOf(m))) : allMembers;
+  if (!members.length) return { ok: false, error: "No enrolled farmers match the location filter." };
+  const locCols = (m: { farmerId: number; storeId: number | null }): string[] => { const l = locOf(m); return [l.village ?? "", l.district ?? "", l.region ?? ""]; };
 
   const MED: Record<string, string> = { CALL: "Call", WHATSAPP: "WhatsApp", SMS: "SMS", IN_PERSON: "In-person", UNREACHABLE: "Unreachable" };
   const RESP: Record<string, string> = { INTERESTED: "Interested", NOT_INTERESTED: "Not interested", OTHER_CROP: "Other crop" };
@@ -798,6 +813,7 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
   // ── Overview sheet ──
   const overview: (string | number)[][] = [
     ["Campaign", campaignName],
+    ["Location filter", locSummary(loc)],
     ["Enrolled (total)", members.length],
     ["  Test", test.length],
     ["  Control", members.length - test.length],
@@ -834,14 +850,14 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
   ];
 
   // ── All farmers sheet (full current outreach state) ──
-  const allHeader = ["Group", "Farmer", "Mobile", "Village", "Store", "RM", "Value segment", "Lifecycle", "Reached", "Channels", "Response", "Response crop", "Broadcast delivered", "SMS sent", "WhatsApp sent",
+  const allHeader = ["Group", "Farmer", "Mobile", "Village", "District", "Region", "Store code", "Store", "RM", "Value segment", "Lifecycle", "Reached", "Channels", "Response", "Response crop", "Broadcast delivered", "SMS sent", "WhatsApp sent",
     ...(anyCoupons ? ["Coupon(s) redeemed", "Coupon revenue (₹)"] : []),
     "Recorded by", "Recorded at (IST)", "Comment"];
   const allRows: (string | number)[][] = members.map((m) => {
     const f = fMap.get(m.farmerId);
     const cp = couponByFarmer.get(m.farmerId);
     return [
-      m.group ?? "", f?.name ?? `Farmer #${m.farmerId}`, f?.mobile ?? "", f?.village ?? "", store(m.storeId), rm(m.storeId),
+      m.group ?? "", f?.name ?? `Farmer #${m.farmerId}`, f?.mobile ?? "", ...locCols(m), storeCode(m.storeId), store(m.storeId), rm(m.storeId),
       m.valueSegment ? segMeta(m.valueSegment).label : (m.segment ? segMeta(m.segment).label : ""),
       m.lifecycleSegment ? segMeta(m.lifecycleSegment).label : "",
       m.reached ? "Yes" : "No",
@@ -860,8 +876,8 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
   ];
 
   // ── One sheet per round — message sends in that round's window + who was reached in it ──
-  const roundHeader = ["Farmer", "Mobile", "Store", "RM", "SMS sent (round)", "WhatsApp sent (round)", "Reached in round", "Response (current)", "Comment (current)", "Recorded by", "Recorded at (IST)"];
-  const roundHeaderCoupon = ["Farmer", "Mobile", "Store", "RM", "Group", "SMS sent (round)", "WhatsApp sent (round)", "Reached in round", "Redeemed coupon", "Coupon revenue (₹)", "Response (current)", "Comment (current)", "Recorded by", "Recorded at (IST)"];
+  const roundHeader = ["Farmer", "Mobile", "Village", "District", "Region", "Store", "RM", "SMS sent (round)", "WhatsApp sent (round)", "Reached in round", "Response (current)", "Comment (current)", "Recorded by", "Recorded at (IST)"];
+  const roundHeaderCoupon = ["Farmer", "Mobile", "Village", "District", "Region", "Store", "RM", "Group", "SMS sent (round)", "WhatsApp sent (round)", "Reached in round", "Redeemed coupon", "Coupon revenue (₹)", "Response (current)", "Comment (current)", "Recorded by", "Recorded at (IST)"];
   for (const p of phases) {
     const rc = roundCoupon.get(p.ordinal)!;
     const isCoupon = rc.codes.length > 0;
@@ -874,7 +890,7 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
       // Coupon rounds also list farmers who redeemed even with no logged send/reach (e.g. via broadcast).
       if (!sms && !wa && !reachedIn && !(isCoupon && redeemed > 0)) continue;
       const f = fMap.get(m.farmerId);
-      const base: (string | number)[] = [f?.name ?? `Farmer #${m.farmerId}`, f?.mobile ?? "", store(m.storeId), rm(m.storeId)];
+      const base: (string | number)[] = [f?.name ?? `Farmer #${m.farmerId}`, f?.mobile ?? "", ...locCols(m), store(m.storeId), rm(m.storeId)];
       const tail: (string | number)[] = [m.response ? RESP[m.response] ?? m.response : "", reachedIn ? (m.comment ?? "") : "", reachedIn && m.reachedBy ? `${m.reachedBy}${m.reachedByCode ? ` (${m.reachedByCode})` : ""}` : "", reachedIn ? fmtTs(m.reachedAt) : ""];
       rrows.push(isCoupon
         ? [...base, m.group ?? "", sms, wa, reachedIn ? "Yes" : "", redeemed > 0 ? "Yes" : "", redeemed > 0 ? Math.round(redeemed) : "", ...tail]
@@ -893,6 +909,7 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
     const memberIds = [...new Set(members.map((m) => m.farmerId))];
     const memMeta = new Map(members.map((m) => [m.farmerId, {
       group: m.group ?? "",
+      loc: locCols(m),
       vseg: m.valueSegment ? segMeta(m.valueSegment).label : (m.segment ? segMeta(m.segment).label : ""),
       lseg: m.lifecycleSegment ? segMeta(m.lifecycleSegment).label : "",
       reached: m.reached ? "Yes" : "No",
@@ -907,13 +924,13 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
       : [];
     // Test rows first, then control (Excel autofilter still lets them slice either way).
     txns.sort((a, b) => (memMeta.get(a.farmerId!)?.group === memMeta.get(b.farmerId!)?.group ? 0 : memMeta.get(a.farmerId!)?.group === "TEST" ? -1 : 1));
-    const txnHeader = ["Group", "Reached", "Farmer", "Mobile", "Store code", "Store", "RM", "Value segment", "Lifecycle", "Date", "Order No", "Item", "Crop", "Qty", "UOM", "Base value (₹)", "Coupon"];
+    const txnHeader = ["Group", "Reached", "Farmer", "Mobile", "Village", "District", "Region", "Store code", "Store", "RM", "Value segment", "Lifecycle", "Date", "Order No", "Item", "Crop", "Qty", "UOM", "Base value (₹)", "Coupon"];
     const txnRows: (string | number)[][] = txns.map((r) => {
       const f = r.farmerId != null ? fMap.get(r.farmerId) : undefined;
       const meta = r.farmerId != null ? memMeta.get(r.farmerId) : undefined;
       const coupon = (r.itemCouponCode && r.itemCouponCode !== "0" ? r.itemCouponCode : "") || (r.invoiceCouponCode && r.invoiceCouponCode !== "0" ? r.invoiceCouponCode : "");
       return [
-        meta?.group ?? "", meta?.reached ?? "", f?.name ?? (r.farmerId != null ? `Farmer #${r.farmerId}` : "—"), f?.mobile ?? "", storeCode(r.storeId), store(r.storeId), rm(r.storeId), meta?.vseg ?? "", meta?.lseg ?? "",
+        meta?.group ?? "", meta?.reached ?? "", f?.name ?? (r.farmerId != null ? `Farmer #${r.farmerId}` : "—"), f?.mobile ?? "", ...(meta?.loc ?? ["", "", ""]), storeCode(r.storeId), store(r.storeId), rm(r.storeId), meta?.vseg ?? "", meta?.lseg ?? "",
         r.soldAt ? fmtDay(r.soldAt) : "", r.orderNo ?? "", r.itemRaw ?? "", r.cropTag ? cropLabel(r.cropTag) : "",
         r.qty ?? 0, r.uom ?? "", Math.round(r.basic ?? 0), coupon,
       ];
@@ -924,11 +941,12 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
   // ── Performance (formulas) sheet — Shilpa's uplift table with LIVE Excel formula linking ──
   // Raw inputs (Test/Reach/Buy/Control/Ctrl Buy/Total sales) are values; every derived column
   // (%buy, uplift %, incremental) is a real formula so the workbook recalculates when opened.
-  const tracker = await getCampaignTracker(campaignId);
+  const tracker = await getCampaignTracker(campaignId, loc ?? undefined);
   if (tracker) {
     const VIEW_LBL: Record<MatchView, string> = { coupon: "Coupon-redeemed", crop: "Crop-matched", total: "All transactions" };
     const COLHDR = ["Segment", "Test", "Reach", "Buy", "Test %Buy", "Reach %Buy", "Control", "Ctrl Buy", "Ctrl %Buy", "Uplift %", "Incr (all test)", "Incr (reached)", "Total sales (all test)", "Total sales (reached)"];
     const perf: Cell[][] = [
+      [`Location: ${locSummary(loc)}`],
       ["Campaign performance — live formulas. Uplift % = (Reach %Buy − Ctrl %Buy) ÷ Reach %Buy · Incremental = Uplift % × total sales (all transactions). Leads/No-spend: no control → full sales are incremental."],
       [],
     ];
@@ -967,26 +985,34 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
 
 /* ── Campaign audience analytics: composition breakdowns + Segment × Store matrix ── */
 export interface SegCol { key: string; label: string; color: string; bg: string }
+/** One outreach row: `store` is the row label (centre / region / district / village); `sub` = its parent (store's region, village's district). */
+export interface CallRow { store: string; sub: string; test: number; reached: number; call: number; whatsapp: number; sms: number; inPerson: number; pending: number }
 export interface CampaignAnalytics {
   total: number;
   byValue: (SegCol & { count: number })[];       // value-tier composition (HNI/Potential/Regular)
   byLifecycle: (SegCol & { count: number })[];    // lifecycle composition (New/At Risk/Lapsed)
   byStore: { label: string; count: number }[];
+  byRegion: { label: string; count: number }[];
+  byDistrict: { label: string; count: number }[];
   byVillage: { label: string; count: number }[];
   byCrop: { label: string; count: number }[];
   valueCols: SegCol[];      // matrix value columns
   lifecycleCols: SegCol[];  // matrix lifecycle columns
   /** Merged Store × (Value | Lifecycle) matrix — both count-sets sum to `total` per store. */
-  matrix: { store: string; value: Record<string, number>; lifecycle: Record<string, number>; total: number }[];
+  matrix: { store: string; region: string; value: Record<string, number>; lifecycle: Record<string, number>; total: number }[];
   /** Per-centre (store) outreach breakdown over the TEST group: reached + how (Call/WA/SMS/In-person).
    *  Scoped like everything else, so an RM sees only their own centres. A farmer reached by more than
    *  one approach counts under each, so the approach columns can exceed `reached`. */
-  callByStore: { store: string; test: number; reached: number; call: number; whatsapp: number; sms: number; inPerson: number; pending: number }[];
+  callByStore: CallRow[];
+  /** The same outreach breakdown by farmer location (TEST group). Village rows are capped at the top 300. */
+  callByLocation: { region: CallRow[]; district: CallRow[]; village: CallRow[] };
+  /** Distinct Region/District/Village combinations of the campaign's farmers (scope applied, filters NOT) — filter options. */
+  locItems: LocItem[];
   /** Regional managers that have members in this campaign (within the caller's scope) — for the RM filter. */
   rmOptions: string[];
 }
 
-const EMPTY_ANALYTICS: CampaignAnalytics = { total: 0, byValue: [], byLifecycle: [], byStore: [], byVillage: [], byCrop: [], valueCols: [], lifecycleCols: [], matrix: [], callByStore: [], rmOptions: [] };
+const EMPTY_ANALYTICS: CampaignAnalytics = { total: 0, byValue: [], byLifecycle: [], byStore: [], byRegion: [], byDistrict: [], byVillage: [], byCrop: [], valueCols: [], lifecycleCols: [], matrix: [], callByStore: [], callByLocation: { region: [], district: [], village: [] }, locItems: [], rmOptions: [] };
 const colOf = (k: string): SegCol => { const m = segMeta(k); return { key: k, label: m.label, color: m.color, bg: m.bg }; };
 
 /**
@@ -994,7 +1020,8 @@ const colOf = (k: string): SegCol => { const m = segMeta(k); return { key: k, la
  * Scoped like the other member views (officer→store, RM→zone, central→all). Counts every enrolled
  * member (TEST + CONTROL). Returns single-dimension breakdowns + a Segment × Store cross-tab.
  */
-export async function getCampaignAnalytics(campaignId: number, rms?: string[]): Promise<CampaignAnalytics> {
+export async function getCampaignAnalytics(campaignId: number, rms?: string[], locIn?: LocFilter): Promise<CampaignAnalytics> {
+  const loc = sanitizeLoc(locIn);
   const scope = await memberScopeWhere();
   if (scope === "none") return EMPTY_ANALYTICS;
   const allMembers = await prisma.campaignMember.findMany({
@@ -1006,46 +1033,67 @@ export async function getCampaignAnalytics(campaignId: number, rms?: string[]): 
 
   const farmerIds = [...new Set(allMembers.map((m) => m.farmerId))];
   const [farmers, stores] = await Promise.all([
-    prisma.farmer.findMany({ where: { id: { in: farmerIds } }, select: { id: true, village: true, cropTags: true } }),
-    prisma.store.findMany({ select: { id: true, name: true, regionalManager: true } }),
+    prisma.farmer.findMany({ where: { id: { in: farmerIds } }, select: { id: true, village: true, district: true, cropTags: true } }),
+    prisma.store.findMany({ select: { id: true, name: true, regionalManager: true, zone: true } }),
   ]);
   const fMap = new Map(farmers.map((f) => [f.id, f]));
   const sMap = new Map(stores.map((s) => [s.id, shortStoreName(s.name)]));
   const rmByStore = new Map(stores.map((s) => [s.id, (s.regionalManager ?? "").trim()]));
+  const zoneByStore = new Map(stores.map((s) => [s.id, locVal(s.zone)]));
+  const zoneByName = new Map(stores.map((s) => [shortStoreName(s.name), locVal(s.zone) ?? ""]));
+  const locOf = (m: { farmerId: number; storeId: number | null }) => {
+    const f = fMap.get(m.farmerId);
+    return { village: locVal(f?.village), district: locVal(f?.district), region: m.storeId != null ? zoneByStore.get(m.storeId) ?? null : null };
+  };
+  const locItems = locItemsOf(allMembers.map(locOf)); // filter options: every location in scope, before RM/location filters
 
   // RM options = every RM with members in this campaign (within scope), computed BEFORE the RM filter.
   const rmOptions = [...new Set(allMembers.map((m) => (m.storeId != null ? rmByStore.get(m.storeId) : "") || "").filter(Boolean))].sort((a, b) => a.localeCompare(b));
   // Apply the optional RM filter in-memory (keeps it to one members query).
   const rmSet = rms?.length ? new Set(rms) : null;
-  const members = rmSet ? allMembers.filter((m) => m.storeId != null && rmSet.has(rmByStore.get(m.storeId) ?? "")) : allMembers;
-  if (!members.length) return { ...EMPTY_ANALYTICS, rmOptions };
+  const inLoc = locMatcher(loc);
+  const members = allMembers.filter((m) =>
+    (!rmSet || (m.storeId != null && rmSet.has(rmByStore.get(m.storeId) ?? ""))) && (!loc || inLoc(locOf(m))));
+  if (!members.length) return { ...EMPTY_ANALYTICS, rmOptions, locItems };
 
   const vcount: Record<string, number> = {}, lcount: Record<string, number> = {};
   const store: Record<string, number> = {};
   const village: Record<string, number> = {};
+  const region: Record<string, number> = {}, district: Record<string, number> = {};
   const crop: Record<string, number> = {};
   // Store → { value → count, lifecycle → count } cross-tab (both sum to the store's member count).
   const cross = new Map<string, { value: Record<string, number>; lifecycle: Record<string, number>; total: number }>();
   // Centre-wise outreach (TEST group only): per store → reached + approach counts.
-  type CallAcc = { test: number; reached: number; call: number; whatsapp: number; sms: number; inPerson: number };
+  type CallAcc = { sub: string; test: number; reached: number; call: number; whatsapp: number; sms: number; inPerson: number };
   const callMap = new Map<string, CallAcc>();
+  // Same outreach tallies keyed by location. Village keys carry the district (same name can sit in two districts).
+  const callLoc = { region: new Map<string, CallAcc>(), district: new Map<string, CallAcc>(), village: new Map<string, CallAcc>() };
+  const tally = (map: Map<string, CallAcc>, key: string, sub: string, m: (typeof members)[number]) => {
+    const cs = map.get(key) ?? map.set(key, { sub, test: 0, reached: 0, call: 0, whatsapp: 0, sms: 0, inPerson: 0 }).get(key)!;
+    cs.test += 1;
+    if (m.reached) cs.reached += 1;
+    const meds = m.mediums ?? [];
+    if (meds.includes("CALL")) cs.call += 1;
+    if (meds.includes("WHATSAPP")) cs.whatsapp += 1;
+    if (meds.includes("SMS")) cs.sms += 1;
+    if (meds.includes("IN_PERSON")) cs.inPerson += 1;
+  };
   for (const m of members) {
     const f = fMap.get(m.farmerId);
     const storeName = m.storeId != null ? sMap.get(m.storeId) ?? "—" : "—";
+    const loc_ = locOf(m);
     if (m.group === "TEST") {
-      const cs = callMap.get(storeName) ?? callMap.set(storeName, { test: 0, reached: 0, call: 0, whatsapp: 0, sms: 0, inPerson: 0 }).get(storeName)!;
-      cs.test += 1;
-      if (m.reached) cs.reached += 1;
-      const meds = m.mediums ?? [];
-      if (meds.includes("CALL")) cs.call += 1;
-      if (meds.includes("WHATSAPP")) cs.whatsapp += 1;
-      if (meds.includes("SMS")) cs.sms += 1;
-      if (meds.includes("IN_PERSON")) cs.inPerson += 1;
+      tally(callMap, storeName, zoneByName.get(storeName) ?? "", m);
+      tally(callLoc.region, locLabel(loc_.region), "", m);
+      tally(callLoc.district, locLabel(loc_.district), "", m);
+      tally(callLoc.village, `${locLabel(loc_.village)}\u0001${loc_.district ?? ""}`, loc_.district ?? "", m);
     }
+    region[locLabel(loc_.region)] = (region[locLabel(loc_.region)] ?? 0) + 1;
+    district[locLabel(loc_.district)] = (district[locLabel(loc_.district)] ?? 0) + 1;
     // Fall back to deriving from the legacy collapsed snapshot for pre-split members.
     const v = m.valueSegment ?? (VALUE_SEGMENTS.includes(m.segment as never) ? m.segment : "REGULAR");
     const l = m.lifecycleSegment ?? (LIFECYCLE_SEGMENTS.includes(m.segment as never) ? m.segment : "LAPSED");
-    const villageName = f?.village || "—";
+    const villageName = loc_.village || "—";
     vcount[v] = (vcount[v] ?? 0) + 1;
     lcount[l] = (lcount[l] ?? 0) + 1;
     store[storeName] = (store[storeName] ?? 0) + 1;
@@ -1057,20 +1105,26 @@ export async function getCampaignAnalytics(campaignId: number, rms?: string[]): 
     row.total += 1;
   }
   const top = (o: Record<string, number>, k = 12) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, k).map(([label, count]) => ({ label, count }));
-  const matrix = [...cross.entries()].map(([storeName, c]) => ({ store: storeName, value: c.value, lifecycle: c.lifecycle, total: c.total })).sort((a, b) => b.total - a.total);
+  const matrix = [...cross.entries()].map(([storeName, c]) => ({ store: storeName, region: zoneByName.get(storeName) ?? "", value: c.value, lifecycle: c.lifecycle, total: c.total })).sort((a, b) => b.total - a.total);
+  const callRows = (map: Map<string, CallAcc>, cap = Infinity): CallRow[] => [...map.entries()]
+    .map(([key, c]) => ({ store: key.split("\u0001")[0], ...c, pending: Math.max(0, c.test - c.reached) }))
+    .sort((a, b) => b.test - a.test || a.store.localeCompare(b.store))
+    .slice(0, cap);
   return {
     total: members.length,
     byValue: VALUE_SEGMENTS.filter((k) => vcount[k]).map((k) => ({ ...colOf(k), count: vcount[k] })),
     byLifecycle: LIFECYCLE_SEGMENTS.filter((k) => lcount[k]).map((k) => ({ ...colOf(k), count: lcount[k] })),
     byStore: top(store),
+    byRegion: top(region),
+    byDistrict: top(district),
     byVillage: top(village),
     byCrop: top(crop).map((x) => ({ label: cropLabel(x.label), count: x.count })),
     valueCols: [...VALUE_SEGMENTS].map(colOf),
     lifecycleCols: [...LIFECYCLE_SEGMENTS].map(colOf),
     matrix,
-    callByStore: [...callMap.entries()]
-      .map(([store, c]) => ({ store, ...c, pending: Math.max(0, c.test - c.reached) }))
-      .sort((a, b) => b.test - a.test),
+    callByStore: callRows(callMap),
+    callByLocation: { region: callRows(callLoc.region), district: callRows(callLoc.district), village: callRows(callLoc.village, 300) },
+    locItems,
     rmOptions,
   };
 }
@@ -1080,9 +1134,9 @@ export async function getCampaignAnalytics(campaignId: number, rms?: string[]): 
  * getCampaignAnalytics), so the file matches the screen: sheet 1 = Call stats by centre (the headline
  * table), sheet 2 = the Value + Lifecycle × Store composition matrix. Respects the RM filter + scope.
  */
-export async function exportCampaignAudienceXlsx(campaignId: number, campaignName: string, rms?: string[]): Promise<{ ok: boolean; filename?: string; b64?: string; error?: string }> {
-  const a = await getCampaignAnalytics(campaignId, rms);
-  if (!a.total) return { ok: false, error: "No enrolled farmers in your scope for this campaign." };
+export async function exportCampaignAudienceXlsx(campaignId: number, campaignName: string, rms?: string[], locIn?: LocFilter): Promise<{ ok: boolean; filename?: string; b64?: string; error?: string }> {
+  const a = await getCampaignAnalytics(campaignId, rms, locIn);
+  if (!a.total) return { ok: false, error: "No enrolled farmers in your scope (and filters) for this campaign." };
 
   // Store → RM, for the required Store + RM columns (callByStore / matrix are keyed by short store name).
   const stores = await prisma.store.findMany({ select: { name: true, regionalManager: true } });
@@ -1094,9 +1148,14 @@ export async function exportCampaignAudienceXlsx(campaignId: number, campaignNam
   const tot = cbs.reduce((t, s) => ({ test: t.test + s.test, reached: t.reached + s.reached, call: t.call + s.call, whatsapp: t.whatsapp + s.whatsapp, sms: t.sms + s.sms, inPerson: t.inPerson + s.inPerson, pending: t.pending + s.pending }),
     { test: 0, reached: 0, call: 0, whatsapp: 0, sms: 0, inPerson: 0, pending: 0 });
   const callSheet: (string | number)[][] = [
-    ["Centre", "RM", "Test farmers", "Reached", "Reached %", "Call", "WhatsApp", "SMS", "In-person", "Pending"],
-    ["All centres", "", tot.test, tot.reached, pct(tot.reached, tot.test), tot.call, tot.whatsapp, tot.sms, tot.inPerson, tot.pending],
-    ...cbs.map((s) => [s.store, rmByName.get(s.store) ?? "", s.test, s.reached, pct(s.reached, s.test), s.call, s.whatsapp, s.sms, s.inPerson, s.pending]),
+    ["Centre", "Region", "RM", "Test farmers", "Reached", "Reached %", "Call", "WhatsApp", "SMS", "In-person", "Pending"],
+    ["All centres", "", "", tot.test, tot.reached, pct(tot.reached, tot.test), tot.call, tot.whatsapp, tot.sms, tot.inPerson, tot.pending],
+    ...cbs.map((s) => [s.store, s.sub, rmByName.get(s.store) ?? "", s.test, s.reached, pct(s.reached, s.test), s.call, s.whatsapp, s.sms, s.inPerson, s.pending]),
+  ];
+  // Location sheets — same outreach columns keyed by Region / District / Village (TEST group).
+  const locSheet = (first: string, rows: CallRow[], withSub?: string): (string | number)[][] => [
+    [first, ...(withSub ? [withSub] : []), "Test farmers", "Reached", "Reached %", "Call", "WhatsApp", "SMS", "In-person", "Pending"],
+    ...rows.map((s) => [s.store, ...(withSub ? [s.sub] : []), s.test, s.reached, pct(s.reached, s.test), s.call, s.whatsapp, s.sms, s.inPerson, s.pending]),
   ];
 
   // Sheet 2 — Value + Lifecycle × Store composition matrix.
@@ -1104,15 +1163,18 @@ export async function exportCampaignAudienceXlsx(campaignId: number, campaignNam
   const vTot: Record<string, number> = {}, lTot: Record<string, number> = {};
   for (const r of a.matrix) { for (const c of V) vTot[c.key] = (vTot[c.key] ?? 0) + (r.value[c.key] ?? 0); for (const c of L) lTot[c.key] = (lTot[c.key] ?? 0) + (r.lifecycle[c.key] ?? 0); }
   const matrixSheet: (string | number)[][] = [
-    ["Store", "RM", ...V.map((c) => c.label), "Segment Total", ...L.map((c) => c.label), "Lifecycle Total"],
-    ["All stores", "", ...V.map((c) => vTot[c.key] ?? 0), a.total, ...L.map((c) => lTot[c.key] ?? 0), a.total],
-    ...a.matrix.map((r) => [r.store, rmByName.get(r.store) ?? "", ...V.map((c) => r.value[c.key] ?? 0), r.total, ...L.map((c) => r.lifecycle[c.key] ?? 0), r.total]),
+    ["Store", "Region", "RM", ...V.map((c) => c.label), "Segment Total", ...L.map((c) => c.label), "Lifecycle Total"],
+    ["All stores", "", "", ...V.map((c) => vTot[c.key] ?? 0), a.total, ...L.map((c) => lTot[c.key] ?? 0), a.total],
+    ...a.matrix.map((r) => [r.store, r.region, rmByName.get(r.store) ?? "", ...V.map((c) => r.value[c.key] ?? 0), r.total, ...L.map((c) => r.lifecycle[c.key] ?? 0), r.total]),
   ];
 
   const safe = (campaignName || "campaign").replace(/[\\/?*[\]:]/g, " ").trim().slice(0, 60) || "campaign";
   const b64 = await buildStyledWorkbookB64([
-    { name: "Call stats by centre", rows: callSheet, leftCols: [0, 1], boldRows: [1] }, // Centre, RM text; totals row bold
-    { name: "Value + Lifecycle x Store", rows: matrixSheet, leftCols: [0, 1], boldRows: [1] },
+    { name: "Call stats by centre", rows: callSheet, leftCols: [0, 1, 2], boldRows: [1] }, // Centre, Region, RM text; totals row bold
+    { name: "Call stats by region", rows: locSheet("Region", a.callByLocation.region), leftCols: [0] },
+    { name: "Call stats by district", rows: locSheet("District", a.callByLocation.district), leftCols: [0] },
+    { name: "Call stats by village", rows: locSheet("Village", a.callByLocation.village, "District"), leftCols: [0, 1] },
+    { name: "Value + Lifecycle x Store", rows: matrixSheet, leftCols: [0, 1, 2], boldRows: [1] },
   ]);
   return { ok: true, filename: `${safe} - analytics.xlsx`, b64 };
 }
@@ -1364,12 +1426,15 @@ async function computeScope(members: UpliftMemberVM[], pf: ProductFilter, codes:
   return { key, label, windowStart: iso(ws)!, windowEnd: iso(we)!, couponCodes: codes, byValue: build(valueKeyOf, VALUE_SEGMENTS), byLifecycle: build(lifecycleKeyOf, LIFECYCLE_SEGMENTS) };
 }
 
+export interface ReachRow { store: string; sub: string; reached: number; total: number; broadcast: number }
 export interface CampaignReach {
   testTotal: number; reached: number;
   byApproach: { CALL: number; WHATSAPP: number; SMS: number; IN_PERSON: number; unspecified: number };
   byResponse: { interested: number; notInterested: number; otherCrop: number; noResponse: number };
   otherCrops: { crop: string; count: number }[]; // crops requested via "interested in another crop"
   byStore: { store: string; reached: number; total: number; broadcast: number }[]; // outreach progress per store (TEST group)
+  /** Same progress by farmer location (TEST group). Village rows capped at the top 300. */
+  byLocation: { region: ReachRow[]; district: ReachRow[]; village: ReachRow[] };
   broadcastDelivered: number; // TEST members a mass send DELIVERED to (separate from individual `reached`)
   byBroadcastChannel: { SMS: number; WHATSAPP: number };
 }
@@ -1381,6 +1446,8 @@ export interface CampaignTracker {
   reach: CampaignReach;
   attribution: CampaignAttribution;
   scopes: TrackerScope[]; // [0] = overall (all rounds); then one per round
+  locItems: LocItem[];    // Region/District/Village combinations of ALL members — filter options
+  locFiltered: boolean;   // a location filter narrowed everything above
 }
 
 /**
@@ -1388,7 +1455,8 @@ export interface CampaignTracker {
  * Attributed revenue = matched purchases (segment-mirrored products) by CONTACTED (reached) TEST farmers,
  * over the window [campaign start, campaign end + 30 days]. Populated as monthly sales are imported.
  */
-export async function getCampaignTracker(campaignId: number): Promise<CampaignTracker | null> {
+export async function getCampaignTracker(campaignId: number, locIn?: LocFilter): Promise<CampaignTracker | null> {
+  const loc = sanitizeLoc(locIn);
   const { role } = await getScope();
   if (!canManage(role)) return null; // officers/RMs execute via the scoped farmer list, not the tracker
   const camp = await prisma.campaign.findUnique({ where: { id: campaignId } });
@@ -1414,7 +1482,21 @@ export async function getCampaignTracker(campaignId: number): Promise<CampaignTr
   const start = camp.startDate;
   const end = new Date(camp.endDate); end.setDate(end.getDate() + 30); // +30-day grace tail
 
-  const members = await prisma.campaignMember.findMany({ where: { campaignId }, select: { farmerId: true, segment: true, valueSegment: true, lifecycleSegment: true, group: true, reached: true, mediums: true, response: true, responseCrop: true, storeId: true, broadcastMediums: true } });
+  const allMembers = await prisma.campaignMember.findMany({ where: { campaignId }, select: { farmerId: true, segment: true, valueSegment: true, lifecycleSegment: true, group: true, reached: true, mediums: true, response: true, responseCrop: true, storeId: true, broadcastMediums: true } });
+  // Location of every member (village/district from the farmer, region = enrolled store's zone) → options + optional filter.
+  const [locFarmers, locStores] = await Promise.all([
+    prisma.farmer.findMany({ where: { id: { in: [...new Set(allMembers.map((m) => m.farmerId))] } }, select: { id: true, village: true, district: true } }),
+    prisma.store.findMany({ select: { id: true, zone: true } }),
+  ]);
+  const lfMap = new Map(locFarmers.map((f) => [f.id, f]));
+  const lzMap = new Map(locStores.map((s) => [s.id, locVal(s.zone)]));
+  const locOf = (m: { farmerId: number; storeId: number | null }) => {
+    const f = lfMap.get(m.farmerId);
+    return { village: locVal(f?.village), district: locVal(f?.district), region: m.storeId != null ? lzMap.get(m.storeId) ?? null : null };
+  };
+  const locItems = locItemsOf(allMembers.map(locOf));
+  const inLoc = locMatcher(loc);
+  const members = loc ? allMembers.filter((m) => inLoc(locOf(m))) : allMembers;
   const test = members.filter((m) => m.group === "TEST");
   const reachedMembers = test.filter((m) => m.reached);
   // Approaches are multi-select, so a farmer reached by Call AND WhatsApp counts under both:
@@ -1453,6 +1535,22 @@ export async function getCampaignTracker(campaignId: number): Promise<CampaignTr
     storeAgg.set(store, a);
   }
   const byStore = [...storeAgg.values()].sort((a, b) => b.total - a.total || a.store.localeCompare(b.store));
+  // Same progress by location.
+  const locAgg = { region: new Map<string, ReachRow>(), district: new Map<string, ReachRow>(), village: new Map<string, ReachRow>() };
+  const bump = (map: Map<string, ReachRow>, key: string, label: string, sub: string, m: (typeof test)[number]) => {
+    const a = map.get(key) ?? map.set(key, { store: label, sub, reached: 0, total: 0, broadcast: 0 }).get(key)!;
+    a.total++;
+    if (m.reached) a.reached++;
+    if ((m.broadcastMediums ?? []).length) a.broadcast++;
+  };
+  for (const m of test) {
+    const l = locOf(m);
+    bump(locAgg.region, locLabel(l.region), locLabel(l.region), "", m);
+    bump(locAgg.district, locLabel(l.district), locLabel(l.district), "", m);
+    bump(locAgg.village, `${l.village ?? ""}\u0001${l.district ?? ""}`, locLabel(l.village), l.district ?? "", m);
+  }
+  const reachRows = (map: Map<string, ReachRow>, cap = Infinity) => [...map.values()].sort((a, b) => b.total - a.total || a.store.localeCompare(b.store)).slice(0, cap);
+  const byLocation = { region: reachRows(locAgg.region), district: reachRows(locAgg.district), village: reachRows(locAgg.village, 300) };
 
   // ── Segment × view scopes: overall (all rounds) + one per round ──────────────────────────────────
   const phases = await prisma.campaignPhase.findMany({ where: { campaignId }, orderBy: { ordinal: "asc" } });
@@ -1470,9 +1568,11 @@ export async function getCampaignTracker(campaignId: number): Promise<CampaignTr
     : [pf.crops.length ? `Crop: ${pf.crops.map(cropLabel).join(", ")}` : "", pf.categories.length ? `Category: ${pf.categories.join(", ")}` : ""].filter(Boolean).join(" · ");
 
   return {
-    reach: { testTotal: test.length, reached: reachedMembers.length, byApproach, byResponse, otherCrops, byStore, broadcastDelivered, byBroadcastChannel },
+    reach: { testTotal: test.length, reached: reachedMembers.length, byApproach, byResponse, otherCrops, byStore, byLocation, broadcastDelivered, byBroadcastChannel },
     attribution: { basisLabel, crops: pf.crops, categories: pf.categories, all: pf.all, noCatalogMatch, windowStart: iso(start)!, windowEnd: iso(end)! },
     scopes,
+    locItems,
+    locFiltered: !!loc,
   };
 }
 

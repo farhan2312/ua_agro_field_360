@@ -13,6 +13,8 @@ import { PhasesPanel } from "./phases/PhasesPanel";
 import { PhaseOutreachPanel } from "./phases/PhaseOutreachPanel";
 import { HelpersModal } from "./HelpersModal";
 import { ClusterMultiSelect } from "./ClusterMultiSelect";
+import { LocationFilterBar } from "./LocationFilter";
+import { EMPTY_LOC, locActive, locMatcher, locLine, type LocFilter } from "@/lib/campaign-location";
 import { TeamPicker, type TeamValue } from "./TeamPicker";
 import type { TeamOfficer, TeamCampaigner } from "@/lib/campaign-team";
 import { WA_VAR_TOKENS, SAMPLE_VARS, fillNamedTemplate, countDltVars, fillDltTemplate } from "@/lib/campaign-vars";
@@ -22,7 +24,7 @@ import { cropLabel } from "@/lib/crops";
 import { inr } from "@/lib/format";
 import {
   saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, previewCampaignAudience, getTeamCandidates, getCampaignTeam, setCampaignTeam, getCampaignTracker, extendCampaign, updateCampaignCommPlans, deleteCampaign, getCampaignMembers, markCampaignMember, getCampaignAnalytics, exportCampaignAudienceXlsx, exportCampaignTrackerXlsx, getSmsTemplates,
-  type CampaignListItem, type CampaignTracker, type ProjectVM, type CampaignMemberVM, type CampaignAnalytics, type SmsTemplateVM, type TrackerScope, type SegRow, type MatchView,
+  type CampaignListItem, type CampaignTracker, type ProjectVM, type CampaignMemberVM, type CampaignAnalytics, type SmsTemplateVM, type TrackerScope, type SegRow, type MatchView, type CallRow,
 } from "@/app/actions/campaigns";
 import { downloadB64 } from "@/lib/download";
 
@@ -523,11 +525,15 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
   const [trackerOf, setTrackerOf] = useState<CampaignListItem | null>(null);
   const [tracker, setTracker] = useState<CampaignTracker | null>(null);
   const [trackerExporting, setTrackerExporting] = useState(false);
+  const [trackerLoc, setTrackerLoc] = useState<LocFilter>(EMPTY_LOC); // tracker Region/District/Village filter (server-side)
+  const [trackerReloading, setTrackerReloading] = useState(false);
+  const trackerSeq = useRef(0); // drops stale tracker responses when filters change quickly
   const [analyticsOf, setAnalyticsOf] = useState<CampaignListItem | null>(null);
   const [analytics, setAnalytics] = useState<CampaignAnalytics | null>(null);
   const [membersOf, setMembersOf] = useState<CampaignListItem | null>(null);
   const [members, setMembers] = useState<CampaignMemberVM[] | null>(null);
   const [memberPage, setMemberPage] = useState(0);
+  const [memberLoc, setMemberLoc] = useState<LocFilter>(EMPTY_LOC); // contact-list Region/District/Village filter
   const [focusMode, setFocusMode] = useState(false);
   const [broadcasting, setBroadcasting] = useState(false); // admin mass-send panel
   const [bcReload, setBcReload] = useState(0); // bump to refresh broadcast history after a run
@@ -602,9 +608,20 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
       } else setMsg(res.error ?? "Failed");
     });
   };
-  const openTracker = (c: CampaignListItem) => { setTrackerOf(c); setTracker(null); getCampaignTracker(c.id).then(setTracker); };
+  const loadTracker = (c: CampaignListItem, loc: LocFilter) => {
+    const seq = ++trackerSeq.current;
+    setTrackerReloading(true);
+    getCampaignTracker(c.id, locActive(loc) ? loc : undefined).then((t) => {
+      if (seq !== trackerSeq.current) return;
+      setTracker(t); setTrackerReloading(false);
+    });
+  };
+  const openTracker = (c: CampaignListItem) => { setTrackerOf(c); setTracker(null); setTrackerLoc(EMPTY_LOC); loadTracker(c, EMPTY_LOC); };
+  const changeTrackerLoc = (f: LocFilter) => { setTrackerLoc(f); if (trackerOf) loadTracker(trackerOf, f); };
   const openAnalytics = (c: CampaignListItem) => { setAnalyticsOf(c); setAnalytics(null); getCampaignAnalytics(c.id).then(setAnalytics); };
-  const openMembers = (c: CampaignListItem) => { setMembersOf(c); setMembers(null); setMemberPage(0); setFocusMode(false); getCampaignMembers(c.id).then(setMembers); };
+  const openMembers = (c: CampaignListItem) => { setMembersOf(c); setMembers(null); setMemberPage(0); setMemberLoc(EMPTY_LOC); setFocusMode(false); getCampaignMembers(c.id).then(setMembers); };
+  const inMemberLoc = locMatcher(memberLoc);
+  const visibleMembers = members && locActive(memberLoc) ? members.filter(inMemberLoc) : members;
   const patchMember = (u: CampaignMemberVM) => setMembers((list) => list?.map((x) => (x.id === u.id ? u : x)) ?? null);
 
   return (
@@ -754,7 +771,8 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
                         className="lg:w-[330px] lg:shrink-0 lg:overflow-y-auto lg:border-r lg:border-[#F0F0F0] lg:pr-4" />
                     )}
                     <div className="min-w-0 flex-1 lg:overflow-y-auto">
-                    <OutreachProgress members={members} />
+                    <LocationFilterBar items={members} value={memberLoc} onChange={(f) => { setMemberLoc(f); setMemberPage(0); }} className="mb-3 rounded-[10px] bg-[#F5F7F5] p-2.5" />
+                    <OutreachProgress members={visibleMembers ?? members} />
                     {canManage && <BroadcastHistory campaignId={membersOf.id} reloadKey={bcReload} />}
                     <div className="mb-3 mt-3 flex flex-wrap items-center justify-between gap-2">
                       <div className="text-[12px] text-[#757575]">{focusMode ? "Focus mode — one farmer at a time" : "Work the list, switch to Focus mode, or open the full-page matrix."}</div>
@@ -771,11 +789,13 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
                         </button>
                       </div>
                     </div>
-                    {focusMode
-                      ? <FocusMode members={members} crops={crops} onChange={patchMember} onExit={() => setFocusMode(false)} onCurrent={setFocusCurrent} commPlans={membersOf?.commPlans ?? []} templates={templates} canSms={canManage} />
+                    {(visibleMembers ?? members).length === 0
+                      ? <div className="rounded-[12px] border border-dashed border-[#E0E0E0] py-8 text-center text-[13px] text-[#9E9E9E]">No farmers in this location — clear the location filters to see everyone.</div>
+                      : focusMode
+                      ? <FocusMode key={JSON.stringify(memberLoc)} members={visibleMembers ?? members} crops={crops} onChange={patchMember} onExit={() => setFocusMode(false)} onCurrent={setFocusCurrent} commPlans={membersOf?.commPlans ?? []} templates={templates} canSms={canManage} />
                       : (() => {
                           // List view: un-contacted first, reached/unreachable sink to the bottom.
-                          const sorted = [...members].sort((a, b) => rank(a) - rank(b));
+                          const sorted = [...(visibleMembers ?? members)].sort((a, b) => rank(a) - rank(b));
                           const PAGE = 25;
                           const pages = Math.max(1, Math.ceil(sorted.length / PAGE));
                           const page = Math.min(memberPage, pages - 1);
@@ -811,19 +831,29 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
           <>
             <ModalHeader eyebrow="Campaign Tracker" eyebrowColor="#2E7D32" title={trackerOf.name} subtitle="Outreach reach · segment uplift · incremental sales" onClose={() => setTrackerOf(null)} />
             <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
-              <div className="mb-3 flex justify-end">
+              <div className="mb-3 flex flex-wrap items-end gap-3">
+                {tracker && tracker.locItems.length > 0 && (
+                  <LocationFilterBar items={tracker.locItems} value={trackerLoc} onChange={changeTrackerLoc} className="min-w-0 flex-1 rounded-[10px] bg-[#F5F7F5] p-2.5" />
+                )}
+                <div className="ml-auto flex items-center gap-2">
+                {trackerReloading && tracker && <span className="text-[11.5px] text-[#9E9E9E]">Updating…</span>}
                 <button type="button" disabled={trackerExporting}
+                  title={locActive(trackerLoc) ? "Exports only the farmers in the selected location" : undefined}
                   onClick={async () => {
                     setTrackerExporting(true);
-                    try { const r = await exportCampaignTrackerXlsx(trackerOf.id, trackerOf.name); if (r.ok && r.b64 && r.filename) downloadB64(r.b64, r.filename); else alert(r.error ?? "Export failed."); }
+                    try { const r = await exportCampaignTrackerXlsx(trackerOf.id, trackerOf.name, locActive(trackerLoc) ? trackerLoc : undefined); if (r.ok && r.b64 && r.filename) downloadB64(r.b64, r.filename); else alert(r.error ?? "Export failed."); }
                     finally { setTrackerExporting(false); }
                   }}
                   className="inline-flex items-center gap-1.5 rounded-[9px] bg-[#1B5E20] px-3.5 py-1.5 text-[12px] font-semibold text-white hover:bg-[#2E7D32] disabled:opacity-50">
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14" /></svg>
                   {trackerExporting ? "Exporting…" : "Export Excel"}
                 </button>
+                </div>
               </div>
-              {tracker == null ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">Loading…</div> : <TrackerBody t={tracker} />}
+              {tracker == null ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">Loading…</div>
+                : tracker.locFiltered && tracker.reach.testTotal === 0 && tracker.scopes.every((sc) => sc.byValue.length === 0)
+                ? <div className="rounded-[12px] border border-dashed border-[#E0E0E0] py-8 text-center text-[13px] text-[#9E9E9E]">No farmers in this location — clear the location filters to see the whole campaign.</div>
+                : <TrackerBody t={tracker} />}
             </div>
           </>
         )}
@@ -1342,7 +1372,7 @@ function MemberRow({ member, crops, onChange, commPlans, templates, canSms }: { 
         <StatusBadge member={member} />
         <BroadcastBadge member={member} />
         <ResponseBadge member={member} />
-        <span className="text-[12px] text-[#9E9E9E]">{member.village ?? "—"}{member.store ? ` · ${member.store}` : ""}</span>
+        <span className="text-[12px] text-[#9E9E9E]">{locLine(member) || "—"}{member.store ? ` · ${member.store}` : ""}</span>
       </div>
       <div className="mb-3"><PhoneBlock mobile={member.mobile} extra={canSms ? <><SmsSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} /><WaSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} /></> : null} /></div>
       <div className="flex flex-col gap-2.5 rounded-[12px] border border-[#EAEAEA] bg-[#FBFBFB] p-3">
@@ -1421,7 +1451,7 @@ function FocusCard({ member, crops, onChange, onHandled, onSkip, onBack, remaini
         <ResponseBadge member={member} />
         <span className="ml-auto rounded-full bg-[#F5F7F5] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#616161]">{remaining} left</span>
       </div>
-      <div className="mb-3 text-[12.5px] text-[#9E9E9E]">{member.village ?? "—"}{member.store ? ` · ${member.store}` : ""}</div>
+      <div className="mb-3 text-[12.5px] text-[#9E9E9E]">{locLine(member) || "—"}{member.store ? ` · ${member.store}` : ""}</div>
       <div className="mb-4"><PhoneBlock mobile={member.mobile} big extra={canSms ? <><SmsSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} onSent={onHandled} big /><WaSender member={member} commPlans={commPlans} templates={templates} onChange={onChange} onSent={onHandled} big /></> : null} /></div>
       <div className="flex flex-col gap-3 rounded-[12px] border border-[#EAEAEA] bg-[#FBFBFB] p-3.5">
         <ResponsePicker value={o.response} crop={o.crop} crops={crops} onPick={o.pickResponse} onCrop={o.setCrop} disabled={pending} />
@@ -1620,6 +1650,7 @@ function SegStoreMatrix({ valueCols, lifecycleCols, matrix, total }: { valueCols
           <thead className="sticky top-0 z-10">
             <tr className="bg-[#FAFAFA] text-[10px] font-bold uppercase tracking-[0.3px] text-[#9E9E9E]">
               <th className="sticky left-0 z-10 bg-[#FAFAFA] px-4 py-2 text-left">Store</th>
+              <th className="px-2 py-2 text-left">Region</th>
               {valueCols.map((c) => <th key={c.key} className="px-2 py-2 text-right" style={{ color: c.color }}>{c.label}</th>)}
               <th className="border-l border-[#EEE] px-3 py-2 text-right text-[#1A1C1A]">Segment total</th>
               {lifecycleCols.map((c) => <th key={c.key} className="px-2 py-2 text-right" style={{ color: c.color }}>{c.label}</th>)}
@@ -1630,6 +1661,7 @@ function SegStoreMatrix({ valueCols, lifecycleCols, matrix, total }: { valueCols
             {matrix.map((r) => (
               <tr key={r.store} className="border-b border-[#F5F5F5]">
                 <td className="sticky left-0 z-10 bg-white px-4 py-1.5 font-semibold text-[#1565C0]">{r.store}</td>
+                <td className="px-2 py-1.5 text-left text-[#757575]">{r.region || "—"}</td>
                 {valueCols.map((c) => cell("v" + c.key, r.value[c.key] ?? 0, c.color))}
                 <td className="border-l border-[#EEE] px-3 py-1.5 text-right font-bold text-[#1A1C1A]">{n(r.total)}</td>
                 {lifecycleCols.map((c) => cell("l" + c.key, r.lifecycle[c.key] ?? 0, c.color))}
@@ -1640,6 +1672,7 @@ function SegStoreMatrix({ valueCols, lifecycleCols, matrix, total }: { valueCols
           <tfoot className="sticky bottom-0">
             <tr className="border-t border-[#EEE] bg-[#F8F8F8] font-bold text-[#1A1C1A]">
               <td className="sticky left-0 z-10 bg-[#F8F8F8] px-4 py-2">All stores</td>
+              <td />
               {valueCols.map((c) => <td key={c.key} className="px-2 py-2 text-right tabular-nums">{n(vTot[c.key])}</td>)}
               <td className="border-l border-[#EEE] px-3 py-2 text-right">{n(total)}</td>
               {lifecycleCols.map((c) => <td key={c.key} className="px-2 py-2 text-right tabular-nums">{n(lTot[c.key])}</td>)}
@@ -1652,8 +1685,10 @@ function SegStoreMatrix({ valueCols, lifecycleCols, matrix, total }: { valueCols
   );
 }
 
-/** Per-centre outreach: Reached + how (Call/WA/SMS/In-person) + still-pending, one row per store. */
-function CallByStoreTable({ rows }: { rows: CampaignAnalytics["callByStore"] }) {
+/** Outreach table: Reached + how (Call/WA/SMS/In-person) + still-pending, one row per centre / region / district / village. */
+function CallByStoreTable({ rows, title = "Call stats by centre", firstCol = "Centre", subCol = "Region", totalLabel = "All centres", toolbar }: {
+  rows: CallRow[]; title?: string; firstCol?: string; subCol?: string | null; totalLabel?: string; toolbar?: ReactNode;
+}) {
   const tot = rows.reduce((t, r) => ({
     test: t.test + r.test, reached: t.reached + r.reached, call: t.call + r.call,
     whatsapp: t.whatsapp + r.whatsapp, sms: t.sms + r.sms, inPerson: t.inPerson + r.inPerson, pending: t.pending + r.pending,
@@ -1663,16 +1698,17 @@ function CallByStoreTable({ rows }: { rows: CampaignAnalytics["callByStore"] }) 
   const CELL = "px-2.5 py-1.5 text-right text-[12px] tabular-nums text-[#424242]";
   return (
     <div className={`${CARD} p-4`}>
-      <div className="mb-1 flex items-center justify-between">
-        <div className="text-[13px] font-bold text-[#1A1C1A]">Call stats by centre</div>
-        <span className="text-[11px] text-[#9E9E9E]">test group · reached &amp; how</span>
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-[13px] font-bold text-[#1A1C1A]">{title}</div>
+        {toolbar ?? <span className="text-[11px] text-[#9E9E9E]">test group · reached &amp; how</span>}
       </div>
       <div className="mb-2 text-[11px] text-[#9E9E9E]">A farmer reached by more than one approach counts under each, so Call/WA/SMS/Visit can exceed Reached.</div>
-      <div className="overflow-x-auto">
+      <div className="max-h-[440px] overflow-auto">
         <table className="w-full border-collapse">
-          <thead>
+          <thead className="sticky top-0 bg-white">
             <tr className="border-b border-[#ECECEC]">
-              <th className="px-2.5 py-1.5 text-left text-[10.5px] font-semibold uppercase tracking-[0.3px] text-[#757575]">Centre</th>
+              <th className="px-2.5 py-1.5 text-left text-[10.5px] font-semibold uppercase tracking-[0.3px] text-[#757575]">{firstCol}</th>
+              {subCol && <th className="px-2.5 py-1.5 text-left text-[10.5px] font-semibold uppercase tracking-[0.3px] text-[#757575]">{subCol}</th>}
               <th className={HEAD}>Test</th>
               <th className={HEAD}>Reached</th>
               <th className={HEAD}>Call</th>
@@ -1684,8 +1720,9 @@ function CallByStoreTable({ rows }: { rows: CampaignAnalytics["callByStore"] }) 
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.store} className="border-b border-[#F5F5F5]">
+              <tr key={`${r.store}|${r.sub}`} className="border-b border-[#F5F5F5]">
                 <td className="px-2.5 py-1.5 text-left text-[12px] font-semibold text-[#1A1C1A]" title={r.store}>{r.store}</td>
+                {subCol && <td className="px-2.5 py-1.5 text-left text-[11.5px] text-[#757575]">{r.sub || "—"}</td>}
                 <td className={CELL}>{n(r.test)}</td>
                 <td className="px-2.5 py-1.5 text-right text-[12px] tabular-nums font-semibold text-[#2E7D32]">{n(r.reached)} <span className="text-[10px] font-normal text-[#9E9E9E]">({pct(r.reached, r.test)}%)</span></td>
                 <td className={CELL}>{n(r.call)}</td>
@@ -1698,7 +1735,8 @@ function CallByStoreTable({ rows }: { rows: CampaignAnalytics["callByStore"] }) 
           </tbody>
           <tfoot>
             <tr className="border-t-2 border-[#E0E0E0] font-semibold">
-              <td className="px-2.5 py-1.5 text-left text-[12px] text-[#1A1C1A]">All centres</td>
+              <td className="px-2.5 py-1.5 text-left text-[12px] text-[#1A1C1A]">{totalLabel}</td>
+              {subCol && <td />}
               <td className={CELL}>{n(tot.test)}</td>
               <td className="px-2.5 py-1.5 text-right text-[12px] tabular-nums font-bold text-[#2E7D32]">{n(tot.reached)} <span className="text-[10px] font-normal text-[#9E9E9E]">({pct(tot.reached, tot.test)}%)</span></td>
               <td className={CELL}>{n(tot.call)}</td>
@@ -1716,19 +1754,26 @@ function CallByStoreTable({ rows }: { rows: CampaignAnalytics["callByStore"] }) 
 
 function AnalyticsBody({ a: initial, campaign }: { a: CampaignAnalytics; campaign: CampaignListItem }) {
   const [rms, setRms] = useState<string[]>([]);
+  const [loc, setLoc] = useState<LocFilter>(EMPTY_LOC);
+  const [locDim, setLocDim] = useState<"region" | "district" | "village">("region");
   const [data, setData] = useState<CampaignAnalytics>(initial);
-  const [reloading, startReload] = useTransition();
+  const [reloading, setReloading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const seq = useRef(0);
 
-  // No RM filter → parent's already-loaded data; otherwise refetch scoped to the chosen RM(s).
+  // No RM / location filter → parent's already-loaded data; otherwise refetch with the filters (latest wins).
   useEffect(() => {
-    if (!rms.length) { setData(initial); return; }
-    startReload(async () => setData(await getCampaignAnalytics(campaign.id, rms)));
-  }, [rms, initial, campaign.id]);
+    const mine = ++seq.current;
+    if (!rms.length && !locActive(loc)) { setData(initial); setReloading(false); return; }
+    setReloading(true);
+    getCampaignAnalytics(campaign.id, rms.length ? rms : undefined, locActive(loc) ? loc : undefined).then((d) => {
+      if (mine === seq.current) { setData(d); setReloading(false); }
+    });
+  }, [rms, loc, initial, campaign.id]);
 
   const doExport = () => {
     setExporting(true);
-    exportCampaignAudienceXlsx(campaign.id, campaign.name, rms.length ? rms : undefined)
+    exportCampaignAudienceXlsx(campaign.id, campaign.name, rms.length ? rms : undefined, locActive(loc) ? loc : undefined)
       .then((res) => {
         if (res.ok && res.b64 && res.filename) downloadB64(res.b64, res.filename);
         else alert(res.error ?? "Export failed.");
@@ -1757,11 +1802,33 @@ function AnalyticsBody({ a: initial, campaign }: { a: CampaignAnalytics; campaig
         </div>
       </div>
 
+      {initial.locItems.length > 0 && (
+        <LocationFilterBar items={initial.locItems} value={loc} onChange={setLoc} className="rounded-[10px] bg-[#F5F7F5] p-2.5" />
+      )}
+
       {a.total === 0 ? (
-        <div className="rounded-[12px] border border-dashed border-[#E0E0E0] py-8 text-center text-[13px] text-[#9E9E9E]">No farmers for the selected RM — clear the filter to see all.</div>
+        <div className="rounded-[12px] border border-dashed border-[#E0E0E0] py-8 text-center text-[13px] text-[#9E9E9E]">No farmers for the selected filters — clear them to see all.</div>
       ) : (<>
         {/* Centre-wise call stats — the per-store outreach breakdown (BDM/RM view) */}
         {a.callByStore.length > 0 && <CallByStoreTable rows={a.callByStore} />}
+
+        {/* Same outreach breakdown by farmer location */}
+        {a.callByLocation[locDim].length > 0 && (
+          <CallByStoreTable rows={a.callByLocation[locDim]}
+            title={`Call stats by ${locDim}`} firstCol={locDim === "region" ? "Region" : locDim === "district" ? "District" : "Village"}
+            subCol={locDim === "village" ? "District" : null} totalLabel={`All ${locDim === "village" ? "villages" : locDim === "district" ? "districts" : "regions"}${locDim === "village" && a.callByLocation.village.length >= 300 ? " (top 300)" : ""}`}
+            toolbar={
+              <div className="inline-flex rounded-[8px] border border-[#E0E0E0] bg-[#F5F7F5] p-0.5">
+                {(["region", "district", "village"] as const).map((k) => (
+                  <button key={k} type="button" onClick={() => setLocDim(k)}
+                    className="rounded-[6px] px-2.5 py-1 text-[11.5px] font-semibold capitalize transition-colors"
+                    style={{ background: locDim === k ? "#fff" : "transparent", color: locDim === k ? "#00838F" : "#9E9E9E", boxShadow: locDim === k ? "0 1px 2px rgba(0,0,0,0.1)" : "none" }}>
+                    {k}
+                  </button>
+                ))}
+              </div>
+            } />
+        )}
 
         {/* Two independent segment dimensions: value tier + lifecycle */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -1772,9 +1839,11 @@ function AnalyticsBody({ a: initial, campaign }: { a: CampaignAnalytics; campaig
         {/* Crop bars (crops overlap across farmers, so a bar reads clearer than a pie) */}
         <HBarCard title="By crop (top)" data={cropData} total={a.total} note="% = share of enrolled farmers; a farmer may grow several crops, so these overlap." />
 
-        {/* Decomposition treemaps: store + village */}
+        {/* Decomposition treemaps: store + location */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <TreemapCard title="By store" rows={a.byStore} total={a.total} />
+          <TreemapCard title="By region" rows={a.byRegion} total={a.total} />
+          <TreemapCard title="By district (top)" rows={a.byDistrict} total={a.total} />
           <TreemapCard title="By village (top)" rows={a.byVillage} total={a.total} />
         </div>
 
@@ -1809,6 +1878,7 @@ function RmPicker({ options, selected, onChange }: { options: string[]; selected
 }
 
 const VIEW_LABEL: Record<MatchView, string> = { coupon: "Coupon", crop: "Crop", total: "All transactions" };
+const REACH_DIM_LABEL = { store: "Store", region: "Region", district: "District", village: "Village" } as const;
 
 function TrackerBody({ t }: { t: CampaignTracker }) {
   const a = t.attribution;
@@ -1820,6 +1890,9 @@ function TrackerBody({ t }: { t: CampaignTracker }) {
   const rows = scope ? (axis === "value" ? scope.byValue : scope.byLifecycle) : [];
   // Reached test who bought anything (all-transaction view), overall — for the outreach KPI.
   const payingContacted = t.scopes[0] ? t.scopes[0].byValue.reduce((s, r) => s + r.views.total.buy, 0) : 0;
+  const [reachDim, setReachDim] = useState<keyof typeof REACH_DIM_LABEL>("store");
+  const reachRows: { store: string; sub?: string; reached: number; total: number; broadcast: number }[] =
+    reachDim === "store" ? t.reach.byStore : t.reach.byLocation[reachDim];
   return (
     <div className="flex flex-col gap-4">
       <div className={`${CARD} p-4`}>
@@ -1847,19 +1920,30 @@ function TrackerBody({ t }: { t: CampaignTracker }) {
         )}
       </div>
 
-      {/* Outreach progress per store — individually reached / total (TEST group) */}
+      {/* Outreach progress per store / region / district / village — individually reached / total (TEST group) */}
       {t.reach.byStore.length > 0 && (
         <div className={`${CARD} p-4`}>
-          <div className="mb-2 flex items-center justify-between">
-            <div className="text-[13px] font-bold text-[#1A1C1A]">Reached by store</div>
-            <span className="text-[11px] text-[#9E9E9E]">individually reached / total</span>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div className="text-[13px] font-bold text-[#1A1C1A]">Reached by {REACH_DIM_LABEL[reachDim].toLowerCase()}</div>
+            <div className="flex items-center gap-2">
+              <div className="inline-flex rounded-[8px] border border-[#E0E0E0] bg-[#F5F7F5] p-0.5">
+                {(Object.keys(REACH_DIM_LABEL) as (keyof typeof REACH_DIM_LABEL)[]).map((k) => (
+                  <button key={k} type="button" onClick={() => setReachDim(k)}
+                    className="rounded-[6px] px-2.5 py-1 text-[11.5px] font-semibold transition-colors"
+                    style={{ background: reachDim === k ? "#fff" : "transparent", color: reachDim === k ? "#2E7D32" : "#9E9E9E", boxShadow: reachDim === k ? "0 1px 2px rgba(0,0,0,0.1)" : "none" }}>
+                    {REACH_DIM_LABEL[k]}
+                  </button>
+                ))}
+              </div>
+              <span className="text-[11px] text-[#9E9E9E]">reached / total</span>
+            </div>
           </div>
-          <div className="flex flex-col gap-2">
-            {t.reach.byStore.map((s) => {
+          <div className="flex max-h-[420px] flex-col gap-2 overflow-y-auto">
+            {reachRows.map((s) => {
               const pct = s.total ? Math.round((s.reached / s.total) * 100) : 0;
               return (
-                <div key={s.store} className="flex items-center gap-2.5 text-[12px]">
-                  <span className="w-[130px] shrink-0 truncate font-semibold text-[#424242]" title={s.store}>{s.store}</span>
+                <div key={`${s.store}|${s.sub ?? ""}`} className="flex items-center gap-2.5 text-[12px]">
+                  <span className="w-[170px] shrink-0 truncate font-semibold text-[#424242]" title={s.sub ? `${s.store} · ${s.sub}` : s.store}>{s.store}{s.sub ? <span className="ml-1 text-[10.5px] font-normal text-[#9E9E9E]">{s.sub}</span> : null}</span>
                   <div className="relative h-[16px] flex-1 overflow-hidden rounded-[6px] bg-[#F0F0F0]">
                     <div className="absolute inset-y-0 left-0 rounded-[6px] bg-[#2E7D32]" style={{ width: `${pct}%` }} />
                   </div>

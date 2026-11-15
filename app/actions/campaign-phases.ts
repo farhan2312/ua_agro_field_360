@@ -1,5 +1,6 @@
 "use server";
 
+import { locVal } from "@/lib/campaign-location";
 import { revalidatePath } from "next/cache";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -192,6 +193,7 @@ export async function getRoundAdvanceHistory(campaignId: number): Promise<Advanc
 
 export interface PhaseOutreachMember {
   memberId: number; farmerId: number; name: string; mobile: string | null; village: string | null; store: string | null;
+  district: string | null; region: string | null; // region = enrolled store's zone (normalised, like village/district)
   segmentLabel: string; groupLabel: string;
   reached: boolean; mediums: string[];
   recCommPlan: string | null; recChannel: string | null;
@@ -225,7 +227,8 @@ export async function getPhaseOutreach(campaignId: number): Promise<PhaseOutreac
 
   const members = await prisma.campaignMember.findMany({ where, orderBy: { id: "asc" } });
   const farmerIds = members.map((m) => m.farmerId);
-  const farmers = new Map((await prisma.farmer.findMany({ where: { id: { in: farmerIds } }, select: { id: true, name: true, mobile: true, village: true, store: { select: { name: true } } } })).map((f) => [f.id, f]));
+  const farmers = new Map((await prisma.farmer.findMany({ where: { id: { in: farmerIds } }, select: { id: true, name: true, mobile: true, village: true, district: true, store: { select: { name: true } } } })).map((f) => [f.id, f]));
+  const zones = new Map((await prisma.store.findMany({ select: { id: true, zone: true } })).map((st) => [st.id, locVal(st.zone)]));
   const pset = purchaseSplit ? await purchasedFarmerIds(farmerIds, camp.startDate, new Date(camp.endDate.getTime() + 864e5)) : new Set<number>();
 
   const out: PhaseOutreachMember[] = members.map((m) => {
@@ -236,7 +239,8 @@ export async function getPhaseOutreach(campaignId: number): Promise<PhaseOutreac
     const tl = t ? targetLabel(t) : "No target set";
     const f = farmers.get(m.farmerId);
     return {
-      memberId: m.id, farmerId: m.farmerId, name: f?.name ?? "Unknown", mobile: f?.mobile ?? null, village: f?.village ?? null,
+      memberId: m.id, farmerId: m.farmerId, name: f?.name ?? "Unknown", mobile: f?.mobile ?? null, village: locVal(f?.village),
+      district: locVal(f?.district), region: m.storeId != null ? zones.get(m.storeId) ?? null : null,
       store: f?.store?.name ? (shortStoreName(f.store.name) || f.store.name) : null,
       segmentLabel: segLabel(m.valueSegment, m.lifecycleSegment),
       groupLabel: purchaseSplit ? `${bucket} · ${tl}` : tl,

@@ -9,24 +9,28 @@ import {
   ScriptPanel, ResponsePicker, ResponseBadge, useOutreach, type CommTemplateVM, type CropOption,
 } from "@/components/campaigns/CampaignsScreen";
 import { ClusterMultiSelect } from "@/components/campaigns/ClusterMultiSelect";
+import { LocationFilterBar } from "@/components/campaigns/LocationFilter";
+import { EMPTY_LOC, locActive, locMatcher, type LocFilter } from "@/lib/campaign-location";
 
 const CARD = "rounded-[14px] border border-black/[0.04] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]";
 const n = (x: number) => x.toLocaleString("en-IN");
 const PAGE = 50;
 const NO_STORE = 0; // filter id for farmers enrolled without a store
 
-/** Shared row grid — farmer | phone | outcome (response + channel) | note | save. */
-const GRID = "grid grid-cols-[1.3fr_0.8fr_auto_1.2fr_auto] items-center gap-3";
+/** Shared row grid — farmer | village | district | region | phone | outcome (response + channel) | note | save. */
+const GRID = "grid grid-cols-[1.2fr_0.75fr_0.7fr_0.65fr_0.8fr_auto_1.1fr_auto] items-center gap-3";
 
 /**
  * Full-page outreach matrix: every farmer on ONE line — outcome tiles, note and save together.
  * Reached/unreachable rows sink to the bottom; un-contacted stay on top.
- * Central/system admins also get a store filter, which narrows both the list and the progress bar.
+ * Everyone can filter by Region / District / Village; central/system admins also get a store filter.
+ * Filters narrow both the list and the progress bar.
  */
 export function OutreachMatrix({ campaign, initial, scripts = [], crops = [], canFilterStores = false }: { campaign: CampaignListItem; initial: CampaignMemberVM[]; scripts?: CommTemplateVM[]; crops?: CropOption[]; canFilterStores?: boolean }) {
   const [members, setMembers] = useState(initial);
   const [page, setPage] = useState(0);
   const [storeIds, setStoreIds] = useState<number[]>([]);
+  const [loc, setLoc] = useState<LocFilter>(EMPTY_LOC);
   const patch = (u: CampaignMemberVM) => setMembers((list) => list.map((x) => (x.id === u.id ? u : x)));
 
   // Filter options come from this campaign's own farmers, with each store's count; "No store" goes last.
@@ -39,7 +43,9 @@ export function OutreachMatrix({ campaign, initial, scripts = [], crops = [], ca
   }
   const storeOptions = [...storeOpts.values()].sort((a, b) => (a.id === NO_STORE ? 1 : b.id === NO_STORE ? -1 : a.name.localeCompare(b.name)));
 
-  const visible = storeIds.length ? members.filter((m) => storeIds.includes(m.storeId ?? NO_STORE)) : members;
+  const inStores = storeIds.length ? members.filter((m) => storeIds.includes(m.storeId ?? NO_STORE)) : members;
+  const inLoc = locMatcher(loc);
+  const visible = locActive(loc) ? inStores.filter(inLoc) : inStores;
   const sorted = [...visible].sort((a, b) => rank(a) - rank(b));
   const pages = Math.max(1, Math.ceil(sorted.length / PAGE));
   const p = Math.min(page, pages - 1);
@@ -74,28 +80,34 @@ export function OutreachMatrix({ campaign, initial, scripts = [], crops = [], ca
         {/* Right: progress + matrix */}
         <div className="min-w-0 flex-1">
           <div className={`${CARD} p-4`}>
-            {canFilterStores && (
-              <div className="mb-3 max-w-[420px]">
-                <div className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Filter by store</div>
-                <ClusterMultiSelect options={storeOptions} value={storeIds} onChange={(ids) => { setStoreIds(ids); setPage(0); }}
-                  noun="stores" emptyLabel={`All stores (${storeOptions.length})`} allLabel={`All ${storeOptions.length} stores selected`} />
-              </div>
-            )}
+            <div className="mb-3 flex flex-col gap-2">
+              {canFilterStores && (
+                <div className="max-w-[420px]">
+                  <div className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Store</div>
+                  <ClusterMultiSelect options={storeOptions} value={storeIds} onChange={(ids) => { setStoreIds(ids); setPage(0); }} compact
+                    noun="stores" emptyLabel={`All stores (${storeOptions.length})`} allLabel={`All ${storeOptions.length} stores selected`} />
+                </div>
+              )}
+              <LocationFilterBar items={inStores} value={loc} onChange={(f) => { setLoc(f); setPage(0); }} />
+            </div>
             <OutreachProgress members={visible} />
           </div>
 
           <div className={`${CARD} mt-3 overflow-hidden`}>
             <div className="overflow-x-auto">
-              <div className="min-w-[1180px]">
+              <div className="min-w-[1440px]">
                 <div className={`${GRID} border-b border-[#F0F0F0] bg-[#FAFAFA] px-4 py-2.5 text-[10.5px] font-semibold uppercase tracking-[0.4px] text-[#9E9E9E]`}>
                   <div>Farmer</div>
+                  <div>Village</div>
+                  <div>District</div>
+                  <div>Region</div>
                   <div>Phone</div>
                   <div>Response &amp; how reached</div>
                   <div>Note</div>
                   <div className="text-right">Save</div>
                 </div>
                 {slice.length === 0 ? (
-                  <div className="px-4 py-10 text-center text-[13px] text-[#9E9E9E]">No farmers to contact here.</div>
+                  <div className="px-4 py-10 text-center text-[13px] text-[#9E9E9E]">{members.length ? "No farmers match these filters." : "No farmers to contact here."}</div>
                 ) : (
                   slice.map((m) => <MatrixRow key={m.id} member={m} crops={crops} onChange={patch} />)
                 )}
@@ -165,9 +177,13 @@ function MatrixRow({ member, crops, onChange }: { member: CampaignMemberVM; crop
           <span className="truncate text-[12.5px] font-semibold text-[#1A1C1A]">{member.name}</span>
           <span className="shrink-0 rounded-full px-1.5 py-px text-[9px] font-semibold" style={{ background: segMeta(member.segment).bg, color: segMeta(member.segment).color }}>{segMeta(member.segment).label}</span>
         </div>
-        <div className="truncate text-[10.5px] text-[#9E9E9E]">{member.village ?? "—"}{member.store ? ` · ${member.store}` : ""}</div>
+        {member.store && <div className="truncate text-[10.5px] text-[#9E9E9E]">{member.store}</div>}
         <div className="mt-0.5"><ResponseBadge member={member} /></div>
       </div>
+      {/* Location */}
+      <div className="truncate text-[11.5px] text-[#424242]" title={member.village ?? undefined}>{member.village ?? <span className="text-[#BDBDBD]">—</span>}</div>
+      <div className="truncate text-[11.5px] text-[#424242]" title={member.district ?? undefined}>{member.district ?? <span className="text-[#BDBDBD]">—</span>}</div>
+      <div className="truncate text-[11.5px] text-[#424242]" title={member.region ?? undefined}>{member.region ?? <span className="text-[#BDBDBD]">—</span>}</div>
       {/* Phone */}
       <div className="min-w-0">
         {d10 ? (

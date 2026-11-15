@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 
-export interface ClusterOption { id: number; name: string; count: number }
+export interface ClusterOption<K extends string | number = number> { id: K; name: string; count: number }
+
+const MAX_ROWS = 300; // long lists (e.g. thousands of villages) render the first 300 — search narrows the rest
 
 const n = (x: number) => x.toLocaleString("en-IN");
 
@@ -11,8 +13,8 @@ const n = (x: number) => x.toLocaleString("en-IN");
  * Select all / Clear (acting on the filtered list), and a checkbox list with each cluster's live count.
  * Picked clusters also show as removable chips under the trigger. `noun` + the labels let it filter other lists (e.g. stores).
  */
-export function ClusterMultiSelect({ options, value, onChange, noun = "clusters", emptyLabel = "Pick clusters…", allLabel }: {
-  options: ClusterOption[]; value: number[]; onChange: (ids: number[]) => void; noun?: string; emptyLabel?: string; allLabel?: string;
+export function ClusterMultiSelect<K extends string | number = number>({ options, value, onChange, noun = "clusters", emptyLabel = "Pick clusters…", allLabel, compact }: {
+  options: ClusterOption<K>[]; value: K[]; onChange: (ids: K[]) => void; noun?: string; emptyLabel?: string; allLabel?: string; compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -32,19 +34,20 @@ export function ClusterMultiSelect({ options, value, onChange, noun = "clusters"
   const picked = new Set(value);
   const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const shown = options.filter((o) => terms.every((t) => o.name.toLowerCase().includes(t)));
-  const toggle = (id: number) => onChange(picked.has(id) ? value.filter((x) => x !== id) : [...value, id]);
+  const toggle = (id: K) => onChange(picked.has(id) ? value.filter((x) => x !== id) : [...value, id]);
   const selectShown = () => onChange([...new Set([...value, ...shown.map((o) => o.id)])]);
   const clearShown = () => { const drop = new Set(shown.map((o) => o.id)); onChange(value.filter((id) => !drop.has(id))); };
 
   const all = options.length > 0 && value.length === options.length;
   const summary = value.length === 0 ? emptyLabel : all ? allLabel ?? `Whole project · all ${options.length} ${noun}` : `${value.length} of ${options.length} ${noun}`;
   const chips = options.filter((o) => picked.has(o.id));
+  const rendered = shown.length > MAX_ROWS ? shown.slice(0, MAX_ROWS) : shown;
 
   return (
     <div ref={box} className="relative mt-1">
       <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
-        className={`flex w-full items-center justify-between gap-2 rounded-lg border bg-white px-2.5 py-2 text-left text-[13px] ${open ? "border-[#2E7D32]" : "border-[#E0E0E0]"}`}>
-        <span className={value.length ? "font-semibold text-[#1A1C1A]" : "text-[#9E9E9E]"}>{summary}</span>
+        className={`flex w-full items-center justify-between gap-2 rounded-lg border bg-white px-2.5 text-left ${compact ? "py-1.5 text-[12.5px]" : "py-2 text-[13px]"} ${open ? "border-[#2E7D32]" : "border-[#E0E0E0]"}`}>
+        <span className={`truncate ${value.length ? "font-semibold text-[#1A1C1A]" : "text-[#9E9E9E]"}`}>{summary}</span>
         <span className="text-[10px] text-[#757575]">{open ? "▲" : "▼"}</span>
       </button>
 
@@ -60,10 +63,10 @@ export function ClusterMultiSelect({ options, value, onChange, noun = "clusters"
             </div>
           </div>
           <ul className="max-h-[260px] overflow-y-auto py-1">
-            {shown.map((o) => {
+            {rendered.map((o) => {
               const on = picked.has(o.id);
               return (
-                <li key={o.id}>
+                <li key={String(o.id)}>
                   <label className={`flex cursor-pointer items-center gap-2.5 px-3 py-1.5 text-[13px] hover:bg-[#F5F7F5] ${on ? "bg-[#F1F8F1]" : ""}`}>
                     <input type="checkbox" checked={on} onChange={() => toggle(o.id)} className="h-4 w-4 accent-[#2E7D32]" />
                     <span className="min-w-0 flex-1 truncate" title={o.name}>{o.name}</span>
@@ -72,6 +75,7 @@ export function ClusterMultiSelect({ options, value, onChange, noun = "clusters"
                 </li>
               );
             })}
+            {shown.length > rendered.length && <li className="px-3 py-2 text-center text-[11.5px] text-[#9E9E9E]">Showing {MAX_ROWS} of {n(shown.length)} — type to search the rest.</li>}
             {!shown.length && <li className="px-3 py-3 text-center text-[12.5px] text-[#9E9E9E]">No {noun} match “{q}”.</li>}
           </ul>
         </div>
@@ -80,7 +84,7 @@ export function ClusterMultiSelect({ options, value, onChange, noun = "clusters"
       {chips.length > 0 && !all && (
         <div className="mt-1.5 flex flex-wrap gap-1">
           {chips.map((o) => (
-            <span key={o.id} className="inline-flex max-w-full items-center gap-1 rounded-full bg-[#E8F5E9] py-0.5 pl-2.5 pr-1 text-[11.5px] font-semibold text-[#2E7D32]">
+            <span key={String(o.id)} className="inline-flex max-w-full items-center gap-1 rounded-full bg-[#E8F5E9] py-0.5 pl-2.5 pr-1 text-[11.5px] font-semibold text-[#2E7D32]">
               <span className="truncate">{o.name}</span>
               <button type="button" onClick={() => toggle(o.id)} aria-label={`Remove ${o.name}`} className="rounded-full px-1 text-[13px] leading-none hover:bg-[#C8E6C9]">×</button>
             </span>

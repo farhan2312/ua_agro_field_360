@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
 import { getPhaseOutreach, type PhaseOutreach, type PhaseOutreachMember } from "@/app/actions/campaign-phases";
 import { channelLabel } from "@/lib/campaign-phases";
+import { EMPTY_LOC, locActive, locMatcher, locLine, type LocFilter } from "@/lib/campaign-location";
+import { LocationFilterBar } from "../LocationFilter";
 
 const CHIP = "rounded-full px-2 py-0.5 text-[10.5px] font-bold";
 
@@ -27,17 +29,19 @@ export function PhaseOutreachPanel({ campaignId, campaignName, onClose }: { camp
 }
 
 function PhaseList({ data }: { data: PhaseOutreach }) {
+  const [loc, setLoc] = useState<LocFilter>(EMPTY_LOC);
+  const visible = useMemo(() => { const ok = locMatcher(loc); return data.members.filter(ok); }, [data, loc]);
   const groups = useMemo(() => {
     const m = new Map<string, PhaseOutreachMember[]>();
-    for (const x of data.members) { const a = m.get(x.groupLabel) ?? []; a.push(x); m.set(x.groupLabel, a); }
+    for (const x of visible) { const a = m.get(x.groupLabel) ?? []; a.push(x); m.set(x.groupLabel, a); }
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [data]);
+  }, [visible]);
 
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <span className="rounded-full bg-[#E8F5E9] px-2.5 py-1 text-[11.5px] font-bold text-[#2E7D32]">Round {data.ordinal}: {data.roundName || "(unnamed)"}</span>
-        <span className="text-[12px] text-[#757575]">{data.members.length} to contact{data.purchaseSplit ? " · split by purchase" : ""}</span>
+        <span className="text-[12px] text-[#757575]">{locActive(loc) ? `${visible.length} of ${data.members.length}` : data.members.length} to contact{data.purchaseSplit ? " · split by purchase" : ""}</span>
         {data.coupons.length > 0 && (
           <span className="ml-auto flex flex-wrap gap-1.5">
             {data.coupons.map((c) => <span key={c.code} className="rounded-md bg-[#FFF3E0] px-2 py-0.5 text-[11px] font-semibold text-[#E65100]" title={c.minSpend ? `min ₹${c.minSpend}` : undefined}>{c.label}: <b>{c.code}</b></span>)}
@@ -45,7 +49,11 @@ function PhaseList({ data }: { data: PhaseOutreach }) {
         )}
       </div>
 
-      {data.members.length === 0 ? (
+      {data.members.length > 0 && <LocationFilterBar items={data.members} value={loc} onChange={setLoc} className="mb-3 rounded-[10px] bg-[#F5F7F5] p-2.5" />}
+
+      {data.members.length > 0 && visible.length === 0 ? (
+        <div className="rounded-[12px] border border-dashed border-[#E0E0E0] px-5 py-8 text-center text-[13px] text-[#9E9E9E]">No farmers in this location — clear the location filters to see everyone.</div>
+      ) : data.members.length === 0 ? (
         <div className="rounded-[12px] border border-dashed border-[#C8E6C9] bg-[#F1F8F1] px-5 py-10 text-center text-[13px] text-[#66857A]">Nobody to contact in this round in your scope.</div>
       ) : groups.map(([label, rows]) => (
         <div key={label} className="mb-4">
@@ -69,7 +77,7 @@ function OutreachRow({ m }: { m: PhaseOutreachMember }) {
         <div className="text-[13px] font-semibold text-[#1A1C1A]">{m.name}
           <span className={`${CHIP} ml-2 bg-[#ECEFF1] text-[#546E7A]`}>{m.segmentLabel}</span>
         </div>
-        <div className="text-[11px] text-[#9E9E9E]">{[m.village, m.store].filter(Boolean).join(" · ")}{m.mobile ? ` · ${m.mobile}` : ""}</div>
+        <div className="text-[11px] text-[#9E9E9E]">{[locLine(m), m.store].filter(Boolean).join(" · ")}{m.mobile ? ` · ${m.mobile}` : ""}</div>
       </div>
       <div className="text-[11px]">
         {m.recChannel ? <span className={`${CHIP} bg-[#E3F2FD] text-[#1565C0]`}>→ {channelLabel(m.recChannel)}</span> : <span className="text-[#BDBDBD]">no channel</span>}
