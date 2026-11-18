@@ -438,6 +438,23 @@ export const TRAINING: TrainingTopic[] = [
     related: ["analytics-basics", "store-360"],
   },
   {
+    id: "new-farmers-daily",
+    title: "New farmers by day — who joined, from where, and how",
+    summary: "Pick any day to see every farmer added that day: ERP sync from store bills, field visits or Excel uploads, their status and location.",
+    section: "Analytics",
+    roles: ["officer", "regional", "central", "sysadmin"],
+    minutes: 3,
+    steps: [
+      { text: "On Analytics (Sales tab), scroll to “🆕 New farmers by day”. The strip shows the last 45 days; each bar is split by how farmers came in — blue ERP sync, green field visit, orange Excel upload. Click a bar (or pick a date) to open that day." },
+      { text: "The nightly ERP sync runs at about 2 AM, so a day’s ERP farmers are customers whose numbers first appeared on the previous days’ store bills. The card names the sync run (e.g. “Run #69 · sales 14 → 16 Nov”).", tip: "Field visit farmers are those an officer added through New Visit — the list shows who added them." },
+      { text: "The tiles show how many were added, how many have bought, how many are still leads, their base value and average bill." },
+      { text: "“How they came”, “Customer status” (lead / first purchase / repeat buyer), “Value tier”, “Where they are” (switch Region, District, Store, Village) and “What they bought” break the day down. Click any bar to filter the farmer list below; click it again to clear." },
+      { text: "The farmer list shows each farmer’s village, district, region, store, how they came, status, bills, base value, first purchase and what they bought. Search by name, mobile, village or store; click a name to open the farmer.", warn: "Officers and RMs only see farmers of their own stores. The “⬇ Excel” download is for the System Admin." },
+    ],
+    outcome: "You can see exactly who joined on any day, where they are, whether they bought, and how they reached us.",
+    related: ["analytics-basics", "performance-boards"],
+  },
+  {
     id: "custom-analytics",
     title: "Custom analytics: your reports & templates",
     summary: "Where your own dashboards live, how to start one, and what “Shared with me” holds.",
