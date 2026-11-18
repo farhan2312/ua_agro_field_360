@@ -20,6 +20,8 @@ import { getSession } from "@/lib/auth";
 import { cropLabel } from "@/lib/crops";
 import { locVal, locMatcher, locItemsOf, sanitizeLoc, locSummary, locLabel, type LocFilter, type LocItem } from "@/lib/campaign-location";
 import { buildWorkbookB64, type Cell } from "@/lib/xlsx-export";
+import { loadPrevRounds, earlierReached } from "@/lib/campaign-member-rounds";
+import type { PrevRoundContact } from "@/lib/campaign-prev-round";
 import { buildStyledWorkbookB64 } from "@/lib/xlsx-styled";
 import { sendSms, zapConfig, listSmsTemplates, type SmsTemplate } from "@/lib/zapsms";
 import { sendWhatsApp, waConfig, waCreateTemplate } from "@/lib/whatsapp";
@@ -694,6 +696,7 @@ export interface CampaignMemberVM {
   reachedBy: string | null; reachedByCode: string | null;
   response: string | null; responseCrop: string | null; // interest outcome + the crop when OTHER_CROP
   broadcastMediums: string[]; // channels DELIVERED via mass send (separate from `reached`)
+  prev: PrevRoundContact[]; // what happened with this farmer in earlier rounds (round 2+), oldest first
 }
 // Load the whole TEST group so the outreach counts (to-contact / reached / left) are accurate — the old
 // 1000 default capped a 2k+ campaign's list. Bounded to keep the payload sane; huge campaigns use the matrix.
@@ -715,6 +718,9 @@ export async function getCampaignMembers(campaignId: number, limit = 25000): Pro
   const fMap = new Map(farmers.map((f) => [f.id, f]));
   const sMap = new Map(stores.map((s) => [s.id, shortStoreName(s.name)]));
   const zMap = new Map(stores.map((s) => [s.id, locVal(s.zone)]));
+  // Earlier-round conversations (only once the campaign has moved past round 1).
+  const camp = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { currentRound: true } });
+  const prev = await loadPrevRounds(campaignId, camp?.currentRound ?? 1, scope ? members.map((m) => m.id) : undefined);
   return members.map((m) => {
     const f = fMap.get(m.farmerId);
     return {
@@ -724,6 +730,7 @@ export async function getCampaignMembers(campaignId: number, limit = 25000): Pro
       segment: m.segment, valueSegment: m.valueSegment, reached: m.reached, mediums: m.mediums, comment: m.comment, reachedAt: iso(m.reachedAt),
       reachedBy: m.reachedBy, reachedByCode: m.reachedByCode, response: m.response, responseCrop: m.responseCrop,
       broadcastMediums: m.broadcastMediums,
+      prev: prev.get(m.id) ?? [],
     };
   });
 }
@@ -750,9 +757,16 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
     prisma.campaignPhase.findMany({ where: { campaignId }, orderBy: { ordinal: "asc" }, select: { ordinal: true, name: true, type: true, defaultStart: true, defaultEnd: true, coupons: true } }),
     prisma.smsLog.findMany({ where: { campaignId, memberId: { not: null } }, select: { memberId: true, createdAt: true } }),
     prisma.whatsAppLog.findMany({ where: { campaignId, memberId: { not: null } }, select: { memberId: true, createdAt: true } }),
-    prisma.campaign.findUnique({ where: { id: campaignId }, select: { startDate: true, endDate: true } }),
+    prisma.campaign.findUnique({ where: { id: campaignId }, select: { startDate: true, endDate: true, currentRound: true } }),
   ]);
   const fMap = new Map(farmers.map((f) => [f.id, f]));
+  // Finished-round outcomes (saved when the campaign advanced) — the live outcome is the current round's.
+  const snaps = await prisma.campaignMemberRound.findMany({ where: { campaignId }, orderBy: { round: "asc" } });
+  const snapBy = new Map(snaps.map((r) => [`${r.memberId}:${r.round}`, r]));
+  const snapsOf = new Map<number, typeof snaps>();
+  for (const r of snaps) (snapsOf.get(r.memberId) ?? snapsOf.set(r.memberId, []).get(r.memberId)!).push(r);
+  const earlierReachedIds = new Set(snaps.filter((r) => r.reached).map((r) => r.memberId));
+  const curRound = camp?.currentRound ?? 1;
   const sMap = new Map(stores.map((s) => [s.id, shortStoreName(s.name) || s.name]));
   const rmMap = new Map(stores.map((s) => [s.id, (s.regionalManager ?? "").trim()]));
   const codeMap = new Map(stores.map((s) => [s.id, s.code]));
@@ -784,13 +798,29 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
 
   const test = members.filter((m) => m.group === "TEST");
   const count = (pred: (m: typeof members[number]) => boolean) => test.filter(pred).length;
+  type Mem = typeof members[number];
+  /** Reached in the current round OR any earlier one (tracker reach/uplift are cumulative across rounds). */
+  const everReached = (m: Mem) => m.reached || earlierReachedIds.has(m.id);
+  /** The outcome a member had in round `ord`: its saved snapshot, or the live outcome for the round it belongs to
+   *  (current round once the campaign has advanced; before that, the round whose window holds the date). */
+  const recIn = (m: Mem, ord: number) => {
+    const sn = snapBy.get(`${m.id}:${ord}`);
+    if (sn) return { reached: sn.reached, response: sn.response, comment: sn.comment, reachedAt: sn.reachedAt, reachedBy: sn.reachedBy, reachedByCode: sn.reachedByCode };
+    if (!m.reachedAt) return null;
+    const liveRound = curRound > 1 ? curRound : roundOf(m.reachedAt);
+    return liveRound === ord ? { reached: m.reached, response: m.response, comment: m.comment, reachedAt: m.reachedAt, reachedBy: m.reachedBy, reachedByCode: m.reachedByCode } : null;
+  };
+  const earlierText = (m: Mem) => (snapsOf.get(m.id) ?? []).map((r) => {
+    const bits = [(r.mediums ?? []).map((x) => MED[x] ?? x).join(" + "), r.response ? RESP[r.response] ?? r.response : "", r.comment ?? ""].filter(Boolean);
+    return `R${r.round}: ${bits.join(" · ") || "—"}`;
+  }).join(" | ");
 
   // ── Per-round coupon redemption (same basis as the tracker) ──
   // A round with a coupon code is scored on hard redemptions; matching rides on item OR invoice coupon,
   // over the round window + 30-day tail. byFarmer covers ALL enrolled farmers (for the data-dump sheets);
   // the overview headline uses the reached-TEST subset to mirror the tracker.
   const memberFarmerIds = [...new Set(members.map((m) => m.farmerId))];
-  const reachedTestFarmerIds = new Set(test.filter((m) => m.reached).map((m) => m.farmerId));
+  const reachedTestFarmerIds = new Set(test.filter(everReached).map((m) => m.farmerId));
   const roundCoupon = new Map<number, { codes: string[]; byFarmer: Map<number, number> }>();
   for (const p of phases) {
     const codes = [...new Set(asCoupons(p.coupons).map((c) => c.code.trim().toUpperCase()).filter(Boolean))];
@@ -817,7 +847,7 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
     ["Enrolled (total)", members.length],
     ["  Test", test.length],
     ["  Control", members.length - test.length],
-    ["Reached (test)", count((m) => m.reached)],
+    ["Reached (test, any round)", count(everReached)],
     [""],
     ["Reach by channel (test group)", ""],
     ...(["CALL", "WHATSAPP", "SMS", "IN_PERSON", "UNREACHABLE"] as const).map((c) => [MED[c], count((m) => (m.mediums ?? []).includes(c))] as (string | number)[]),
@@ -830,11 +860,11 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
     ["  via WhatsApp", count((m) => (m.broadcastMediums ?? []).includes("WHATSAPP"))],
     [""],
     ["Rounds", ""],
-    ["Round", "Window", "SMS sent", "WhatsApp sent", "Farmers reached in window", "Basis", "Coupon code(s)", "Redeemers (reached test)", "Redemption rate", "Coupon revenue (₹)"],
+    ["Round", "Window", "SMS sent", "WhatsApp sent", "Farmers reached in round", "Basis", "Coupon code(s)", "Redeemers (reached test)", "Redemption rate", "Coupon revenue (₹)"],
     ...phases.map((p) => {
       const sms = [...smsByRound].filter(([k]) => k.endsWith(`:${p.ordinal}`)).reduce((s, [, v]) => s + v, 0);
       const wa = [...waByRound].filter(([k]) => k.endsWith(`:${p.ordinal}`)).reduce((s, [, v]) => s + v, 0);
-      const reached = test.filter((m) => m.reachedAt && roundOf(m.reachedAt) === p.ordinal).length;
+      const reached = test.filter((m) => recIn(m, p.ordinal)?.reached).length;
       const rc = roundCoupon.get(p.ordinal)!;
       const reachedCount = reachedTestFarmerIds.size;
       let redeemers = 0, rev = 0;
@@ -845,14 +875,14 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
       return [`${p.ordinal}. ${p.name}`, `${fmtDay(p.defaultStart)} → ${fmtDay(p.defaultEnd)}`, sms, wa, reached, ...couponCols] as (string | number)[];
     }),
     [""],
-    ["Note", "Call / in-person / comments are not timestamped per round — the per-round sheets show only the message sends (SMS/WhatsApp) that fall in each round's window plus who was reached in it. The full current outreach state per farmer is in the 'All farmers' sheet."],
+    ["Note", "Each round's outcome (channels, response, comment) is saved when the campaign moves to the next round, so the per-round sheets show what happened in that round. SMS/WhatsApp sends are counted by the round window they fall in. 'All farmers' shows the current round plus a summary of earlier rounds."],
     ["Coupon note", "A round with a coupon code is scored on hard redemptions (a reached test farmer buying on that code, item or invoice, within the round window + 30 days). A round with no code falls back to matched spend, same as the campaign total."],
   ];
 
   // ── All farmers sheet (full current outreach state) ──
   const allHeader = ["Group", "Farmer", "Mobile", "Village", "District", "Region", "Store code", "Store", "RM", "Value segment", "Lifecycle", "Reached", "Channels", "Response", "Response crop", "Broadcast delivered", "SMS sent", "WhatsApp sent",
     ...(anyCoupons ? ["Coupon(s) redeemed", "Coupon revenue (₹)"] : []),
-    "Recorded by", "Recorded at (IST)", "Comment"];
+    "Recorded by", "Recorded at (IST)", "Comment", "Earlier rounds"];
   const allRows: (string | number)[][] = members.map((m) => {
     const f = fMap.get(m.farmerId);
     const cp = couponByFarmer.get(m.farmerId);
@@ -867,6 +897,7 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
       smsTotal.get(m.id) ?? 0, waTotal.get(m.id) ?? 0,
       ...(anyCoupons ? [cp ? [...cp.codes].join(", ") : "", cp ? Math.round(cp.revenue) : ""] : []),
       m.reachedBy ? `${m.reachedBy}${m.reachedByCode ? ` (${m.reachedByCode})` : ""}` : "", fmtTs(m.reachedAt), m.comment ?? "",
+      earlierText(m),
     ];
   });
 
@@ -876,8 +907,8 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
   ];
 
   // ── One sheet per round — message sends in that round's window + who was reached in it ──
-  const roundHeader = ["Farmer", "Mobile", "Village", "District", "Region", "Store", "RM", "SMS sent (round)", "WhatsApp sent (round)", "Reached in round", "Response (current)", "Comment (current)", "Recorded by", "Recorded at (IST)"];
-  const roundHeaderCoupon = ["Farmer", "Mobile", "Village", "District", "Region", "Store", "RM", "Group", "SMS sent (round)", "WhatsApp sent (round)", "Reached in round", "Redeemed coupon", "Coupon revenue (₹)", "Response (current)", "Comment (current)", "Recorded by", "Recorded at (IST)"];
+  const roundHeader = ["Farmer", "Mobile", "Village", "District", "Region", "Store", "RM", "SMS sent (round)", "WhatsApp sent (round)", "Reached in round", "Response", "Comment", "Recorded by", "Recorded at (IST)"];
+  const roundHeaderCoupon = ["Farmer", "Mobile", "Village", "District", "Region", "Store", "RM", "Group", "SMS sent (round)", "WhatsApp sent (round)", "Reached in round", "Redeemed coupon", "Coupon revenue (₹)", "Response", "Comment", "Recorded by", "Recorded at (IST)"];
   for (const p of phases) {
     const rc = roundCoupon.get(p.ordinal)!;
     const isCoupon = rc.codes.length > 0;
@@ -885,16 +916,19 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
     for (const m of members) {
       const sms = smsByRound.get(`${m.id}:${p.ordinal}`) ?? 0;
       const wa = waByRound.get(`${m.id}:${p.ordinal}`) ?? 0;
-      const reachedIn = !!(m.reachedAt && roundOf(m.reachedAt) === p.ordinal);
+      const rec = recIn(m, p.ordinal);
+      const reachedIn = !!rec;
       const redeemed = rc.byFarmer.get(m.farmerId) ?? 0;
       // Coupon rounds also list farmers who redeemed even with no logged send/reach (e.g. via broadcast).
       if (!sms && !wa && !reachedIn && !(isCoupon && redeemed > 0)) continue;
       const f = fMap.get(m.farmerId);
       const base: (string | number)[] = [f?.name ?? `Farmer #${m.farmerId}`, f?.mobile ?? "", ...locCols(m), store(m.storeId), rm(m.storeId)];
-      const tail: (string | number)[] = [m.response ? RESP[m.response] ?? m.response : "", reachedIn ? (m.comment ?? "") : "", reachedIn && m.reachedBy ? `${m.reachedBy}${m.reachedByCode ? ` (${m.reachedByCode})` : ""}` : "", reachedIn ? fmtTs(m.reachedAt) : ""];
+      const tail: (string | number)[] = rec
+        ? [rec.response ? RESP[rec.response] ?? rec.response : "", rec.comment ?? "", rec.reachedBy ? `${rec.reachedBy}${rec.reachedByCode ? ` (${rec.reachedByCode})` : ""}` : "", fmtTs(rec.reachedAt)]
+        : ["", "", "", ""];
       rrows.push(isCoupon
-        ? [...base, m.group ?? "", sms, wa, reachedIn ? "Yes" : "", redeemed > 0 ? "Yes" : "", redeemed > 0 ? Math.round(redeemed) : "", ...tail]
-        : [...base, sms, wa, reachedIn ? "Yes" : "", ...tail]);
+        ? [...base, m.group ?? "", sms, wa, rec ? (rec.reached ? "Yes" : "No") : "", redeemed > 0 ? "Yes" : "", redeemed > 0 ? Math.round(redeemed) : "", ...tail]
+        : [...base, sms, wa, rec ? (rec.reached ? "Yes" : "No") : "", ...tail]);
     }
     const nm = `R${p.ordinal} ${p.name}`.replace(/[\\/?*[\]:]/g, " ").slice(0, 31); // Excel sheet-name limit
     const noActivity = isCoupon ? "No sends, reaches or coupon redemptions in this round's window." : "No message sends or reaches recorded in this round's window.";
@@ -912,7 +946,7 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
       loc: locCols(m),
       vseg: m.valueSegment ? segMeta(m.valueSegment).label : (m.segment ? segMeta(m.segment).label : ""),
       lseg: m.lifecycleSegment ? segMeta(m.lifecycleSegment).label : "",
-      reached: m.reached ? "Yes" : "No",
+      reached: everReached(m) ? "Yes" : "No",
     }]));
     const txns = memberIds.length
       ? await prisma.saleLine.findMany({
@@ -1482,7 +1516,14 @@ export async function getCampaignTracker(campaignId: number, locIn?: LocFilter):
   const start = camp.startDate;
   const end = new Date(camp.endDate); end.setDate(end.getDate() + 30); // +30-day grace tail
 
-  const allMembers = await prisma.campaignMember.findMany({ where: { campaignId }, select: { farmerId: true, segment: true, valueSegment: true, lifecycleSegment: true, group: true, reached: true, mediums: true, response: true, responseCrop: true, storeId: true, broadcastMediums: true } });
+  const liveMembers = await prisma.campaignMember.findMany({ where: { campaignId }, select: { id: true, farmerId: true, segment: true, valueSegment: true, lifecycleSegment: true, group: true, reached: true, mediums: true, response: true, responseCrop: true, storeId: true, broadcastMediums: true } });
+  // Reach is cumulative across rounds: a farmer not (yet) reached this round but reached in an earlier one
+  // counts with that earlier outcome — so advancing a round never drops them from reach or uplift.
+  const earlier = await earlierReached(campaignId);
+  const allMembers = liveMembers.map((m) => {
+    const e = !m.reached ? earlier.get(m.id) : undefined;
+    return e ? { ...m, reached: true, mediums: e.mediums, response: e.response, responseCrop: e.responseCrop } : m;
+  });
   // Location of every member (village/district from the farmer, region = enrolled store's zone) → options + optional filter.
   const [locFarmers, locStores] = await Promise.all([
     prisma.farmer.findMany({ where: { id: { in: [...new Set(allMembers.map((m) => m.farmerId))] } }, select: { id: true, village: true, district: true } }),

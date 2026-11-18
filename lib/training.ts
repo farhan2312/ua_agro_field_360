@@ -668,6 +668,7 @@ export const TRAINING: TrainingTopic[] = [
       { text: "Under “Messaging — who to contact & how”, choose All farmers or particular value / lifecycle segments, and the comm plan to use (its medium decides the channel). From Round 2 on, you can message farmers who bought and those who didn’t differently." },
       { text: "Use “+ Add round” for more rounds and press “Save rounds”." },
       { text: "On the “Round status” tab, “→ Advance to <next round>” moves the campaign on.", warn: "You must confirm the sales data for the round has arrived before advancing — the purchased / not-purchased split depends on it." },
+      { text: "When the round moves on, every farmer starts the new round as pending. What each farmer said last round is saved and shows as a small “↩ R1 · Interested” tag on the farmer list, Focus mode, Matrix view and ⏱ Round list — hover it (or tap on a phone) to see the channel, response, note, who recorded it and when, and carry the conversation on.", tip: "The Campaign Tracker still counts a farmer as reached if they were reached in any round." },
     ],
     outcome: "Each round runs on its own dates and offers, and the tracker scores every round separately.",
     related: ["campaign-tracker", "mass-send", "comm-plan"],
@@ -682,6 +683,7 @@ export const TRAINING: TrainingTopic[] = [
     steps: [
       { text: "Open a campaign’s farmer panel (“Farmers”) and press “📣 Mass send”. It only ever goes to the test group." },
       { text: "Choose “✉ SMS” or “⚡ WhatsApp”, then the comm plan / template. WhatsApp goes only to farmers who have opted in, and only plans with an approved WhatsApp template can be used. SMS goes to every farmer with a valid mobile.", warn: "Check the SMS credit warning before sending a large SMS batch." },
+      { text: "To send to one area only, pick Region, District and/or Village under “Send to (location)” — the counts, the sample messages and the send all follow it." },
       { text: "The tiles show the Test group, Valid mobile, Opted-in and “Will send” counts; numbers that will be skipped are listed. You can tick “Skip farmers already contacted on …”. Three sample messages show exactly what real farmers will get." },
       { text: "Press “Send to N farmers”. It sends in small batches with Sent / Failed / Remaining counts; “Stop” pauses it. If it’s interrupted, open Mass send again to resume where it left off." },
       { text: "“📣 Broadcasts” on the campaign row lists past mass sends (channel, template, sent, failed, by whom). “↻ Delivery” refreshes delivery receipts.", tip: "Admins can also send one farmer an SMS or WhatsApp from their card in the farmer panel (“✉ SMS” / “⚡ WA API”) — that marks the farmer reached by that channel." },

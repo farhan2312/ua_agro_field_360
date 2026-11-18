@@ -9,6 +9,7 @@ import {
   ScriptPanel, ResponsePicker, ResponseBadge, useOutreach, type CommTemplateVM, type CropOption,
 } from "@/components/campaigns/CampaignsScreen";
 import { ClusterMultiSelect } from "@/components/campaigns/ClusterMultiSelect";
+import { PrevRoundTag } from "@/components/campaigns/PrevRoundTag";
 import { LocationFilterBar } from "@/components/campaigns/LocationFilter";
 import { EMPTY_LOC, locActive, locMatcher, type LocFilter } from "@/lib/campaign-location";
 
@@ -178,7 +179,7 @@ function MatrixRow({ member, crops, onChange }: { member: CampaignMemberVM; crop
           <span className="shrink-0 rounded-full px-1.5 py-px text-[9px] font-semibold" style={{ background: segMeta(member.segment).bg, color: segMeta(member.segment).color }}>{segMeta(member.segment).label}</span>
         </div>
         {member.store && <div className="truncate text-[10.5px] text-[#9E9E9E]">{member.store}</div>}
-        <div className="mt-0.5"><ResponseBadge member={member} /></div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-1"><PrevRoundTag prev={member.prev} size="xs" /><ResponseBadge member={member} /></div>
       </div>
       {/* Location */}
       <div className="truncate text-[11.5px] text-[#424242]" title={member.village ?? undefined}>{member.village ?? <span className="text-[#BDBDBD]">—</span>}</div>

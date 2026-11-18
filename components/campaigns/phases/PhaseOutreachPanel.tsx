@@ -6,6 +6,7 @@ import { getPhaseOutreach, type PhaseOutreach, type PhaseOutreachMember } from "
 import { channelLabel } from "@/lib/campaign-phases";
 import { EMPTY_LOC, locActive, locMatcher, locLine, type LocFilter } from "@/lib/campaign-location";
 import { LocationFilterBar } from "../LocationFilter";
+import { PrevRoundTag } from "../PrevRoundTag";
 
 const CHIP = "rounded-full px-2 py-0.5 text-[10.5px] font-bold";
 
@@ -76,6 +77,7 @@ function OutreachRow({ m }: { m: PhaseOutreachMember }) {
       <div className="min-w-[150px] flex-1">
         <div className="text-[13px] font-semibold text-[#1A1C1A]">{m.name}
           <span className={`${CHIP} ml-2 bg-[#ECEFF1] text-[#546E7A]`}>{m.segmentLabel}</span>
+          {m.prev.length > 0 && <span className="ml-1.5 inline-block align-middle"><PrevRoundTag prev={m.prev} /></span>}
         </div>
         <div className="text-[11px] text-[#9E9E9E]">{[locLine(m), m.store].filter(Boolean).join(" · ")}{m.mobile ? ` · ${m.mobile}` : ""}</div>
       </div>

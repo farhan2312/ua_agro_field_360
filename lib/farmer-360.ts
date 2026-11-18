@@ -86,11 +86,14 @@ const RESP: Record<string, string> = { INTERESTED: "Interested", NOT_INTERESTED:
 
 /** Merged, time-sorted log of every campaign contact for a farmer: SMS + WhatsApp sends + call/in-person marks. */
 export async function getFarmerContactTimeline(farmerId: number, limit = 120): Promise<ContactEvent[]> {
-  const [sms, wa, members] = await Promise.all([
+  const [sms, wa, live, rounds] = await Promise.all([
     prisma.smsLog.findMany({ where: { farmerId }, orderBy: { createdAt: "desc" }, take: 200, select: { createdAt: true, message: true, status: true, deliveryStatus: true, ok: true, sentByName: true, sentByCode: true, campaignId: true } }),
     prisma.whatsAppLog.findMany({ where: { farmerId }, orderBy: { createdAt: "desc" }, take: 200, select: { createdAt: true, message: true, status: true, ok: true, sentByName: true, sentByCode: true, campaignId: true, kind: true } }),
     prisma.campaignMember.findMany({ where: { farmerId, reachedAt: { not: null } }, select: { reachedAt: true, mediums: true, response: true, responseCrop: true, comment: true, reachedBy: true, reachedByCode: true, campaignId: true } }),
+    // Finished campaign rounds keep their outcome here (the live member outcome is cleared each round).
+    prisma.campaignMemberRound.findMany({ where: { farmerId, reachedAt: { not: null } }, select: { reachedAt: true, mediums: true, response: true, responseCrop: true, comment: true, reachedBy: true, reachedByCode: true, campaignId: true } }),
   ]);
+  const members = [...live, ...rounds];
 
   const campIds = [...new Set([...sms.map((s) => s.campaignId), ...wa.map((w) => w.campaignId), ...members.map((m) => m.campaignId)].filter((x): x is number => x != null))];
   const campName = new Map((campIds.length ? await prisma.campaign.findMany({ where: { id: { in: campIds } }, select: { id: true, name: true } }) : []).map((c) => [c.id, c.name]));

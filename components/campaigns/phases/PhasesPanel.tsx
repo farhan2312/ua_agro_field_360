@@ -321,6 +321,9 @@ function AdvanceModal({ campaignId, status, onClose, onDone }: { campaignId: num
         <div className="rounded-[10px] bg-[#FFF8E1] px-3.5 py-2.5 text-[12px] text-[#8D6E00]">
           Moving the whole campaign to <b>{status.nextRoundName}</b>. From Round 2 on, messaging splits by whether each farmer has purchased — so confirm this round&apos;s sales data is uploaded first.
         </div>
+        <div className="mt-2 rounded-[10px] bg-[#E3F2FD] px-3.5 py-2.5 text-[12px] text-[#0D47A1]">
+          Every farmer starts the new round as <b>pending</b>. What they said in {status.roundName || "this round"} is saved and shows as a <b>↩ R{status.currentOrdinal}</b> tag — hover it to see the earlier conversation.
+        </div>
         <label className="mt-3 flex items-start gap-2 text-[13px] text-[#333]">
           <input type="checkbox" checked={attested} onChange={(e) => setAttested(e.target.checked)} className="mt-0.5" />
           <span>I confirm the sales data for <b>{status.roundName || "this round"}</b> has been uploaded.</span>

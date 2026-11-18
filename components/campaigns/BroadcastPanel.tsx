@@ -9,6 +9,8 @@ import {
 } from "@/app/actions/broadcasts";
 import { smsBalance } from "@/app/actions/test-messaging";
 import type { SmsBalance } from "@/lib/zapsms";
+import { LocationFilterBar } from "./LocationFilter";
+import { EMPTY_LOC, locActive, locSummary, type LocFilter, type LocItem } from "@/lib/campaign-location";
 
 const n = (x: number) => x.toLocaleString("en-IN");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -24,6 +26,9 @@ export function BroadcastPanel({ campaignId, campaignName, commPlans, templates,
   const [aud, setAud] = useState<BroadcastAudience | null>(null);
   const [tplId, setTplId] = useState<number | null>(null);
   const [skipContacted, setSkipContacted] = useState(false);
+  const [loc, setLoc] = useState<LocFilter>(EMPTY_LOC);
+  const [locItems, setLocItems] = useState<LocItem[]>([]); // filter options — whole test group, kept across refetches
+  const audSeq = useRef(0);
   const [phase, setPhase] = useState<"setup" | "running" | "done">("setup");
   const [prog, setProg] = useState({ sent: 0, failed: 0, total: 0, remaining: 0 });
   const [err, setErr] = useState<string | null>(null);
@@ -37,15 +42,25 @@ export function BroadcastPanel({ campaignId, campaignName, commPlans, templates,
 
   const [bal, setBal] = useState<SmsBalance | null>(null);
   const [preview, setPreview] = useState<BroadcastPreviewRow[] | null>(null);
-  useEffect(() => { setTplId(null); setAud(null); getBroadcastAudience(campaignId, channel).then(setAud); }, [campaignId, channel]);
+  useEffect(() => { setTplId(null); }, [campaignId, channel]);
+  // Audience counts for the channel + location filter (stale responses dropped).
+  useEffect(() => {
+    const seq = ++audSeq.current;
+    setAud(null);
+    getBroadcastAudience(campaignId, channel, locActive(loc) ? loc : undefined).then((a) => {
+      if (seq !== audSeq.current) return;
+      setAud(a);
+      if (a.locItems.length) setLocItems(a.locItems);
+    });
+  }, [campaignId, channel, loc]);
   // SMS credit balance — to warn before a mass send burns through more credits than the account has.
   useEffect(() => { setBal(null); if (channel === "SMS") smsBalance().then((r) => setBal(r.ok && r.balance ? r.balance : null)); }, [channel]);
   // Sample of exactly what will be sent (real farmers, variables filled).
   useEffect(() => {
     setPreview(null);
     if (tplId == null) return;
-    getBroadcastPreview({ campaignId, channel, commTemplateId: tplId, limit: 3 }).then((r) => setPreview(r.ok ? r.rows : []));
-  }, [campaignId, channel, tplId]);
+    getBroadcastPreview({ campaignId, channel, commTemplateId: tplId, limit: 3, loc: locActive(loc) ? loc : undefined }).then((r) => setPreview(r.ok ? r.rows : []));
+  }, [campaignId, channel, tplId, loc]);
 
   const ready = channel === "WHATSAPP" ? aud?.waReady : aud?.smsReady;
   const eligible = aud ? (channel === "WHATSAPP" ? aud.optedIn : aud.withMobile) - (skipContacted ? aud.alreadyContacted : 0) : 0;
@@ -56,7 +71,7 @@ export function BroadcastPanel({ campaignId, campaignName, commPlans, templates,
     setErr(null); stopRef.current = false; setStarting(true);
     // Wrap the whole run: a thrown server error used to vanish silently ("nothing happened, no code").
     try {
-      const c = await createBroadcast({ campaignId, channel, commTemplateId: tplId, skipContacted });
+      const c = await createBroadcast({ campaignId, channel, commTemplateId: tplId, skipContacted, loc: locActive(loc) ? loc : undefined });
       if (!c.ok || c.broadcastId == null) { setErr(c.error ?? "Could not start the broadcast."); setStarting(false); return; }
       bidRef.current = c.broadcastId;
       setPhase("running"); setStarting(false); setProg({ sent: 0, failed: 0, total: c.total ?? 0, remaining: c.total ?? 0 });
@@ -113,9 +128,17 @@ export function BroadcastPanel({ campaignId, campaignName, commPlans, templates,
               </div>
             )}
 
+            {/* Location — send to one area only */}
+            <div className="mt-4 rounded-[10px] bg-[#F5F7F5] p-2.5">
+              <div className="mb-1 text-[10.5px] font-bold uppercase tracking-[0.4px] text-[#757575]">Send to (location)</div>
+              {locItems.length
+                ? <LocationFilterBar items={locItems} value={loc} onChange={setLoc} />
+                : <div className="text-[11.5px] text-[#9E9E9E]">Loading locations…</div>}
+            </div>
+
             {/* Audience */}
-            <div className="mt-4 grid grid-cols-2 gap-2 text-[12px] sm:grid-cols-4">
-              <div className={cell}><div className="text-[10px] font-bold uppercase text-[#9E9E9E]">Test group</div><div className="text-[16px] font-bold text-[#1A1C1A]">{aud ? n(aud.total) : "…"}</div></div>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-[12px] sm:grid-cols-4">
+              <div className={cell}><div className="text-[10px] font-bold uppercase text-[#9E9E9E]">{locActive(loc) ? "Test group (area)" : "Test group"}</div><div className="text-[16px] font-bold text-[#1A1C1A]">{aud ? n(aud.total) : "…"}</div></div>
               <div className={cell}><div className="text-[10px] font-bold uppercase text-[#9E9E9E]">Valid mobile</div><div className="text-[16px] font-bold text-[#1A1C1A]">{aud ? n(aud.withMobile) : "…"}</div></div>
               <div className={cell}><div className="text-[10px] font-bold uppercase text-[#9E9E9E]">Opted-in</div><div className="text-[16px] font-bold text-[#0B8A3D]">{aud ? n(aud.optedIn) : "…"}</div></div>
               <div className={cell} style={{ background: "#E8F5E9" }}><div className="text-[10px] font-bold uppercase text-[#2E7D32]">Will send</div><div className="text-[16px] font-bold text-[#2E7D32]">{aud ? n(Math.max(0, eligible)) : "…"}</div></div>
@@ -177,11 +200,12 @@ export function BroadcastPanel({ campaignId, campaignName, commPlans, templates,
 
             {err && <div className="mt-2 rounded-[8px] bg-[#FDECEA] px-3 py-2 text-[12px] font-semibold text-[#C62828]">{err}</div>}
 
+            {locActive(loc) && <div className="mt-3 text-[11.5px] text-[#616161]">📍 Only farmers in <b>{locSummary(loc)}</b> will get this message.</div>}
             <div className="mt-4 flex items-center justify-end gap-2">
               <button type="button" onClick={onClose} className="rounded-[10px] border border-[#E0E0E0] px-4 py-2 text-[12.5px] font-semibold text-[#616161] hover:bg-[#F5F5F5]">Cancel</button>
               <button type="button" onClick={start} disabled={!ready || tplId == null || eligible <= 0 || starting}
                 className="rounded-[10px] px-5 py-2 text-[12.5px] font-bold text-white disabled:opacity-50" style={{ background: accent }}>
-                {starting ? "Starting…" : `Send to ${aud ? n(Math.max(0, eligible)) : "…"} farmers`}
+                {starting ? "Starting…" : `Send to ${aud ? n(Math.max(0, eligible)) : "…"} farmers${locActive(loc) ? " in this area" : ""}`}
               </button>
             </div>
           </>

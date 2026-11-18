@@ -1,6 +1,8 @@
 "use server";
 
 import { locVal } from "@/lib/campaign-location";
+import { snapshotAndResetRound, loadPrevRounds } from "@/lib/campaign-member-rounds";
+import type { PrevRoundContact } from "@/lib/campaign-prev-round";
 import { revalidatePath } from "next/cache";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -173,12 +175,15 @@ export async function advanceCampaignRound(input: { campaignId: number; attested
   const next = current + 1;
 
   const actor = await getActor();
-  await prisma.$transaction([
-    prisma.campaign.update({ where: { id: input.campaignId }, data: { currentRound: next } }),
-    prisma.campaignPhaseAdvance.create({
+  // Save each farmer's outcome for the finished round, then clear it — the new round starts with everyone
+  // pending, and the earlier conversation shows as a "contacted last round" tag.
+  await prisma.$transaction(async (tx) => {
+    await snapshotAndResetRound(tx, input.campaignId, current);
+    await tx.campaign.update({ where: { id: input.campaignId }, data: { currentRound: next } });
+    await tx.campaignPhaseAdvance.create({
       data: { campaignId: input.campaignId, fromOrdinal: current, toOrdinal: next, attestationNote: input.note?.trim() || null, byName: actor.name, byCode: actor.code },
-    }),
-  ]);
+    });
+  }, { timeout: 120_000, maxWait: 20_000 });
   revalidatePath("/campaigns");
   return { ok: true };
 }
@@ -197,6 +202,7 @@ export interface PhaseOutreachMember {
   segmentLabel: string; groupLabel: string;
   reached: boolean; mediums: string[];
   recCommPlan: string | null; recChannel: string | null;
+  prev: PrevRoundContact[]; // contacts from earlier rounds (round 2+), oldest first
 }
 export interface PhaseOutreach {
   campaignId: number; ordinal: number; roundName: string; purchaseSplit: boolean;
@@ -230,6 +236,7 @@ export async function getPhaseOutreach(campaignId: number): Promise<PhaseOutreac
   const farmers = new Map((await prisma.farmer.findMany({ where: { id: { in: farmerIds } }, select: { id: true, name: true, mobile: true, village: true, district: true, store: { select: { name: true } } } })).map((f) => [f.id, f]));
   const zones = new Map((await prisma.store.findMany({ select: { id: true, zone: true } })).map((st) => [st.id, locVal(st.zone)]));
   const pset = purchaseSplit ? await purchasedFarmerIds(farmerIds, camp.startDate, new Date(camp.endDate.getTime() + 864e5)) : new Set<number>();
+  const prev = await loadPrevRounds(campaignId, ord, where.storeId ? members.map((m) => m.id) : undefined);
 
   const out: PhaseOutreachMember[] = members.map((m) => {
     const bought = purchaseSplit && pset.has(m.farmerId);
@@ -246,6 +253,7 @@ export async function getPhaseOutreach(campaignId: number): Promise<PhaseOutreac
       groupLabel: purchaseSplit ? `${bucket} · ${tl}` : tl,
       reached: m.reached, mediums: m.mediums,
       recCommPlan: t?.commPlan ?? null, recChannel: t?.channel ?? null,
+      prev: prev.get(m.id) ?? [],
     };
   });
 

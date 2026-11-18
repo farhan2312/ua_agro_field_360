@@ -7,6 +7,7 @@ import { logAudit } from "@/lib/audit";
 import { sendSms, zapConfig, getSmsDeliveryReport } from "@/lib/zapsms";
 import { sendWhatsApp, waConfig } from "@/lib/whatsapp";
 import { resolveVars, fillSmsTemplate, fillWaTemplate, positionalParams, type FarmerVarSource } from "@/lib/campaign-vars";
+import { locVal, locMatcher, locItemsOf, sanitizeLoc, locSummary, type LocFilter, type LocItem } from "@/lib/campaign-location";
 
 export type Channel = "SMS" | "WHATSAPP";
 const validMobile = (m: string | null | undefined) => /^[6-9]\d{9}$/.test((m ?? "").replace(/\D/g, "").slice(-10));
@@ -16,12 +17,38 @@ async function adminOnly(): Promise<boolean> {
   return canManage(role);
 }
 
-/** CampaignMember has no `farmer` relation — batch-load mobile + opt-in by farmerId. */
-async function farmerMap(ids: (number | null)[]): Promise<Map<number, { mobile: string | null; whatsappOptIn: boolean }>> {
+/** CampaignMember has no `farmer` relation — batch-load mobile + opt-in + village/district by farmerId. */
+async function farmerMap(ids: (number | null)[]): Promise<Map<number, { mobile: string | null; whatsappOptIn: boolean; village: string | null; district: string | null }>> {
   const fids = [...new Set(ids.filter((x): x is number => x != null))];
   if (!fids.length) return new Map();
-  const rows = await prisma.farmer.findMany({ where: { id: { in: fids } }, select: { id: true, mobile: true, whatsappOptIn: true } });
-  return new Map(rows.map((f) => [f.id, { mobile: f.mobile, whatsappOptIn: f.whatsappOptIn }]));
+  const rows = await prisma.farmer.findMany({ where: { id: { in: fids } }, select: { id: true, mobile: true, whatsappOptIn: true, village: true, district: true } });
+  return new Map(rows.map((f) => [f.id, { mobile: f.mobile, whatsappOptIn: f.whatsappOptIn, village: f.village, district: f.district }]));
+}
+
+type TestMember = { id: number; farmerId: number; mediums: string[]; storeId: number | null };
+/**
+ * The campaign's TEST group, with each farmer's location (region = enrolled store's zone, district/village
+ * from the farmer) and the optional Region/District/Village filter applied. `locItems` covers the whole
+ * TEST group (before filtering) so the filter dropdowns always list every option.
+ */
+async function testAudience(campaignId: number, locIn?: unknown) {
+  const all: TestMember[] = await prisma.campaignMember.findMany({
+    where: { campaignId, group: "TEST" },
+    select: { id: true, farmerId: true, mediums: true, storeId: true },
+  });
+  const [fmap, stores] = await Promise.all([
+    farmerMap(all.map((m) => m.farmerId)),
+    prisma.store.findMany({ select: { id: true, zone: true } }),
+  ]);
+  const zones = new Map(stores.map((st) => [st.id, locVal(st.zone)]));
+  const locOf = (m: TestMember) => {
+    const f = fmap.get(m.farmerId);
+    return { village: locVal(f?.village), district: locVal(f?.district), region: m.storeId != null ? zones.get(m.storeId) ?? null : null };
+  };
+  const loc = sanitizeLoc(locIn);
+  const ok = locMatcher(loc);
+  const members = loc ? all.filter((m) => ok(locOf(m))) : all;
+  return { members, fmap, loc, locItems: locItemsOf(all.map(locOf)) };
 }
 
 export interface BroadcastAudience {
@@ -33,17 +60,15 @@ export interface BroadcastAudience {
   alreadyContacted: number; // members whose outcome already includes this channel
   eligible: number;     // who this channel would send to
   smsReady: boolean; waReady: boolean;
+  locItems: LocItem[];  // Region/District/Village options (whole TEST group)
+  locFiltered: boolean; // counts above are for the location filter
 }
 
 /** Count the TEST-group audience for a channel (WhatsApp = opted-in only; SMS = any valid mobile). */
-export async function getBroadcastAudience(campaignId: number, channel: Channel): Promise<BroadcastAudience> {
-  const base: BroadcastAudience = { total: 0, withMobile: 0, invalidMobile: 0, noMobile: 0, optedIn: 0, alreadyContacted: 0, eligible: 0, smsReady: zapConfig().ready, waReady: waConfig().ready };
+export async function getBroadcastAudience(campaignId: number, channel: Channel, locIn?: LocFilter): Promise<BroadcastAudience> {
+  const base: BroadcastAudience = { total: 0, withMobile: 0, invalidMobile: 0, noMobile: 0, optedIn: 0, alreadyContacted: 0, eligible: 0, smsReady: zapConfig().ready, waReady: waConfig().ready, locItems: [], locFiltered: false };
   if (!(await adminOnly())) return base;
-  const members = await prisma.campaignMember.findMany({
-    where: { campaignId, group: "TEST" },
-    select: { farmerId: true, mediums: true },
-  });
-  const fmap = await farmerMap(members.map((m) => m.farmerId));
+  const { members, fmap, loc, locItems } = await testAudience(campaignId, locIn);
   let withMobile = 0, invalidMobile = 0, noMobile = 0, optedIn = 0, contacted = 0;
   for (const m of members) {
     const f = fmap.get(m.farmerId);
@@ -56,12 +81,12 @@ export async function getBroadcastAudience(campaignId: number, channel: Channel)
     if (m.mediums.includes(channel)) contacted++;
   }
   const eligible = channel === "WHATSAPP" ? optedIn : withMobile;
-  return { total: members.length, withMobile, invalidMobile, noMobile, optedIn, alreadyContacted: contacted, eligible, smsReady: base.smsReady, waReady: base.waReady };
+  return { total: members.length, withMobile, invalidMobile, noMobile, optedIn, alreadyContacted: contacted, eligible, smsReady: base.smsReady, waReady: base.waReady, locItems, locFiltered: !!loc };
 }
 
 export interface BroadcastPreviewRow { name: string; mobile: string; message: string }
 /** A few real, filled sample messages for the picked comm plan — so the admin sees exactly what sends. */
-export async function getBroadcastPreview(input: { campaignId: number; channel: Channel; commTemplateId: number; limit?: number }): Promise<{ ok: boolean; rows: BroadcastPreviewRow[]; error?: string }> {
+export async function getBroadcastPreview(input: { campaignId: number; channel: Channel; commTemplateId: number; limit?: number; loc?: LocFilter }): Promise<{ ok: boolean; rows: BroadcastPreviewRow[]; error?: string }> {
   if (!(await adminOnly())) return { ok: false, rows: [], error: "Admins only." };
   const tpl = await prisma.commTemplate.findUnique({
     where: { id: input.commTemplateId },
@@ -69,7 +94,7 @@ export async function getBroadcastPreview(input: { campaignId: number; channel: 
   });
   if (!tpl) return { ok: false, rows: [], error: "Comm plan not found." };
   const campaign = await prisma.campaign.findUnique({ where: { id: input.campaignId }, select: { endDate: true } });
-  const members = await prisma.campaignMember.findMany({ where: { campaignId: input.campaignId, group: "TEST" }, select: { farmerId: true }, take: 60 });
+  const members = (await testAudience(input.campaignId, input.loc)).members.slice(0, 60);
   const farmers = await prisma.farmer.findMany({
     where: { id: { in: members.map((m) => m.farmerId).filter((x): x is number => x != null) } },
     select: { name: true, mobile: true, village: true, hniGap: true, cropTags: true, crop: true, store: { select: { name: true } } },
@@ -89,7 +114,7 @@ export async function getBroadcastPreview(input: { campaignId: number; channel: 
 
 /** Create a broadcast job + snapshot its recipients (idempotent, resumable). Admin-only. */
 export async function createBroadcast(input: {
-  campaignId: number; channel: Channel; commTemplateId: number; skipContacted?: boolean;
+  campaignId: number; channel: Channel; commTemplateId: number; skipContacted?: boolean; loc?: LocFilter;
 }): Promise<{ ok: boolean; broadcastId?: number; total?: number; error?: string }> {
   if (!(await adminOnly())) return { ok: false, error: "Mass send is available to admins only." };
   const { channel } = input;
@@ -103,11 +128,7 @@ export async function createBroadcast(input: {
   if (channel === "SMS" && !zapConfig().ready) return { ok: false, error: "SMS gateway not configured." };
   if (channel === "WHATSAPP" && !waConfig().ready) return { ok: false, error: "WhatsApp not configured." };
 
-  const members = await prisma.campaignMember.findMany({
-    where: { campaignId: input.campaignId, group: "TEST" },
-    select: { id: true, farmerId: true, mediums: true },
-  });
-  const fmap = await farmerMap(members.map((m) => m.farmerId));
+  const { members, fmap, loc } = await testAudience(input.campaignId, input.loc);
   const eligible = members.filter((m) => {
     const f = fmap.get(m.farmerId);
     if (!validMobile(f?.mobile)) return false;
@@ -115,7 +136,7 @@ export async function createBroadcast(input: {
     if (input.skipContacted && m.mediums.includes(channel)) return false;
     return true;
   });
-  if (eligible.length === 0) return { ok: false, error: "No eligible recipients for this channel." };
+  if (eligible.length === 0) return { ok: false, error: loc ? "No eligible recipients for this channel in the chosen location." : "No eligible recipients for this channel." };
 
   const label = channel === "WHATSAPP" ? `${tpl.name} · ${tpl.waTemplateName}` : tpl.name;
   const actor = await getActor();
@@ -135,7 +156,7 @@ export async function createBroadcast(input: {
       })),
     });
   }
-  await logAudit("Broadcast", "SEND", `Mass ${channel === "WHATSAPP" ? "WhatsApp" : "SMS"} to ${eligible.length} farmers via ${label}`, actor.name);
+  await logAudit("Broadcast", "SEND", `Mass ${channel === "WHATSAPP" ? "WhatsApp" : "SMS"} to ${eligible.length} farmers via ${label}${loc ? ` · location: ${locSummary(loc)}` : ""}`, actor.name);
   return { ok: true, broadcastId: bc.id, total: eligible.length };
 }
 

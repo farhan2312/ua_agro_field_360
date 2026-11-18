@@ -415,6 +415,7 @@ model Campaign {
   members        CampaignMember[]
   phases         CampaignPhase[]
   phaseAdvances  CampaignPhaseAdvance[]
+  memberRounds   CampaignMemberRound[]
   callers        CampaignCaller[]
   helpers        CampaignHelper[]
   // true = officer access comes from the picked team (CampaignWorker); false = legacy workedBy rule.
@@ -555,6 +556,31 @@ model CampaignPhaseAdvance {
   createdAt       DateTime @default(now())
 
   @@index([campaignId])
+}
+
+/// One member's outreach outcome for a FINISHED round. Snapshotted when the campaign advances, just before
+/// the live outcome on CampaignMember is cleared for the next round — so every round starts with everyone
+/// pending, and the earlier conversation stays visible (the "contacted last round" tag, Farmer 360, tracker).
+model CampaignMemberRound {
+  id            Int       @id @default(autoincrement())
+  campaignId    Int
+  campaign      Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  memberId      Int // loose → CampaignMember.id
+  farmerId      Int
+  round         Int // the round ordinal that just finished
+  reached       Boolean   @default(false)
+  mediums       String[]  @default([])
+  response      String?
+  responseCrop  String?
+  comment       String?
+  reachedAt     DateTime?
+  reachedBy     String?
+  reachedByCode String?
+  createdAt     DateTime  @default(now())
+
+  @@unique([memberId, round])
+  @@index([campaignId])
+  @@index([farmerId])
 }
 
 /// Editable communication plan template (WF3) — many per segment, per language & promotion type.

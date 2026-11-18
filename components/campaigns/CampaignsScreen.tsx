@@ -8,6 +8,7 @@ import { segMeta, VALUE_SEGMENTS, LIFECYCLE_SEGMENTS, VALUE_TITLE, LIFECYCLE_TIT
 import { SmsSender } from "./SmsSender";
 import { WaSender } from "./WaSender";
 import { BroadcastPanel } from "./BroadcastPanel";
+import { PrevRoundTag } from "./PrevRoundTag";
 import { BroadcastHistory } from "./BroadcastHistory";
 import { PhasesPanel } from "./phases/PhasesPanel";
 import { PhaseOutreachPanel } from "./phases/PhaseOutreachPanel";
@@ -1370,6 +1371,7 @@ function MemberRow({ member, crops, onChange, commPlans, templates, canSms }: { 
         <span className="text-[16px] font-bold text-[#1A1C1A]">{member.name}</span>
         <span className="rounded-full px-2.5 py-0.5 text-[10px] font-semibold" style={{ background: segMeta(member.segment).bg, color: segMeta(member.segment).color }}>{segMeta(member.segment).label}</span>
         <StatusBadge member={member} />
+        <PrevRoundTag prev={member.prev} />
         <BroadcastBadge member={member} />
         <ResponseBadge member={member} />
         <span className="text-[12px] text-[#9E9E9E]">{locLine(member) || "—"}{member.store ? ` · ${member.store}` : ""}</span>
@@ -1447,6 +1449,7 @@ function FocusCard({ member, crops, onChange, onHandled, onSkip, onBack, remaini
         <span className="text-[22px] font-bold text-[#1A1C1A]">{member.name}</span>
         <span className="rounded-full px-2.5 py-0.5 text-[10.5px] font-semibold" style={{ background: segMeta(member.segment).bg, color: segMeta(member.segment).color }}>{segMeta(member.segment).label}</span>
         <StatusBadge member={member} />
+        <PrevRoundTag prev={member.prev} />
         <BroadcastBadge member={member} />
         <ResponseBadge member={member} />
         <span className="ml-auto rounded-full bg-[#F5F7F5] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#616161]">{remaining} left</span>
