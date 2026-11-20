@@ -22,7 +22,7 @@ import { locVal, locMatcher, locItemsOf, sanitizeLoc, locSummary, locLabel, type
 import { buildWorkbookB64, type Cell } from "@/lib/xlsx-export";
 import { loadPrevRounds, earlierReached } from "@/lib/campaign-member-rounds";
 import type { PrevRoundContact } from "@/lib/campaign-prev-round";
-import { buildStyledWorkbookB64 } from "@/lib/xlsx-styled";
+import { buildStyledWorkbookB64, type StyledSheetSpec, type StyledCell } from "@/lib/xlsx-styled";
 import { sendSms, zapConfig, listSmsTemplates, type SmsTemplate } from "@/lib/zapsms";
 import { sendWhatsApp, waConfig, waCreateTemplate } from "@/lib/whatsapp";
 import { SAMPLE_VARS, resolveVars, fillDltTemplate, fillWaTemplate, positionalParams, countDltVars, VAR_LABEL, type FarmerVarSource } from "@/lib/campaign-vars";
@@ -1163,6 +1163,285 @@ export async function getCampaignAnalytics(campaignId: number, rms?: string[], l
   };
 }
 
+/* ── Round-by-round analytics (Analytics modal "🔁 Rounds" tab + export sheets) ──
+ * A round's outcome per TEST member: finished rounds read the CampaignMemberRound snapshot (no row = nothing
+ * recorded), the current round reads the live CampaignMember outcome, upcoming rounds have none yet.
+ * "Bought" = purchased the campaign's products (cluster crop/category, or anything when the cluster isn't
+ * product-specific) inside the round's own window (start → end day, inclusive). Control holdouts give a
+ * per-round baseline. Same scope + RM + location filters as the rest of the modal. */
+export type RoundCat = "INTERESTED" | "NOT_INTERESTED" | "OTHER_CROP" | "REACHED" | "UNREACHABLE" | "NONE";
+const ROUND_CATS: RoundCat[] = ["INTERESTED", "NOT_INTERESTED", "OTHER_CROP", "REACHED", "UNREACHABLE", "NONE"];
+export interface RoundMeta {
+  ordinal: number; name: string; start: string; end: string; // YYYY-MM-DD (end inclusive)
+  status: "done" | "current" | "upcoming";
+  coupons: string[];
+  days: number;            // length of the round in days
+  dayNow: number | null;   // current round: today's day number (1-based, capped at `days`)
+}
+export interface RoundStat {
+  ordinal: number;
+  test: number; control: number;
+  recorded: number; reached: number; unreachable: number;
+  call: number; whatsapp: number; sms: number; inPerson: number;
+  interested: number; notInterested: number; otherCrop: number; noResponse: number;
+  buyersReached: number; buyersNotReached: number; buyersControl: number; // campaign-product buyers in the round window
+  salesReached: number; salesTest: number;                                 // campaign-product base ₹ in the window
+  interestedBought: number;
+  couponRedeemers: number | null; couponRevenue: number | null;           // null = the round has no coupon codes
+}
+export interface RoundGeoCell { reached: number; interested: number; bought: number; recorded: number }
+export interface RoundGeoRow { label: string; sub: string; test: number; r: Record<number, RoundGeoCell> }
+export interface RoundTransition { from: number; to: number; cells: Record<RoundCat, Record<RoundCat, number>>; boughtTo: Record<RoundCat, number> }
+export interface RoundAnalytics {
+  rounds: RoundMeta[]; currentRound: number; hasPhases: boolean; basisLabel: string;
+  stats: RoundStat[];
+  transitions: RoundTransition[];
+  geo: { store: RoundGeoRow[]; region: RoundGeoRow[]; district: RoundGeoRow[]; village: RoundGeoRow[] };
+  /** Call-stats rows (same shape as the Overview tables) per round key ("1", "2", … and "all" = reached in any round). */
+  callBy: Record<string, { store: CallRow[]; region: CallRow[]; district: CallRow[]; village: CallRow[] }>;
+  pace: Record<number, number[]>;  // reached outcomes recorded per day of the round (index 0 = day 1)
+  callers: { name: string; r: Record<number, { recorded: number; reached: number; interested: number }> }[];
+  otherCrops: Record<number, { crop: string; count: number }[]>;
+}
+
+type RoundOutcome = { reached: boolean; mediums: string[]; response: string | null; responseCrop: string | null; comment: string | null; reachedAt: Date | null; reachedBy: string | null; reachedByCode: string | null };
+const DAY_MS = 86_400_000;
+const istDayNum = (d: Date) => Math.floor((d.getTime() + 330 * 60_000) / DAY_MS);
+const catOf = (o: RoundOutcome | undefined): RoundCat => {
+  if (!o) return "NONE";
+  if (o.response === "INTERESTED" || o.response === "NOT_INTERESTED" || o.response === "OTHER_CROP") return o.response;
+  if (o.reached) return "REACHED";
+  if (o.mediums.includes("UNREACHABLE")) return "UNREACHABLE";
+  return "NONE";
+};
+
+/** Shared loader for the round analytics screen and the round sheets of the analytics export. */
+async function loadRoundData(campaignId: number, rms?: string[], locIn?: LocFilter) {
+  const loc = sanitizeLoc(locIn);
+  const scope = await memberScopeWhere();
+  if (scope === "none") return null;
+  const camp = await prisma.campaign.findUnique({ where: { id: campaignId } });
+  if (!camp) return null;
+  const allMembers = await prisma.campaignMember.findMany({
+    where: { campaignId, ...(scope ?? {}) },
+    select: { id: true, farmerId: true, group: true, storeId: true, segment: true, valueSegment: true, lifecycleSegment: true, reached: true, mediums: true, response: true, responseCrop: true, comment: true, reachedAt: true, reachedBy: true, reachedByCode: true },
+    take: 40000,
+  });
+  if (!allMembers.length) return null;
+  const [farmers, stores, phases, snaps, clusterIds] = await Promise.all([
+    prisma.farmer.findMany({ where: { id: { in: [...new Set(allMembers.map((m) => m.farmerId))] } }, select: { id: true, name: true, mobile: true, village: true, district: true } }),
+    prisma.store.findMany({ select: { id: true, code: true, name: true, regionalManager: true, zone: true } }),
+    prisma.campaignPhase.findMany({ where: { campaignId }, orderBy: { ordinal: "asc" }, select: { ordinal: true, name: true, defaultStart: true, defaultEnd: true, coupons: true } }),
+    prisma.campaignMemberRound.findMany({ where: { campaignId } }),
+    resolveCampaignClusters([camp]).then((m) => m.get(camp) ?? []),
+  ]);
+  const clusterRows = clusterIds.length ? await prisma.cluster.findMany({ where: { id: { in: clusterIds } }, select: { criteria: true } }) : [];
+  const pf = productFilterOf(clusterRows.map((c) => parseCriteria(c.criteria)).filter((x): x is ClusterCriteria => !!x));
+
+  const fMap = new Map(farmers.map((f) => [f.id, f]));
+  const sName = new Map(stores.map((s) => [s.id, shortStoreName(s.name) || s.name]));
+  const sCode = new Map(stores.map((s) => [s.id, s.code]));
+  const sRm = new Map(stores.map((s) => [s.id, (s.regionalManager ?? "").trim()]));
+  const sZone = new Map(stores.map((s) => [s.id, locVal(s.zone)]));
+  const locOf = (m: { farmerId: number; storeId: number | null }) => {
+    const f = fMap.get(m.farmerId);
+    return { village: locVal(f?.village), district: locVal(f?.district), region: m.storeId != null ? sZone.get(m.storeId) ?? null : null };
+  };
+  const rmSet = rms?.length ? new Set(rms) : null;
+  const inLoc = locMatcher(loc);
+  const members = allMembers.filter((m) => (!rmSet || (m.storeId != null && rmSet.has(sRm.get(m.storeId) ?? ""))) && (!loc || inLoc(locOf(m))));
+  if (!members.length) return null;
+
+  // Rounds: the campaign's phases (any gap / a current round beyond the last phase gets a placeholder);
+  // a campaign without phases is one round spanning the campaign dates.
+  const cur = Math.max(1, camp.currentRound);
+  const phaseBy = new Map(phases.map((p) => [p.ordinal, p]));
+  const maxOrd = Math.max(cur, ...phases.map((p) => p.ordinal), 1);
+  const today = istDayNum(new Date());
+  const rounds: (RoundMeta & { startAt: Date; endAt: Date; codes: string[] })[] = [];
+  for (let o = 1; o <= maxOrd; o++) {
+    const p = phaseBy.get(o);
+    const s = p?.defaultStart ?? camp.startDate, e = p?.defaultEnd ?? camp.endDate;
+    const days = Math.max(1, istDayNum(e) - istDayNum(s) + 1);
+    const status: RoundMeta["status"] = o < cur ? "done" : o === cur ? "current" : "upcoming";
+    const codes = p ? [...new Set(asCoupons(p.coupons).map((c) => c.code.trim().toUpperCase()).filter(Boolean))] : [];
+    rounds.push({
+      ordinal: o, name: p?.name ?? (phases.length ? `Round ${o}` : "Round 1"), start: iso(s)!, end: iso(e)!, status, coupons: codes, days,
+      dayNow: status === "current" ? Math.min(days, Math.max(1, today - istDayNum(s) + 1)) : null,
+      startAt: s, endAt: new Date(e.getTime() + DAY_MS - 1), codes,
+    });
+  }
+  const started = rounds.filter((r) => r.status !== "upcoming");
+
+  // Outcome per (member, round).
+  const snapBy = new Map(snaps.map((r) => [`${r.memberId}:${r.round}`, r]));
+  const outcome = (m: (typeof members)[number], ord: number): RoundOutcome | undefined => {
+    if (ord === cur) return (m.reachedAt || m.comment || m.response || m.mediums.length) ? m : undefined;
+    if (ord > cur) return undefined;
+    return snapBy.get(`${m.id}:${ord}`);
+  };
+
+  // Campaign-product purchases per round window (test + control), and coupon redemptions (test).
+  const test = members.filter((m) => m.group === "TEST");
+  const control = members.filter((m) => m.group !== "TEST");
+  const allIds = [...new Set(members.map((m) => m.farmerId))];
+  const testIds = [...new Set(test.map((m) => m.farmerId))];
+  const spend = new Map<number, Map<number, number>>(), coupon = new Map<number, Map<number, number>>();
+  for (const r of started) {
+    spend.set(r.ordinal, await matchedSpendByFarmer(pf, allIds, r.startAt, r.endAt));
+    if (r.codes.length) coupon.set(r.ordinal, await couponSpendByFarmer(r.codes, testIds, r.startAt, r.endAt));
+  }
+  const basisLabel = pf.all
+    ? "any purchase (the campaign's clusters aren't product-specific)"
+    : [pf.crops.length ? `crop: ${pf.crops.map(cropLabel).join(", ")}` : "", pf.categories.length ? `category: ${pf.categories.join(", ")}` : ""].filter(Boolean).join(" · ");
+
+  return { camp, cur, rounds, started, members, test, control, outcome, spend, coupon, fMap, sName, sCode, sRm, locOf, basisLabel, hasPhases: phases.length > 0, loc };
+}
+
+/** Round-by-round outreach, response, purchase, flow and centre comparisons for the Analytics modal. */
+export async function getCampaignRoundAnalytics(campaignId: number, rms?: string[], locIn?: LocFilter): Promise<RoundAnalytics | null> {
+  const d = await loadRoundData(campaignId, rms, locIn);
+  return d ? computeRoundAnalytics(d) : null;
+}
+
+function computeRoundAnalytics(d: NonNullable<Awaited<ReturnType<typeof loadRoundData>>>): RoundAnalytics {
+  const { rounds, started, test, control, outcome, spend, coupon, sName, locOf } = d;
+
+  const stats: RoundStat[] = [];
+  const pace: Record<number, number[]> = {};
+  const otherCrops: Record<number, { crop: string; count: number }[]> = {};
+  const callerMap = new Map<string, { name: string; r: Record<number, { recorded: number; reached: number; interested: number }> }>();
+  for (const r of rounds) {
+    const st: RoundStat = {
+      ordinal: r.ordinal, test: test.length, control: control.length, recorded: 0, reached: 0, unreachable: 0, call: 0, whatsapp: 0, sms: 0, inPerson: 0,
+      interested: 0, notInterested: 0, otherCrop: 0, noResponse: 0, buyersReached: 0, buyersNotReached: 0, buyersControl: 0, salesReached: 0, salesTest: 0,
+      interestedBought: 0, couponRedeemers: r.codes.length ? 0 : null, couponRevenue: r.codes.length ? 0 : null,
+    };
+    const days = new Array<number>(r.days).fill(0);
+    const crops = new Map<string, number>();
+    const sp = spend.get(r.ordinal), cp = coupon.get(r.ordinal);
+    if (r.status !== "upcoming") {
+      for (const m of test) {
+        const o = outcome(m, r.ordinal);
+        const bought = sp?.get(m.farmerId) ?? 0;
+        st.salesTest += bought;
+        if (o) {
+          st.recorded++;
+          const by = o.reachedBy ? `${o.reachedBy}${o.reachedByCode ? ` (${o.reachedByCode})` : ""}` : null;
+          if (by) {
+            const c = callerMap.get(by) ?? callerMap.set(by, { name: by, r: {} }).get(by)!;
+            const cc = c.r[r.ordinal] ?? (c.r[r.ordinal] = { recorded: 0, reached: 0, interested: 0 });
+            cc.recorded++; if (o.reached) cc.reached++; if (o.response === "INTERESTED") cc.interested++;
+          }
+        }
+        if (o?.reached) {
+          st.reached++;
+          if (o.mediums.includes("CALL")) st.call++;
+          if (o.mediums.includes("WHATSAPP")) st.whatsapp++;
+          if (o.mediums.includes("SMS")) st.sms++;
+          if (o.mediums.includes("IN_PERSON")) st.inPerson++;
+          if (o.response === "INTERESTED") { st.interested++; if (bought > 0) st.interestedBought++; }
+          else if (o.response === "NOT_INTERESTED") st.notInterested++;
+          else if (o.response === "OTHER_CROP") { st.otherCrop++; if (o.responseCrop) crops.set(o.responseCrop, (crops.get(o.responseCrop) ?? 0) + 1); }
+          else st.noResponse++;
+          if (bought > 0) { st.buyersReached++; st.salesReached += bought; }
+          if (o.reachedAt) days[Math.min(r.days - 1, Math.max(0, istDayNum(o.reachedAt) - istDayNum(r.startAt)))]++;
+        } else {
+          if (o && o.mediums.includes("UNREACHABLE")) st.unreachable++;
+          if (bought > 0) st.buyersNotReached++;
+        }
+        if (cp && (cp.get(m.farmerId) ?? 0) > 0) { st.couponRedeemers!++; st.couponRevenue! += cp.get(m.farmerId)!; }
+      }
+      for (const m of control) if ((sp?.get(m.farmerId) ?? 0) > 0) st.buyersControl++;
+    }
+    stats.push(st);
+    pace[r.ordinal] = r.status === "upcoming" ? [] : days.slice(0, r.dayNow ?? r.days);
+    otherCrops[r.ordinal] = [...crops.entries()].sort((a, b) => b[1] - a[1]).map(([crop, count]) => ({ crop, count }));
+  }
+
+  // Round → round flow for every started pair (from < to).
+  const transitions: RoundTransition[] = [];
+  for (let i = 0; i < started.length; i++) for (let j = i + 1; j < started.length; j++) {
+    const a = started[i], b = started[j];
+    const cells = Object.fromEntries(ROUND_CATS.map((x) => [x, Object.fromEntries(ROUND_CATS.map((y) => [y, 0]))])) as RoundTransition["cells"];
+    const boughtTo = Object.fromEntries(ROUND_CATS.map((x) => [x, 0])) as Record<RoundCat, number>;
+    const sp = spend.get(b.ordinal);
+    for (const m of test) {
+      const ca = catOf(outcome(m, a.ordinal)), cb = catOf(outcome(m, b.ordinal));
+      cells[ca][cb]++;
+      if ((sp?.get(m.farmerId) ?? 0) > 0) boughtTo[ca]++;
+    }
+    transitions.push({ from: a.ordinal, to: b.ordinal, cells, boughtTo });
+  }
+
+  // Centre / region / district / village × round.
+  type GeoAcc = Map<string, RoundGeoRow>;
+  const geoAcc = { store: new Map() as GeoAcc, region: new Map() as GeoAcc, district: new Map() as GeoAcc, village: new Map() as GeoAcc };
+  // Call-stats rows per round key (+ "all" = reached in any started round, latest reached outcome's channels).
+  type CallAcc = { sub: string; test: number; reached: number; call: number; whatsapp: number; sms: number; inPerson: number };
+  const keys = [...started.map((r) => String(r.ordinal)), "all"];
+  const callAcc: Record<string, Record<"store" | "region" | "district" | "village", Map<string, CallAcc>>> = {};
+  for (const k of keys) callAcc[k] = { store: new Map(), region: new Map(), district: new Map(), village: new Map() };
+  const bumpGeo = (map: GeoAcc, key: string, label: string, sub: string, m: (typeof test)[number]) => {
+    const g = map.get(key) ?? map.set(key, { label, sub, test: 0, r: {} }).get(key)!;
+    g.test++;
+    for (const r of started) {
+      const o = outcome(m, r.ordinal);
+      const c = g.r[r.ordinal] ?? (g.r[r.ordinal] = { reached: 0, interested: 0, bought: 0, recorded: 0 });
+      if (o) c.recorded++;
+      if (o?.reached) c.reached++;
+      if (o?.response === "INTERESTED") c.interested++;
+      if ((spend.get(r.ordinal)?.get(m.farmerId) ?? 0) > 0) c.bought++;
+    }
+  };
+  const bumpCall = (map: Map<string, CallAcc>, key: string, sub: string, o: RoundOutcome | undefined) => {
+    const c = map.get(key) ?? map.set(key, { sub, test: 0, reached: 0, call: 0, whatsapp: 0, sms: 0, inPerson: 0 }).get(key)!;
+    c.test++;
+    if (!o?.reached) return;
+    c.reached++;
+    if (o.mediums.includes("CALL")) c.call++;
+    if (o.mediums.includes("WHATSAPP")) c.whatsapp++;
+    if (o.mediums.includes("SMS")) c.sms++;
+    if (o.mediums.includes("IN_PERSON")) c.inPerson++;
+  };
+  for (const m of test) {
+    const l = locOf(m);
+    const store = m.storeId != null ? sName.get(m.storeId) ?? "—" : "—";
+    const region = locLabel(l.region), district = locLabel(l.district), vKey = `${locLabel(l.village)}\u0001${l.district ?? ""}`;
+    bumpGeo(geoAcc.store, store, store, l.region ?? "", m);
+    bumpGeo(geoAcc.region, region, region, "", m);
+    bumpGeo(geoAcc.district, district, district, "", m);
+    bumpGeo(geoAcc.village, vKey, locLabel(l.village), l.district ?? "", m);
+    let latestReached: RoundOutcome | undefined;
+    for (const r of started) {
+      const o = outcome(m, r.ordinal);
+      if (o?.reached) latestReached = o;
+      const acc = callAcc[String(r.ordinal)];
+      bumpCall(acc.store, store, l.region ?? "", o); bumpCall(acc.region, region, "", o); bumpCall(acc.district, district, "", o); bumpCall(acc.village, vKey, l.district ?? "", o);
+    }
+    const all = callAcc.all;
+    bumpCall(all.store, store, l.region ?? "", latestReached); bumpCall(all.region, region, "", latestReached); bumpCall(all.district, district, "", latestReached); bumpCall(all.village, vKey, l.district ?? "", latestReached);
+  }
+  const geoRows = (map: GeoAcc, cap = Infinity) => [...map.values()].sort((a, b) => b.test - a.test || a.label.localeCompare(b.label)).slice(0, cap);
+  const callRows = (map: Map<string, CallAcc>, cap = Infinity): CallRow[] => [...map.entries()]
+    .map(([key, c]) => ({ store: key.split("\u0001")[0], ...c, pending: Math.max(0, c.test - c.reached) }))
+    .sort((a, b) => b.test - a.test || a.store.localeCompare(b.store)).slice(0, cap);
+  const callBy: RoundAnalytics["callBy"] = {};
+  for (const k of keys) callBy[k] = { store: callRows(callAcc[k].store), region: callRows(callAcc[k].region), district: callRows(callAcc[k].district), village: callRows(callAcc[k].village, 300) };
+
+  const callers = [...callerMap.values()]
+    .sort((a, b) => Object.values(b.r).reduce((s, x) => s + x.recorded, 0) - Object.values(a.r).reduce((s, x) => s + x.recorded, 0))
+    .slice(0, 40);
+
+  return {
+    rounds: rounds.map((r): RoundMeta => ({ ordinal: r.ordinal, name: r.name, start: r.start, end: r.end, status: r.status, coupons: r.coupons, days: r.days, dayNow: r.dayNow })),
+    currentRound: d.cur, hasPhases: d.hasPhases, basisLabel: d.basisLabel,
+    stats, transitions,
+    geo: { store: geoRows(geoAcc.store), region: geoRows(geoAcc.region), district: geoRows(geoAcc.district), village: geoRows(geoAcc.village, 300) },
+    callBy, pace, callers, otherCrops,
+  };
+}
+
 /**
  * Export a campaign's audience to Excel — built from the SAME data the Analytics modal shows (via
  * getCampaignAnalytics), so the file matches the screen: sheet 1 = Call stats by centre (the headline
@@ -1202,6 +1481,66 @@ export async function exportCampaignAudienceXlsx(campaignId: number, campaignNam
     ...a.matrix.map((r) => [r.store, r.region, rmByName.get(r.store) ?? "", ...V.map((c) => r.value[c.key] ?? 0), r.total, ...L.map((c) => r.lifecycle[c.key] ?? 0), r.total]),
   ];
 
+  // Round sheets — round-by-round summary, centre × round, and one row per TEST farmer with every round's outcome.
+  const roundSheets: StyledSheetSpec[] = [];
+  const rd = await loadRoundData(campaignId, rms, locIn);
+  const ra = rd ? computeRoundAnalytics(rd) : null;
+  if (ra && rd) {
+    const started = ra.rounds.filter((r) => r.status !== "upcoming");
+    const rLabel = (r: RoundMeta) => `R${r.ordinal} ${r.name}`;
+    const pc = (x: number, t: number) => (t ? Math.round((x / t) * 1000) / 10 : 0);
+    const summary: StyledCell[][] = [[
+      "Round", "Status", "Start", "End", "Test farmers", "Outcome recorded", "Reached", "Reached %", "Unreachable",
+      "Call", "WhatsApp", "SMS", "In-person", "Interested", "Not interested", "Wants another crop", "Reached, no response logged",
+      `Reached who bought campaign products in round (${ra.basisLabel})`, "Reached %buy", "Not reached %buy", "Control %buy",
+      "Interested who bought", "Campaign-product sales by reached (₹, base)", "Coupon redeemers", "Coupon revenue (₹, base)",
+    ]];
+    for (const r of ra.rounds) {
+      const s = ra.stats.find((x) => x.ordinal === r.ordinal)!;
+      const up = r.status === "upcoming";
+      summary.push([
+        rLabel(r), up ? "Upcoming" : r.status === "current" ? "Current" : "Finished", r.start, r.end, s.test,
+        up ? null : s.recorded, up ? null : s.reached, up ? null : pc(s.reached, s.test), up ? null : s.unreachable,
+        up ? null : s.call, up ? null : s.whatsapp, up ? null : s.sms, up ? null : s.inPerson,
+        up ? null : s.interested, up ? null : s.notInterested, up ? null : s.otherCrop, up ? null : s.noResponse,
+        up ? null : s.buyersReached, up ? null : pc(s.buyersReached, s.reached), up ? null : pc(s.buyersNotReached, s.test - s.reached), up ? null : pc(s.buyersControl, s.control),
+        up ? null : s.interestedBought, up ? null : Math.round(s.salesReached), s.couponRedeemers, s.couponRevenue != null ? Math.round(s.couponRevenue) : null,
+      ]);
+    }
+    roundSheets.push({ name: "Rounds summary", rows: summary, leftCols: [0, 1], wrapHeaders: true });
+
+    const geoHead: StyledCell[] = ["Centre", "Region", "RM", "Test farmers", ...started.flatMap((r) => [`R${r.ordinal} reached`, `R${r.ordinal} reached %`, `R${r.ordinal} interested`, `R${r.ordinal} bought campaign products`])];
+    roundSheets.push({
+      name: "Round by centre", leftCols: [0, 1, 2], wrapHeaders: true,
+      rows: [geoHead, ...ra.geo.store.map((g) => [g.label, g.sub, rmByName.get(g.label) ?? "", g.test,
+        ...started.flatMap((r) => { const c = g.r[r.ordinal]; return [c?.reached ?? 0, pc(c?.reached ?? 0, g.test), c?.interested ?? 0, c?.bought ?? 0]; })])],
+    });
+
+    const MEDL: Record<string, string> = { CALL: "Call", WHATSAPP: "WhatsApp", SMS: "SMS", IN_PERSON: "In-person", UNREACHABLE: "Unreachable" };
+    const RESPL: Record<string, string> = { INTERESTED: "Interested", NOT_INTERESTED: "Not interested", OTHER_CROP: "Other crop" };
+    const ts = (dt: Date | null) => (dt ? new Date(dt.getTime() + 330 * 60_000).toISOString().slice(0, 16).replace("T", " ") : "");
+    const fHead: StyledCell[] = ["Farmer", "Mobile", "Village", "District", "Region", "Store code", "Store", "RM", "Value segment", "Lifecycle", "Reached in any round",
+      ...started.flatMap((r) => [`R${r.ordinal} reached`, `R${r.ordinal} channels`, `R${r.ordinal} response`, `R${r.ordinal} comment`, `R${r.ordinal} recorded by`, `R${r.ordinal} recorded at (IST)`, `R${r.ordinal} campaign-product purchase in round (₹, base)`])];
+    const per = 7, commentCols = started.map((_, i) => 11 + i * per + 3);
+    const fRows: StyledCell[][] = rd.test.map((m) => {
+      const f = rd.fMap.get(m.farmerId), l = rd.locOf(m);
+      const outs = started.map((r) => rd.outcome(m, r.ordinal));
+      return [
+        f?.name ?? `Farmer #${m.farmerId}`, f?.mobile ?? "", l.village ?? "", l.district ?? "", l.region ?? "",
+        m.storeId != null ? rd.sCode.get(m.storeId) ?? "" : "", m.storeId != null ? rd.sName.get(m.storeId) ?? "" : "", m.storeId != null ? rd.sRm.get(m.storeId) ?? "" : "",
+        segMeta(valueKeyOf(m)).label, segMeta(lifecycleKeyOf(m)).label, outs.some((o) => o?.reached) ? "Yes" : "No",
+        ...started.flatMap((r, i) => {
+          const o = outs[i];
+          const buy = rd.spend.get(r.ordinal)?.get(m.farmerId) ?? 0;
+          return [o ? (o.reached ? "Yes" : "No") : "Not contacted", o ? o.mediums.map((x) => MEDL[x] ?? x).join(", ") : "",
+            o?.response ? `${RESPL[o.response] ?? o.response}${o.response === "OTHER_CROP" && o.responseCrop ? ` (${cropLabel(o.responseCrop)})` : ""}` : "",
+            o?.comment ?? "", o?.reachedBy ? `${o.reachedBy}${o.reachedByCode ? ` (${o.reachedByCode})` : ""}` : "", ts(o?.reachedAt ?? null), buy ? Math.round(buy) : null];
+        }),
+      ];
+    });
+    roundSheets.push({ name: "Farmers round by round", rows: [fHead, ...fRows], leftCols: [0, 1, 2, 3, 4, 5, 6, 7], wrapCols: commentCols, wrapHeaders: true });
+  }
+
   const safe = (campaignName || "campaign").replace(/[\\/?*[\]:]/g, " ").trim().slice(0, 60) || "campaign";
   const b64 = await buildStyledWorkbookB64([
     { name: "Call stats by centre", rows: callSheet, leftCols: [0, 1, 2], boldRows: [1] }, // Centre, Region, RM text; totals row bold
@@ -1209,6 +1548,7 @@ export async function exportCampaignAudienceXlsx(campaignId: number, campaignNam
     { name: "Call stats by district", rows: locSheet("District", a.callByLocation.district), leftCols: [0] },
     { name: "Call stats by village", rows: locSheet("Village", a.callByLocation.village, "District"), leftCols: [0, 1] },
     { name: "Value + Lifecycle x Store", rows: matrixSheet, leftCols: [0, 1, 2], boldRows: [1] },
+    ...roundSheets,
   ]);
   return { ok: true, filename: `${safe} - analytics.xlsx`, b64 };
 }

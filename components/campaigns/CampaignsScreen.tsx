@@ -9,6 +9,7 @@ import { SmsSender } from "./SmsSender";
 import { WaSender } from "./WaSender";
 import { BroadcastPanel } from "./BroadcastPanel";
 import { PrevRoundTag } from "./PrevRoundTag";
+import { RoundsTab, RoundStrip, RoundBadge } from "./CampaignRoundsPanel";
 import { BroadcastHistory } from "./BroadcastHistory";
 import { PhasesPanel } from "./phases/PhasesPanel";
 import { PhaseOutreachPanel } from "./phases/PhaseOutreachPanel";
@@ -24,8 +25,8 @@ import { useConfirm } from "@/components/ConfirmDialog";
 import { cropLabel } from "@/lib/crops";
 import { inr } from "@/lib/format";
 import {
-  saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, previewCampaignAudience, getTeamCandidates, getCampaignTeam, setCampaignTeam, getCampaignTracker, extendCampaign, updateCampaignCommPlans, deleteCampaign, getCampaignMembers, markCampaignMember, getCampaignAnalytics, exportCampaignAudienceXlsx, exportCampaignTrackerXlsx, getSmsTemplates,
-  type CampaignListItem, type CampaignTracker, type ProjectVM, type CampaignMemberVM, type CampaignAnalytics, type SmsTemplateVM, type TrackerScope, type SegRow, type MatchView, type CallRow,
+  saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, previewCampaignAudience, getTeamCandidates, getCampaignTeam, setCampaignTeam, getCampaignTracker, extendCampaign, updateCampaignCommPlans, deleteCampaign, getCampaignMembers, markCampaignMember, getCampaignAnalytics, getCampaignRoundAnalytics, exportCampaignAudienceXlsx, exportCampaignTrackerXlsx, getSmsTemplates,
+  type CampaignListItem, type CampaignTracker, type ProjectVM, type CampaignMemberVM, type RoundAnalytics, type CampaignAnalytics, type SmsTemplateVM, type TrackerScope, type SegRow, type MatchView, type CallRow,
 } from "@/app/actions/campaigns";
 import { downloadB64 } from "@/lib/download";
 
@@ -865,7 +866,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
         {analyticsOf && (
           <>
             <ModalHeader eyebrow="Campaign · audience analytics" eyebrowColor="#00838F" title={analyticsOf.name}
-              subtitle="Who's enrolled — composition by segment, store, village & crop" onClose={() => setAnalyticsOf(null)} />
+              subtitle="Who's enrolled, how outreach is going — and how each round compares" onClose={() => setAnalyticsOf(null)} />
             <div className="max-h-[74vh] overflow-y-auto px-5 py-4">
               {analytics == null ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">Loading…</div> : <AnalyticsBody a={analytics} campaign={analyticsOf} />}
             </div>
@@ -1763,6 +1764,20 @@ function AnalyticsBody({ a: initial, campaign }: { a: CampaignAnalytics; campaig
   const [reloading, setReloading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const seq = useRef(0);
+  const [tab, setTab] = useState<"overview" | "rounds">("overview");
+  const [rounds, setRounds] = useState<RoundAnalytics | null>(null);
+  const [roundsErr, setRoundsErr] = useState(false);
+  const [roundKey, setRoundKey] = useState<string | null>(null); // call-stats round: "1", "2"… or "all"; null = current
+  const rseq = useRef(0);
+
+  // Round-by-round data (same RM + location filters), loaded alongside the overview.
+  useEffect(() => {
+    const mine = ++rseq.current;
+    setRoundsErr(false);
+    getCampaignRoundAnalytics(campaign.id, rms.length ? rms : undefined, locActive(loc) ? loc : undefined)
+      .then((d) => { if (mine === rseq.current) setRounds(d); })
+      .catch(() => { if (mine === rseq.current) setRoundsErr(true); });
+  }, [rms, loc, campaign.id]);
 
   // No RM / location filter → parent's already-loaded data; otherwise refetch with the filters (latest wins).
   useEffect(() => {
@@ -1789,6 +1804,27 @@ function AnalyticsBody({ a: initial, campaign }: { a: CampaignAnalytics; campaig
   const a = data; // render from the (possibly RM-filtered) data
   const rmOptions = initial.rmOptions; // options stay the full set regardless of the active filter
   const cropData = a.byCrop.map((c, i) => ({ label: c.label, count: c.count, color: CHART_PALETTE[i % CHART_PALETTE.length] }));
+  // Round picker for the call-stats tables (only once a second round has started).
+  const startedRounds = rounds ? rounds.rounds.filter((r) => r.status !== "upcoming") : [];
+  const showRoundPick = startedRounds.length >= 2;
+  const rk = showRoundPick && roundKey && rounds?.callBy[roundKey] ? roundKey : null;
+  const callStore = rk ? rounds!.callBy[rk].store : a.callByStore;
+  const callLoc = rk ? rounds!.callBy[rk][locDim] : a.callByLocation[locDim];
+  const roundWord = rk === "all" ? "all rounds — reached in any round" : rk ? `round ${rk}` : rounds ? `round ${rounds.currentRound} (current)` : "test group";
+  const roundPick = showRoundPick ? (
+    <div className="inline-flex flex-wrap rounded-[8px] border border-[#E0E0E0] bg-[#F5F7F5] p-0.5">
+      {[...startedRounds.map((r) => String(r.ordinal)), "all"].map((k) => {
+        const on = (rk ?? String(rounds!.currentRound)) === k;
+        return (
+          <button key={k} type="button" onClick={() => setRoundKey(k === String(rounds!.currentRound) ? null : k)}
+            className="inline-flex items-center gap-1 rounded-[6px] px-2 py-1 text-[11.5px] font-semibold transition-colors"
+            style={{ background: on ? "#fff" : "transparent", color: on ? "#00838F" : "#9E9E9E", boxShadow: on ? "0 1px 2px rgba(0,0,0,0.1)" : "none" }}>
+            {k === "all" ? "All rounds" : <><RoundBadge ord={Number(k)} small />{Number(k) === rounds!.currentRound ? "now" : ""}</>}
+          </button>
+        );
+      })}
+    </div>
+  ) : null;
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1809,18 +1845,37 @@ function AnalyticsBody({ a: initial, campaign }: { a: CampaignAnalytics; campaig
         <LocationFilterBar items={initial.locItems} value={loc} onChange={setLoc} className="rounded-[10px] bg-[#F5F7F5] p-2.5" />
       )}
 
+      {/* Overview (composition + call stats) | Rounds (round-by-round comparison) */}
+      <div className="flex border-b border-[#ECECEC]">
+        {([["overview", "Overview"], ["rounds", "🔁 Rounds"]] as const).map(([k, label]) => (
+          <button key={k} type="button" onClick={() => setTab(k)}
+            className="-mb-px border-b-2 px-4 py-2 text-[13px] font-semibold transition-colors"
+            style={{ borderColor: tab === k ? "#00838F" : "transparent", color: tab === k ? "#00838F" : "#9E9E9E" }}>
+            {label}{k === "rounds" && rounds ? <span className="ml-1.5 rounded-full bg-[#E0F7FA] px-1.5 py-[1px] text-[10.5px] text-[#00838F]">{rounds.rounds.length}</span> : null}
+          </button>
+        ))}
+      </div>
+
       {a.total === 0 ? (
         <div className="rounded-[12px] border border-dashed border-[#E0E0E0] py-8 text-center text-[13px] text-[#9E9E9E]">No farmers for the selected filters — clear them to see all.</div>
+      ) : tab === "rounds" ? (
+        rounds ? <RoundsTab data={rounds} />
+          : <div className="py-8 text-center text-[13px] text-[#9E9E9E]">{roundsErr ? "Couldn't load the round analytics — try again." : "Loading round analytics…"}</div>
       ) : (<>
+        {/* Round timeline — headline numbers per round */}
+        {rounds && <RoundStrip data={rounds} onOpen={() => setTab("rounds")} />}
+
         {/* Centre-wise call stats — the per-store outreach breakdown (BDM/RM view) */}
-        {a.callByStore.length > 0 && <CallByStoreTable rows={a.callByStore} />}
+        {callStore.length > 0 && <CallByStoreTable rows={callStore}
+          toolbar={<div className="flex flex-wrap items-center gap-2">{roundPick}<span className="text-[11px] text-[#9E9E9E]">{roundWord} · reached &amp; how</span></div>} />}
 
         {/* Same outreach breakdown by farmer location */}
-        {a.callByLocation[locDim].length > 0 && (
-          <CallByStoreTable rows={a.callByLocation[locDim]}
+        {callLoc.length > 0 && (
+          <CallByStoreTable rows={callLoc}
             title={`Call stats by ${locDim}`} firstCol={locDim === "region" ? "Region" : locDim === "district" ? "District" : "Village"}
-            subCol={locDim === "village" ? "District" : null} totalLabel={`All ${locDim === "village" ? "villages" : locDim === "district" ? "districts" : "regions"}${locDim === "village" && a.callByLocation.village.length >= 300 ? " (top 300)" : ""}`}
+            subCol={locDim === "village" ? "District" : null} totalLabel={`All ${locDim === "village" ? "villages" : locDim === "district" ? "districts" : "regions"}${locDim === "village" && callLoc.length >= 300 ? " (top 300)" : ""}`}
             toolbar={
+              <div className="flex flex-wrap items-center gap-2">{roundPick}
               <div className="inline-flex rounded-[8px] border border-[#E0E0E0] bg-[#F5F7F5] p-0.5">
                 {(["region", "district", "village"] as const).map((k) => (
                   <button key={k} type="button" onClick={() => setLocDim(k)}
@@ -1829,6 +1884,7 @@ function AnalyticsBody({ a: initial, campaign }: { a: CampaignAnalytics; campaig
                     {k}
                   </button>
                 ))}
+              </div>
               </div>
             } />
         )}
