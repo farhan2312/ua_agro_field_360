@@ -425,7 +425,20 @@ export function OptInAnalyticsTab() {
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Tile label={`Opt-ins · ${periodWord(data.periodDays)}`} value={n(fPeriod)} tone={WA}
           sub={delta != null ? <span style={{ color: delta >= 0 ? "#2E7D32" : "#C62828" }}>{delta >= 0 ? "▲" : "▼"} {n(Math.abs(delta))} vs previous {data.periodDays} days</span> : <>{n(k.total)} all time</>} />
-        <Tile label="Opted-in farmers" value={n(fOpted)} sub={<>{filtered ? "registered + visit, these stores" : <>{n(k.unregistered)} more numbers aren&apos;t registered farmers</>}</>} />
+        {filtered ? (
+          <Tile label="Opt-ins · these stores" value={n(fOpted)} sub={<>registered farmers of the selected stores (unregistered numbers have no store)</>} />
+        ) : (
+          <Tile label="Total opt-ins" value={n(k.total)} tone={WA}
+            sub={<>
+              <div className="mb-1 flex h-[6px] gap-[2px] overflow-hidden rounded-full">
+                <div style={{ width: `${pct(k.registered, k.total)}%`, background: WA }} />
+                <div style={{ width: `${pct(k.unregistered, k.total)}%`, background: ORIGIN_COLOR.UNREGISTERED }} />
+              </div>
+              <span className="font-semibold" style={{ color: WA }}>{n(k.registered)} registered farmers</span>
+              <span className="text-[#9E9E9E]"> · </span>
+              <span className="font-semibold text-[#B8860B]">{n(k.unregistered)} not registered</span>
+            </>} />
+        )}
         <Tile label="Per 1,000 farmers" value={String(fMobile ? Math.round((fOpted / fMobile) * 10000) / 10 : 0)} sub={<>of {n(fMobile)} farmers with a mobile · median store {data.benchmark.medianRate}</>} />
         <Tile label="Visit → opt-in" value={p1(pct(fConv, fElig))} tone={pct(fConv, fElig) < 2 ? "#C62828" : "#1565C0"} sub={<>{n(fConv)} of {n(fElig)} visits ({periodWord(data.periodDays)})</>} />
         <Tile label="Stores with no opt-ins" value={`${n(fZero)}`} tone={fZero ? "#C62828" : "#2E7D32"} sub={<>of {n(stores.length)} stores</>} />

@@ -6,6 +6,9 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth";
 import { checkEmail } from "@/lib/email-validate";
+import { logAudit } from "@/lib/audit";
+import { restampStatements, findOrphanCodes, type OrphanCode } from "@/lib/employee-codes";
+import { shortStoreName } from "@/lib/store-utils";
 import {
   KEY_TO_PRISMA,
   ROLE_GRAD,
@@ -163,24 +166,7 @@ export async function createUserAction(
   }
 }
 
-/**
- * Every column that stores a user's EMPLOYEE CODE for attribution/ownership. When an admin changes a
- * user's code (e.g. a temporary code → their permanent HR code), these must be re-stamped old→new, or
- * the user stops matching their own records: `canSignOff`/`canReviewVisit` key off the code, so they
- * could no longer mark their own follow-ups done, sign off their visits, etc.
- */
-const EMPLOYEE_CODE_COLUMNS: [table: string, column: string][] = [
-  ["Action", "createdByCode"], ["Action", "completedByCode"],
-  ["ActionComment", "authorCode"],
-  ["Visit", "recordedByCode"], ["Visit", "reviewedByCode"], ["VisitReviewRevision", "actorCode"],
-  ["CampaignMember", "reachedByCode"],
-  ["CampaignCaller", "assignedByCode"], ["CampaignHelper", "assignedByCode"],
-  ["CampaignPhaseAdvance", "byCode"],
-  ["Cluster", "createdByCode"], ["Broadcast", "createdByCode"],
-  ["Ghoshti", "createdByCode"], ["Ghoshti", "approvedByCode"], ["GhoshtiAttendee", "recordedByCode"],
-  ["Bug", "reporterCode"],
-  ["SmsLog", "sentByCode"], ["WhatsAppLog", "sentByCode"], ["WhatsAppMessage", "sentByCode"],
-];
+// The employee-code columns + re-stamp live in lib/employee-codes.ts (shared with the orphan-code check).
 
 /** Update an existing user's details (System-Admin edit modal). */
 export async function saveUser(
@@ -191,7 +177,7 @@ export async function saveUser(
   const name = input.name.trim();
   if (!name) return { ok: false, error: "Name is required." };
   try {
-    const existing = await prisma.user.findUnique({ where: { id: input.id }, select: { employeeCode: true } });
+    const existing = await prisma.user.findUnique({ where: { id: input.id }, select: { employeeCode: true, name: true } });
     const oldCode = existing?.employeeCode ?? null;
     // Code changed temp→permanent: carry this user's existing attribution across to the new code.
     const migrateCode = !!(code && oldCode && oldCode !== code);
@@ -230,11 +216,9 @@ export async function saveUser(
     }
     await prisma.$transaction([
       prisma.user.update({ where: { id: input.id }, data }),
-      ...(migrateCode
-        ? EMPLOYEE_CODE_COLUMNS.map(([t, c]) =>
-            prisma.$executeRaw`UPDATE ${Prisma.raw(`"${t}"`)} SET ${Prisma.raw(`"${c}"`)} = ${code} WHERE ${Prisma.raw(`"${c}"`)} = ${oldCode}`)
-        : []),
+      ...(migrateCode ? restampStatements(oldCode!, code) : []),
     ]);
+    if (migrateCode) await logAudit("User", "UPDATE", `Employee code changed ${oldCode} → ${code} for ${existing?.name ?? name}; their visits, follow-ups, comments and campaign records moved to the new code`);
     revalidatePath("/users");
     if (migrateCode) { revalidatePath("/action-registry"); revalidatePath("/visits"); }
     return { ok: true };
@@ -282,5 +266,57 @@ export async function getUserActivity(actorName: string): Promise<UserActivityRo
     }));
   } catch {
     return [];
+  }
+}
+
+/* ─────────────── Lost employee codes (records under a code no account has) ─────────────── */
+export interface OrphanCodeVM extends OrphanCode {
+  storeNames: string[];
+  suggestions: { id: number; name: string; code: string; store: string; sameStore: boolean; active: boolean }[];
+}
+export interface CodeOwnerOption { id: number; name: string; code: string; store: string; active: boolean }
+
+/** Codes stamped on visits / follow-ups / campaign records that match no user — with the likely owner. */
+export async function listOrphanCodes(): Promise<{ orphans: OrphanCodeVM[]; users: CodeOwnerOption[] }> {
+  await requireAdmin();
+  const [orphans, users, stores] = await Promise.all([
+    findOrphanCodes(),
+    prisma.user.findMany({ where: { employeeCode: { not: null } }, select: { id: true, name: true, employeeCode: true, storeId: true, active: true }, orderBy: { name: "asc" } }),
+    prisma.store.findMany({ select: { id: true, name: true } }),
+  ]);
+  const sName = new Map(stores.map((s) => [s.id, shortStoreName(s.name) || s.name]));
+  const norm = (x: string) => x.trim().toLowerCase().replace(/\s+/g, " ");
+  return {
+    orphans: orphans.map((o) => {
+      const names = new Set(o.names.map(norm));
+      const suggestions = users
+        .filter((u) => names.has(norm(u.name)))
+        .map((u) => ({ id: u.id, name: u.name, code: u.employeeCode!, store: u.storeId != null ? sName.get(u.storeId) ?? "" : "", sameStore: u.storeId != null && o.storeIds.includes(u.storeId), active: u.active }))
+        .sort((a, b) => Number(b.sameStore) - Number(a.sameStore) || Number(b.active) - Number(a.active));
+      return { ...o, storeNames: o.storeIds.map((id) => sName.get(id) ?? `#${id}`), suggestions };
+    }),
+    users: users.map((u) => ({ id: u.id, name: u.name, code: u.employeeCode!, store: u.storeId != null ? sName.get(u.storeId) ?? "" : "", active: u.active })),
+  };
+}
+
+/** Move every record stamped with a lost code onto a user's current code (so they own them again). */
+export async function reassignOrphanCode(oldCode: string, userId: number): Promise<{ ok: boolean; moved?: number; error?: string }> {
+  await requireAdmin();
+  const from = (oldCode ?? "").trim().toUpperCase();
+  if (!from) return { ok: false, error: "No code given." };
+  const [taken, target] = await Promise.all([
+    prisma.user.findFirst({ where: { employeeCode: from }, select: { name: true } }),
+    prisma.user.findUnique({ where: { id: userId }, select: { name: true, employeeCode: true } }),
+  ]);
+  if (taken) return { ok: false, error: `${from} belongs to ${taken.name} — it isn't a lost code.` };
+  if (!target?.employeeCode) return { ok: false, error: "Pick a user who has an employee code." };
+  try {
+    const counts = await prisma.$transaction(restampStatements(from, target.employeeCode));
+    const moved = counts.reduce((s, n) => s + Number(n), 0);
+    await logAudit("User", "UPDATE", `Lost employee code ${from} re-assigned to ${target.name} (${target.employeeCode}) — ${moved} records moved`);
+    revalidatePath("/users"); revalidatePath("/action-registry"); revalidatePath("/visits");
+    return { ok: true, moved };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Re-assign failed" };
   }
 }

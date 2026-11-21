@@ -5,6 +5,7 @@ import { shortStoreName, storeColor } from "@/lib/store-utils";
 import { PRISMA_TO_KEY, roleLabel, type RoleKey } from "@/lib/roles";
 import { UserManagementScreen } from "@/components/users/UserManagementScreen";
 import { PendingApprovals, type PendingUser } from "@/components/users/PendingApprovals";
+import { LostCodesCard } from "@/components/users/LostCodesCard";
 import type {
   UserRow,
   OfficerLite,
@@ -245,6 +246,7 @@ export default async function UsersPage() {
   return (
     <>
       {canEdit && <PendingApprovals pending={pending} />}
+      {canEdit && <LostCodesCard />}
       <UserManagementScreen users={users} storeAdmin={storeAdmin} canEdit={canEdit} />
     </>
   );

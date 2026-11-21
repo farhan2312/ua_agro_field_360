@@ -259,3 +259,36 @@ export async function getPhaseOutreach(campaignId: number): Promise<PhaseOutreac
 
   return { campaignId, ordinal: ord, roundName: round.name, purchaseSplit, coupons: asCoupons(round.coupons), members: out };
 }
+
+/* ── Coupon library: every coupon code used in any campaign round, most-used first ── */
+export interface CouponLibraryItem {
+  code: string; label: string; minSpend?: number; // label / min spend from the most recent round that used it
+  uses: number;          // rounds that used the code (across all campaigns)
+  campaigns: string[];   // campaign names that used it (most recent first)
+  lastUsed: string;      // YYYY-MM-DD of the latest round start using it
+}
+export async function getCouponLibrary(): Promise<CouponLibraryItem[]> {
+  if (!(await isManager())) return [];
+  const phases = await prisma.campaignPhase.findMany({
+    select: { coupons: true, defaultStart: true, updatedAt: true, campaign: { select: { name: true } } },
+    orderBy: [{ defaultStart: "desc" }, { updatedAt: "desc" }],
+  });
+  const byCode = new Map<string, CouponLibraryItem>();
+  for (const p of phases) {
+    for (const c of asCoupons(p.coupons)) {
+      const code = c.code.trim().toUpperCase();
+      if (!code) continue;
+      const cur = byCode.get(code);
+      if (!cur) {
+        // phases are newest-first, so the first sighting carries the latest label / min spend
+        byCode.set(code, { code, label: c.label, minSpend: c.minSpend, uses: 1, campaigns: [p.campaign.name], lastUsed: iso(p.defaultStart) });
+      } else {
+        cur.uses++;
+        if (!cur.label && c.label) cur.label = c.label;
+        if (cur.minSpend == null && c.minSpend != null) cur.minSpend = c.minSpend;
+        if (!cur.campaigns.includes(p.campaign.name)) cur.campaigns.push(p.campaign.name);
+      }
+    }
+  }
+  return [...byCode.values()].sort((a, b) => b.uses - a.uses || b.lastUsed.localeCompare(a.lastUsed) || a.code.localeCompare(b.code));
+}

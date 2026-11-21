@@ -3,8 +3,8 @@
 import { useEffect, useState, useTransition } from "react";
 import { Modal, ModalHeader } from "@/components/interactive";
 import {
-  getCampaignPhaseConfig, saveCampaignPhases, getRoundStatus, advanceCampaignRound,
-  type CampaignPhaseConfig, type PhaseVM, type PhaseInput, type RoundStatus,
+  getCampaignPhaseConfig, saveCampaignPhases, getRoundStatus, advanceCampaignRound, getCouponLibrary,
+  type CampaignPhaseConfig, type PhaseVM, type PhaseInput, type RoundStatus, type CouponLibraryItem,
 } from "@/app/actions/campaign-phases";
 import {
   PURCHASED_LABEL, NOT_PURCHASED_LABEL, newTarget, channelLabel, mediumToChannel,
@@ -61,6 +61,10 @@ function DefineTab({ cfg, commPlanNames, commPlanMediums, onSaved }: { cfg: Camp
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [saving, startSave] = useTransition();
+  // Coupon codes used in any campaign's rounds (most-used first) — the quick-pick tray on each round.
+  const [library, setLibrary] = useState<CouponLibraryItem[]>([]);
+  const loadLibrary = () => { getCouponLibrary().then(setLibrary).catch(() => {}); };
+  useEffect(() => { loadLibrary(); }, []);
 
   const patch = (i: number, p: Partial<PhaseVM>) => setPhases((ps) => ps.map((x, j) => j === i ? { ...x, ...p } : x));
   // Round 2 onward starts with Round 1's coupons (copied, so editing one round never changes another);
@@ -81,7 +85,7 @@ function DefineTab({ cfg, commPlanNames, commPlanMediums, onSaved }: { cfg: Camp
     startSave(async () => {
       const r = await saveCampaignPhases(cfg.campaignId, input);
       if (!r.ok) { setErr(r.error ?? "Save failed."); return; }
-      setMsg("Rounds saved."); onSaved();
+      setMsg("Rounds saved."); onSaved(); loadLibrary();
     });
   };
 
@@ -99,7 +103,7 @@ function DefineTab({ cfg, commPlanNames, commPlanMediums, onSaved }: { cfg: Camp
     <div className="flex flex-col gap-3">
       <div className="text-[11.5px] text-[#9E9E9E]">Each round is a stage of the campaign with its own dates, coupons &amp; messaging. Round 2 onward splits messaging by whether the farmer has purchased.</div>
       {phases.map((p, i) => (
-        <PhaseCard key={p.id} phase={p} commPlanNames={commPlanNames} commPlanMediums={commPlanMediums}
+        <PhaseCard key={p.id} phase={p} library={library} commPlanNames={commPlanNames} commPlanMediums={commPlanMediums}
           onPatch={(x) => patch(i, x)} onRemove={() => removePhase(i)} canRemove={phases.length > 1} />
       ))}
       <div className="flex flex-wrap items-center gap-2">
@@ -114,13 +118,22 @@ function DefineTab({ cfg, commPlanNames, commPlanMediums, onSaved }: { cfg: Camp
   );
 }
 
-function PhaseCard({ phase, commPlanNames, commPlanMediums, onPatch, onRemove, canRemove }: {
-  phase: PhaseVM; commPlanNames: string[]; commPlanMediums: Record<string, string>;
+function PhaseCard({ phase, library, commPlanNames, commPlanMediums, onPatch, onRemove, canRemove }: {
+  phase: PhaseVM; library: CouponLibraryItem[]; commPlanNames: string[]; commPlanMediums: Record<string, string>;
   onPatch: (p: Partial<PhaseVM>) => void; onRemove: () => void; canRemove: boolean;
 }) {
   const setCoupon = (ci: number, c: Partial<Coupon>) => onPatch({ coupons: phase.coupons.map((x, j) => j === ci ? { ...x, ...c } : x) });
   const addCoupon = () => onPatch({ coupons: [...phase.coupons, { label: "", code: "" }] });
   const rmCoupon = (ci: number) => onPatch({ coupons: phase.coupons.filter((_, j) => j !== ci) });
+  // Pick from the tray: fill the first blank row if there is one, else add a row. Clicking a code that's
+  // already on this round removes it again.
+  const pickCoupon = (it: CouponLibraryItem) => {
+    const at = phase.coupons.findIndex((c) => c.code.trim().toUpperCase() === it.code);
+    if (at >= 0) { rmCoupon(at); return; }
+    const next: Coupon = { label: it.label, code: it.code, minSpend: it.minSpend };
+    const blank = phase.coupons.findIndex((c) => !c.code.trim() && !c.label.trim());
+    onPatch({ coupons: blank >= 0 ? phase.coupons.map((c, j) => (j === blank ? next : c)) : [...phase.coupons, next] });
+  };
   const setMessaging = (patch: Partial<RoundMessaging>) => onPatch({ messaging: { ...phase.messaging, ...patch } });
   const split = phase.ordinal >= 2;
 
@@ -148,6 +161,7 @@ function PhaseCard({ phase, commPlanNames, commPlanMediums, onPatch, onRemove, c
         <div className="mb-1.5 flex items-center justify-between"><span className={LBL}>Offers / coupons (fill message [coupon])</span>
           <button type="button" onClick={addCoupon} className="text-[11px] font-semibold text-[#2E7D32]">+ Add coupon</button></div>
         {phase.ordinal > 1 && <div className="mb-1.5 text-[11px] text-[#9E9E9E]">New rounds start with Round 1&apos;s coupons — remove any you don&apos;t want, or add more.</div>}
+        <CouponTray library={library} selected={phase.coupons.map((c) => c.code.trim().toUpperCase())} onPick={pickCoupon} />
         {phase.coupons.length === 0 ? <div className="text-[11.5px] text-[#BDBDBD]">No coupons for this round.</div> : (
           <div className="flex flex-col gap-1.5">
             {phase.coupons.map((c, ci) => (
@@ -185,6 +199,55 @@ function PhaseCard({ phase, commPlanNames, commPlanMediums, onPatch, onRemove, c
 }
 
 /* ─────────────────── Message targets editor ─────────────────── */
+
+/** Quick-pick tray of coupon codes used before in any campaign, most-used first. */
+function CouponTray({ library, selected, onPick }: { library: CouponLibraryItem[]; selected: string[]; onPick: (it: CouponLibraryItem) => void }) {
+  const [q, setQ] = useState("");
+  const [all, setAll] = useState(false);
+  if (!library.length) return null;
+  const t = q.trim().toUpperCase();
+  const match = library.filter((it) => !t || it.code.includes(t) || it.label.toUpperCase().includes(t));
+  const SHOW = 10;
+  const shown = all || t ? match : match.slice(0, SHOW);
+  const tip = (it: CouponLibraryItem) => [
+    `${it.label || it.code}${it.minSpend != null ? ` · min ₹${it.minSpend.toLocaleString("en-IN")}` : ""}`,
+    `Used in ${it.uses} round${it.uses === 1 ? "" : "s"}: ${it.campaigns.join(", ")}`,
+    `Last used ${it.lastUsed}`,
+  ].join("\n");
+  return (
+    <div className="mb-2 rounded-[10px] border border-[#E8F0E8] bg-[#F7FBF7] p-2">
+      <div className="mb-1.5 flex flex-wrap items-center gap-2">
+        <span className="text-[11px] font-semibold text-[#2E7D32]">Previously used coupons</span>
+        <span className="text-[10.5px] text-[#9E9E9E]">most used first · all campaigns · click to add (click again to remove)</span>
+        {library.length > SHOW && (
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a code…" className="ml-auto w-[130px] rounded-[7px] border border-[#E0E0E0] bg-white px-2 py-0.5 text-[11.5px] outline-none focus:border-[#2E7D32]" />
+        )}
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {shown.map((it) => {
+          const on = selected.includes(it.code);
+          return (
+            <button key={it.code} type="button" onClick={() => onPick(it)} title={tip(it)}
+              className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11.5px] transition-colors"
+              style={on ? { borderColor: "#2E7D32", background: "#E8F5E9", color: "#1B5E20" } : { borderColor: "#DDE8DD", background: "#fff", color: "#424242" }}>
+              <span>{on ? "✓" : "+"}</span>
+              <span className="font-mono font-bold">{it.code}</span>
+              {it.label && <span className="max-w-[140px] truncate text-[#757575]">{it.label}</span>}
+              {it.minSpend != null && <span className="text-[10.5px] text-[#9E9E9E]">min ₹{it.minSpend.toLocaleString("en-IN")}</span>}
+              <span className="rounded-full bg-[#F0F0F0] px-1.5 text-[10px] font-semibold text-[#757575]">×{it.uses}</span>
+            </button>
+          );
+        })}
+        {shown.length === 0 && <span className="text-[11.5px] text-[#BDBDBD]">No code matches “{q}”.</span>}
+        {!t && match.length > SHOW && (
+          <button type="button" onClick={() => setAll((v) => !v)} className="rounded-full px-2 py-1 text-[11.5px] font-semibold text-[#2E7D32] hover:underline">
+            {all ? "Show fewer" : `Show all ${match.length}`}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function MessageTargets({ targets, commPlanNames, commPlanMediums, onChange }: {
   targets: MessageTarget[]; commPlanNames: string[]; commPlanMediums: Record<string, string>; onChange: (t: MessageTarget[]) => void;
