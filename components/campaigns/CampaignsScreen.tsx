@@ -9,7 +9,7 @@ import { SmsSender } from "./SmsSender";
 import { WaSender } from "./WaSender";
 import { BroadcastPanel } from "./BroadcastPanel";
 import { PrevRoundTag } from "./PrevRoundTag";
-import { RoundsTab, RoundStrip, RoundBadge } from "./CampaignRoundsPanel";
+import { RoundsTab, RoundStrip, RoundBadge, roundColor } from "./CampaignRoundsPanel";
 import { BroadcastHistory } from "./BroadcastHistory";
 import { PhasesPanel } from "./phases/PhasesPanel";
 import { PhaseOutreachPanel } from "./phases/PhaseOutreachPanel";
@@ -25,7 +25,7 @@ import { useConfirm } from "@/components/ConfirmDialog";
 import { cropLabel } from "@/lib/crops";
 import { inr } from "@/lib/format";
 import {
-  saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, previewCampaignAudience, getTeamCandidates, getCampaignTeam, setCampaignTeam, getCampaignTracker, extendCampaign, updateCampaignCommPlans, deleteCampaign, getCampaignMembers, markCampaignMember, getCampaignAnalytics, getCampaignRoundAnalytics, exportCampaignAudienceXlsx, exportCampaignTrackerXlsx, getSmsTemplates,
+  saveCommTemplate, createCommTemplate, deleteCommTemplate, createCampaign, previewCampaignAudience, getTeamCandidates, getCampaignTeam, setCampaignTeam, getCampaignTracker, extendCampaign, updateCampaignCommPlans, deleteCampaign, getCampaignContactList, markCampaignMember, getCampaignAnalytics, getCampaignRoundAnalytics, exportCampaignAudienceXlsx, exportCampaignTrackerXlsx, getSmsTemplates,
   type CampaignListItem, type CampaignTracker, type ProjectVM, type CampaignMemberVM, type RoundAnalytics, type CampaignAnalytics, type SmsTemplateVM, type TrackerScope, type SegRow, type MatchView, type CallRow,
 } from "@/app/actions/campaigns";
 import { downloadB64 } from "@/lib/download";
@@ -534,6 +534,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
   const [analytics, setAnalytics] = useState<CampaignAnalytics | null>(null);
   const [membersOf, setMembersOf] = useState<CampaignListItem | null>(null);
   const [members, setMembers] = useState<CampaignMemberVM[] | null>(null);
+  const [memberRound, setMemberRound] = useState<{ round: number; boughtSkipped: number } | null>(null); // Round 2+: buyers left out
   const [memberPage, setMemberPage] = useState(0);
   const [memberLoc, setMemberLoc] = useState<LocFilter>(EMPTY_LOC); // contact-list Region/District/Village filter
   const [focusMode, setFocusMode] = useState(false);
@@ -621,7 +622,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
   const openTracker = (c: CampaignListItem) => { setTrackerOf(c); setTracker(null); setTrackerLoc(EMPTY_LOC); loadTracker(c, EMPTY_LOC); };
   const changeTrackerLoc = (f: LocFilter) => { setTrackerLoc(f); if (trackerOf) loadTracker(trackerOf, f); };
   const openAnalytics = (c: CampaignListItem) => { setAnalyticsOf(c); setAnalytics(null); getCampaignAnalytics(c.id).then(setAnalytics); };
-  const openMembers = (c: CampaignListItem) => { setMembersOf(c); setMembers(null); setMemberPage(0); setMemberLoc(EMPTY_LOC); setFocusMode(false); getCampaignMembers(c.id).then(setMembers); };
+  const openMembers = (c: CampaignListItem) => { setMembersOf(c); setMembers(null); setMemberPage(0); setMemberLoc(EMPTY_LOC); setFocusMode(false); setMemberRound(null); getCampaignContactList(c.id).then((r) => { setMembers(r.members); setMemberRound({ round: r.round, boughtSkipped: r.boughtSkipped }); }); };
   const inMemberLoc = locMatcher(memberLoc);
   const visibleMembers = members && locActive(memberLoc) ? members.filter(inMemberLoc) : members;
   const patchMember = (u: CampaignMemberVM) => setMembers((list) => list?.map((x) => (x.id === u.id ? u : x)) ?? null);
@@ -731,6 +732,14 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="text-[13.5px] font-bold text-[#1A1C1A]">{c.name}</span>
+                {c.liveRound && (
+                  <span title={`Live round: Round ${c.liveRound.ordinal} of ${c.liveRound.total} — ${c.liveRound.name}${c.liveRound.final ? " (final round)" : ""}`}
+                    className="inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold"
+                    style={{ borderColor: roundColor(c.liveRound.ordinal), color: roundColor(c.liveRound.ordinal) }}>
+                    <span className="h-1.5 w-1.5 rounded-full" style={{ background: roundColor(c.liveRound.ordinal) }} />
+                    Live · Round {c.liveRound.ordinal}{c.liveRound.total > 1 ? ` of ${c.liveRound.total}` : ""}
+                  </span>
+                )}
                 {c.workedBy === "CAMPAIGNERS" && <span className="rounded-full bg-[#E0F7FA] px-2 py-0.5 text-[10px] font-semibold text-[#00838F]">📞 Campaigners only</span>}
                 {c.workedBy === "BOTH" && <span className="rounded-full bg-[#F3E5F5] px-2 py-0.5 text-[10px] font-semibold text-[#6A1B9A]">Officers + campaigners</span>}
               </div>
@@ -764,8 +773,14 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
             <ModalHeader eyebrow="Campaign · outreach" eyebrowColor="#1565C0" title={membersOf.name}
               subtitle={canManage ? "Contact list (test group)" : "Your farmers — call, then log how you reached them"} onClose={() => { setMembersOf(null); setFocusMode(false); setFocusCurrent(null); }} />
             <div className="px-5 py-4">
+              {memberRound && memberRound.round >= 2 && (
+                <div className="mb-3 rounded-[10px] border border-[#C8E6C9] bg-[#F1F8F1] px-3 py-2 text-[12px] text-[#1B5E20]">
+                  <b>Round {memberRound.round}</b> — only farmers who haven&apos;t bought yet are listed.
+                  {memberRound.boughtSkipped > 0 && <> {memberRound.boughtSkipped.toLocaleString("en-IN")} farmer{memberRound.boughtSkipped === 1 ? "" : "s"} who already bought during the campaign {memberRound.boughtSkipped === 1 ? "is" : "are"} left out (and skipped by Mass send).</>}
+                </div>
+              )}
               {members == null ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">Loading…</div>
-                : members.length === 0 ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">No farmers to contact here.</div>
+                : members.length === 0 ? <div className="py-8 text-center text-[13px] text-[#9E9E9E]">{memberRound && memberRound.boughtSkipped > 0 ? "Everyone here has already bought — nobody left to contact this round." : "No farmers to contact here."}</div>
                 : (
                   <div className="flex flex-col gap-4 lg:max-h-[74vh] lg:flex-row">
                     {scripts.length > 0 && (

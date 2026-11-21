@@ -7,6 +7,7 @@ import { logAudit } from "@/lib/audit";
 import { sendSms, zapConfig, getSmsDeliveryReport } from "@/lib/zapsms";
 import { sendWhatsApp, waConfig } from "@/lib/whatsapp";
 import { resolveVars, fillSmsTemplate, fillWaTemplate, positionalParams, type FarmerVarSource } from "@/lib/campaign-vars";
+import { roundBuyersToSkip } from "@/lib/campaign-round-audience";
 import { locVal, locMatcher, locItemsOf, sanitizeLoc, locSummary, type LocFilter, type LocItem } from "@/lib/campaign-location";
 
 export type Channel = "SMS" | "WHATSAPP";
@@ -32,10 +33,13 @@ type TestMember = { id: number; farmerId: number; mediums: string[]; storeId: nu
  * TEST group (before filtering) so the filter dropdowns always list every option.
  */
 async function testAudience(campaignId: number, locIn?: unknown) {
-  const all: TestMember[] = await prisma.campaignMember.findMany({
+  const everyone: TestMember[] = await prisma.campaignMember.findMany({
     where: { campaignId, group: "TEST" },
     select: { id: true, farmerId: true, mediums: true, storeId: true },
   });
+  // Round 2+: farmers who already bought during the campaign are done — don't message them again.
+  const { skip } = await roundBuyersToSkip(campaignId, everyone.map((m) => m.farmerId));
+  const all = skip.size ? everyone.filter((m) => !skip.has(m.farmerId)) : everyone;
   const [fmap, stores] = await Promise.all([
     farmerMap(all.map((m) => m.farmerId)),
     prisma.store.findMany({ select: { id: true, zone: true } }),

@@ -22,6 +22,7 @@ import { locVal, locMatcher, locItemsOf, sanitizeLoc, locSummary, locLabel, type
 import { buildWorkbookB64, type Cell } from "@/lib/xlsx-export";
 import { loadPrevRounds, earlierReached } from "@/lib/campaign-member-rounds";
 import type { PrevRoundContact } from "@/lib/campaign-prev-round";
+import { roundBuyersToSkip } from "@/lib/campaign-round-audience";
 import { buildStyledWorkbookB64, type StyledSheetSpec, type StyledCell } from "@/lib/xlsx-styled";
 import { sendSms, zapConfig, listSmsTemplates, type SmsTemplate } from "@/lib/zapsms";
 import { sendWhatsApp, waConfig, waCreateTemplate } from "@/lib/whatsapp";
@@ -571,6 +572,7 @@ export interface CampaignListItem {
   commPlans: string[]; // comm-plan names the campaign is tagged with
   workedBy: string; // STORE | CAMPAIGNERS | BOTH — who sees + works this campaign
   team: boolean; // true = a picked team (CampaignWorker / CampaignCaller) decides who works it
+  liveRound: { ordinal: number; name: string; total: number; final: boolean } | null; // null = no rounds set up
 }
 
 /** Member `where` for the current user's scope (officer→their store, RM→their managed stores). null = see all. */
@@ -652,7 +654,10 @@ export async function listCampaigns(): Promise<CampaignListItem[]> {
     orderBy: { createdAt: "desc" },
     take: 100,
     where,
-    include: { _count: { select: { members: countWhere ? { where: countWhere } : true } } }, // scoped member count
+    include: {
+      _count: { select: { members: countWhere ? { where: countWhere } : true } }, // scoped member count
+      phases: { select: { ordinal: true, name: true }, orderBy: { ordinal: "asc" } }, // for the live-round tag
+    },
   });
   if (wholeIds.size) { // whole-campaign team members see (and count) every member
     const full = await prisma.campaignMember.groupBy({ by: ["campaignId"], where: { campaignId: { in: [...wholeIds] } }, _count: { _all: true } });
@@ -685,6 +690,13 @@ export async function listCampaigns(): Promise<CampaignListItem[]> {
         ? `Project · ${pName.get(c.projectId) ?? "removed"}`
         : c.targetSegments.map((s) => segMeta(s).label).join(", ") || "—", // legacy segment campaigns
     members: c._count.members,
+    liveRound: (() => {
+      if (!c.phases.length) return null;
+      const max = Math.max(...c.phases.map((p) => p.ordinal));
+      const ord = Math.min(Math.max(1, c.currentRound), max);
+      const p = c.phases.find((x) => x.ordinal === ord) ?? c.phases[0];
+      return { ordinal: p.ordinal, name: p.name, total: c.phases.length, final: ord >= max };
+    })(),
   }));
 }
 
@@ -701,16 +713,32 @@ export interface CampaignMemberVM {
 // Load the whole TEST group so the outreach counts (to-contact / reached / left) are accurate — the old
 // 1000 default capped a 2k+ campaign's list. Bounded to keep the payload sane; huge campaigns use the matrix.
 export async function getCampaignMembers(campaignId: number, limit = 25000): Promise<CampaignMemberVM[]> {
+  return (await getCampaignContactList(campaignId, limit)).members;
+}
+
+export interface CampaignContactList {
+  members: CampaignMemberVM[];
+  round: number;          // campaign's current round
+  boughtSkipped: number;  // Round 2+: farmers left out because they already bought during the campaign
+}
+/** The contact list for the current round. From Round 2 on, farmers who already bought are left out —
+ *  only the "Not yet purchased" farmers are worked (same rule as the Round status screen). */
+export async function getCampaignContactList(campaignId: number, limit = 25000): Promise<CampaignContactList> {
+  const empty: CampaignContactList = { members: [], round: 1, boughtSkipped: 0 };
   const assigned = await campaignerAssignedIds();
-  if (assigned && !assigned.includes(campaignId)) return []; // campaigner may only open assigned campaigns
+  if (assigned && !assigned.includes(campaignId)) return empty; // campaigner may only open assigned campaigns
   const scope = await campaignMemberScope(campaignId); // own store/zone + any helper grant on this campaign
-  if (scope === "none") return [];
-  const members = await prisma.campaignMember.findMany({
+  if (scope === "none") return empty;
+  const allMembers = await prisma.campaignMember.findMany({
     where: { campaignId, group: "TEST", ...(scope ?? {}) }, // officers/RMs contact only the TEST group
     take: limit, orderBy: { id: "asc" },
     select: { id: true, farmerId: true, segment: true, valueSegment: true, reached: true, mediums: true, comment: true, reachedAt: true, reachedBy: true, reachedByCode: true, storeId: true, response: true, responseCrop: true, broadcastMediums: true },
   });
-  if (!members.length) return [];
+  if (!allMembers.length) return empty;
+  const { round, skip } = await roundBuyersToSkip(campaignId, allMembers.map((m) => m.farmerId));
+  const members = skip.size ? allMembers.filter((m) => !skip.has(m.farmerId)) : allMembers;
+  const boughtSkipped = allMembers.length - members.length;
+  if (!members.length) return { members: [], round, boughtSkipped };
   const [farmers, stores] = await Promise.all([
     prisma.farmer.findMany({ where: { id: { in: members.map((m) => m.farmerId) } }, select: { id: true, name: true, mobile: true, village: true, district: true } }),
     prisma.store.findMany({ select: { id: true, name: true, zone: true } }),
@@ -719,9 +747,8 @@ export async function getCampaignMembers(campaignId: number, limit = 25000): Pro
   const sMap = new Map(stores.map((s) => [s.id, shortStoreName(s.name)]));
   const zMap = new Map(stores.map((s) => [s.id, locVal(s.zone)]));
   // Earlier-round conversations (only once the campaign has moved past round 1).
-  const camp = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { currentRound: true } });
-  const prev = await loadPrevRounds(campaignId, camp?.currentRound ?? 1, scope ? members.map((m) => m.id) : undefined);
-  return members.map((m) => {
+  const prev = await loadPrevRounds(campaignId, round, scope ? members.map((m) => m.id) : undefined);
+  const list = members.map((m): CampaignMemberVM => {
     const f = fMap.get(m.farmerId);
     return {
       id: m.id, name: f?.name ?? `Farmer #${m.farmerId}`, mobile: f?.mobile ?? null, village: locVal(f?.village),
@@ -733,6 +760,7 @@ export async function getCampaignMembers(campaignId: number, limit = 25000): Pro
       prev: prev.get(m.id) ?? [],
     };
   });
+  return { members: list, round, boughtSkipped };
 }
 
 /**

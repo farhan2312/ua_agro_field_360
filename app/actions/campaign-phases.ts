@@ -16,18 +16,11 @@ import {
   type Coupon, type RoundMessaging,
 } from "@/lib/campaign-phases";
 
+import { purchasedFarmerIds } from "@/lib/campaign-round-audience";
+
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 async function isManager(): Promise<boolean> { const { role } = await getScope(); return canManage(role); }
 
-/** Farmers (from a given set) who made ANY real purchase inside the campaign window. */
-async function purchasedFarmerIds(farmerIds: number[], from: Date, to: Date): Promise<Set<number>> {
-  if (!farmerIds.length) return new Set();
-  const rows = await prisma.saleLine.findMany({
-    where: { farmerId: { in: farmerIds }, source: "REAL", soldAt: { gte: from, lt: to } },
-    select: { farmerId: true }, distinct: ["farmerId"],
-  });
-  return new Set(rows.map((r) => r.farmerId!).filter((x): x is number => x != null));
-}
 
 function segLabel(value: string | null, lifecycle: string | null): string {
   return [value, lifecycle].filter(Boolean).map((s) => segMeta(s!).label).join(" · ") || "—";
