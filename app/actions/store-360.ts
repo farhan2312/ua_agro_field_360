@@ -82,7 +82,7 @@ export async function getStoreList(): Promise<StoreListResult | null> {
 
 export interface StoreDetail {
   id: number; name: string; code: string; zone: string | null; address: string | null; regionalManager: string | null; status: string;
-  kpis: { farmers: number; officers: number; ltv: number; activeCampaigns: number; openActions: number; overdueActions: number; visits: number; ghoshti: number };
+  kpis: { farmers: number; officers: number; ltv: number; activeCampaigns: number; openActions: number; overdueActions: number; visits: number; ghoshti: number; optIns: number; optIns30: number };
   officers: { name: string; code: string | null; role: string; lastActive: string | null; visits: number }[];
   valueSeg: { label: string; count: number; color: string }[];
   lifecycleSeg: { label: string; count: number; color: string }[];
@@ -107,7 +107,7 @@ export async function getStoreDetail(storeId: number): Promise<StoreDetail | nul
   const sod = startOfToday(); // overdue = due strictly before today (matches Action Registry)
 
   const [
-    farmerCount, officerRows, ltvAgg, openActions, overdueActions, doneActions, visitCount, ghoshtiCount,
+    farmerCount, officerRows, ltvAgg, openActions, overdueActions, doneActions, visitCount, ghoshtiCount, optInCount, optIn30Count,
     valueG, lifecycleG, topFarmers, monthly, topCrops, topProducts,
     camMembers, camReached, recentActions, recentVisits, ghoshtiRows,
   ] = await Promise.all([
@@ -119,6 +119,9 @@ export async function getStoreDetail(storeId: number): Promise<StoreDetail | nul
     prisma.action.count({ where: { storeId, status: "DONE" } }),
     prisma.visit.count({ where: { storeId } }),
     prisma.ghoshti.count({ where: { storeId } }),
+    // WhatsApp opt-ins = this store's farmers who messaged us / scanned the QR (Farmer.whatsappOptIn), + last 30 days.
+    prisma.farmer.count({ where: { storeId, whatsappOptIn: true } }),
+    prisma.farmer.count({ where: { storeId, whatsappOptIn: true, whatsappOptInAt: { gte: new Date(Date.now() - 30 * 86_400_000) } } }),
     prisma.farmer.groupBy({ by: ["valueSegment"], where: { storeId, valueSegment: { not: null } }, _count: { _all: true } }),
     prisma.farmer.groupBy({ by: ["lifecycleSegment"], where: { storeId, lifecycleSegment: { not: null } }, _count: { _all: true } }),
     prisma.farmer.findMany({ where: { storeId }, orderBy: { lifetimeSpend: { sort: "desc", nulls: "last" } }, take: 10, select: { id: true, name: true, mobile: true, lifetimeSpend: true, lifecycleSegment: true } }),
@@ -160,7 +163,7 @@ export async function getStoreDetail(storeId: number): Promise<StoreDetail | nul
 
   return {
     id: store.id, name: shortStoreName(store.name) || store.name, code: store.code, zone: store.zone, address: store.address, regionalManager: store.regionalManager, status: store.status,
-    kpis: { farmers: farmerCount, officers: officers.length, ltv: Math.round(ltvAgg._sum.basic ?? 0), activeCampaigns: campaigns.filter((c) => c.status === "ACTIVE").length, openActions, overdueActions, visits: visitCount, ghoshti: ghoshtiCount },
+    kpis: { farmers: farmerCount, officers: officers.length, ltv: Math.round(ltvAgg._sum.basic ?? 0), activeCampaigns: campaigns.filter((c) => c.status === "ACTIVE").length, openActions, overdueActions, visits: visitCount, ghoshti: ghoshtiCount, optIns: optInCount, optIns30: optIn30Count },
     officers,
     valueSeg: segRow(valueG, "valueSegment", VALUE_SEGMENTS),
     lifecycleSeg: segRow(lifecycleG, "lifecycleSegment", LIFECYCLE_SEGMENTS),

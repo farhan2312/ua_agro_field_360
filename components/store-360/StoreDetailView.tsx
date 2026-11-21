@@ -15,6 +15,25 @@ function Kpi({ label, value, tone }: { label: string; value: string; tone?: stri
     </div>
   );
 }
+/** Two KPIs side by side in one card, split by a divider (e.g. Visits | WhatsApp opt-ins). */
+function SplitKpi({ left, right }: { left: { label: string; value: string; tone?: string }; right: { label: string; value: string; tone?: string; sub?: string } }) {
+  return (
+    <div className={`${CARD} flex items-stretch gap-4`}>
+      <div className="min-w-0 flex-1">
+        <div className="text-[10.5px] font-semibold uppercase tracking-[0.4px] text-[#9E9E9E]">{left.label}</div>
+        <div className="mt-1 text-[22px] font-bold leading-none tabular-nums" style={{ color: left.tone ?? "#1A1C1A" }}>{left.value}</div>
+      </div>
+      <div className="w-px shrink-0 bg-[#ECECEC]" />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[10.5px] font-semibold uppercase tracking-[0.4px] text-[#9E9E9E]">{right.label}</div>
+        <div className="mt-1 flex items-baseline gap-1.5">
+          <span className="text-[22px] font-bold leading-none tabular-nums" style={{ color: right.tone ?? "#1A1C1A" }}>{right.value}</span>
+          {right.sub && <span className="truncate text-[11px] font-semibold text-[#2E7D32]">{right.sub}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return <div className="mb-3 text-[14px] font-bold text-[#1A1C1A]">{children}</div>;
 }
@@ -82,7 +101,8 @@ export function StoreDetailView({ store }: { store: StoreDetail }) {
         <Kpi label="Overdue follow-ups" value={n(k.overdueActions)} tone={k.overdueActions > 0 ? "#C62828" : "#1A1C1A"} />
         <Kpi label="Officers" value={n(k.officers)} />
         <Kpi label="Open follow-ups" value={n(k.openActions)} tone={k.openActions > 0 ? "#E65100" : "#1A1C1A"} />
-        <Kpi label="Visits" value={n(k.visits)} />
+        <SplitKpi left={{ label: "Visits", value: n(k.visits) }}
+          right={{ label: "WhatsApp opt-ins", value: n(k.optIns), tone: "#25A244", sub: k.optIns30 > 0 ? `+${n(k.optIns30)} in 30 days` : undefined }} />
         <Kpi label="Ghoshti meetups" value={n(k.ghoshti)} />
       </div>
 

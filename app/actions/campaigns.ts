@@ -1739,7 +1739,8 @@ export interface SegRow {
 }
 export interface TrackerScope {
   key: string; label: string;               // "overall"/"All rounds" · "R1"/"Round 1 · Discount"
-  windowStart: string; windowEnd: string;    // dates + 30-day tail
+  roundStatus: "finished" | "current" | "upcoming" | null; // null = All rounds
+  windowStart: string; windowEnd: string;    // dates + 30-day tail (a round's tail stops at the next round's start)
   couponCodes: string[];
   byValue: SegRow[]; byLifecycle: SegRow[];
 }
@@ -1747,7 +1748,7 @@ export interface TrackerScope {
 const MV: MatchView[] = ["coupon", "crop", "total"];
 
 /** Build one scope's segment tables (overall campaign or one round) across all three match views. */
-async function computeScope(members: UpliftMemberVM[], pf: ProductFilter, codes: string[], ws: Date, we: Date, key: string, label: string): Promise<TrackerScope> {
+async function computeScope(members: UpliftMemberVM[], pf: ProductFilter, codes: string[], ws: Date, we: Date, key: string, label: string, roundStatus?: "finished" | "current" | "upcoming"): Promise<TrackerScope> {
   const allIds = [...new Set(members.map((m) => m.farmerId))];
   const [allSpend, cropSpend, couponSpend] = await Promise.all([
     matchedSpendByFarmer({ crops: [], categories: [], all: true }, allIds, ws, we), // every transaction
@@ -1797,7 +1798,7 @@ async function computeScope(members: UpliftMemberVM[], pf: ProductFilter, codes:
       return { segment, isLeads, test: a.test, reached: a.reached, control: a.control, totalSalesAllTest: Math.round(a.totAll), totalSalesReached: Math.round(a.totReached), views };
     });
   };
-  return { key, label, windowStart: iso(ws)!, windowEnd: iso(we)!, couponCodes: codes, byValue: build(valueKeyOf, VALUE_SEGMENTS), byLifecycle: build(lifecycleKeyOf, LIFECYCLE_SEGMENTS) };
+  return { key, label, roundStatus: roundStatus ?? null, windowStart: iso(ws)!, windowEnd: iso(we)!, couponCodes: codes, byValue: build(valueKeyOf, VALUE_SEGMENTS), byLifecycle: build(lifecycleKeyOf, LIFECYCLE_SEGMENTS) };
 }
 
 export interface ReachRow { store: string; sub: string; reached: number; total: number; broadcast: number }
@@ -1938,10 +1939,22 @@ export async function getCampaignTracker(campaignId: number, locIn?: LocFilter):
   const codesOf = (p: (typeof phases)[number]) => [...new Set(asCoupons(p.coupons).map((c) => c.code.trim().toUpperCase()).filter(Boolean))];
   const allCodes = [...new Set(phases.flatMap(codesOf))];
   const scopes: TrackerScope[] = [];
+  // All rounds: cumulative reach (reached in ANY round) over the whole campaign window.
   scopes.push(await computeScope(members, pf, allCodes, start, end, "overall", "All rounds"));
-  for (const p of phases) {
-    const rEnd = new Date(p.defaultEnd); rEnd.setDate(rEnd.getDate() + 30); // +30-day grace tail
-    scopes.push(await computeScope(members, pf, codesOf(p), p.defaultStart, rEnd, `R${p.ordinal}`, `Round ${p.ordinal} · ${p.name}`));
+  // Per round: only farmers reached IN THAT ROUND (finished rounds → their snapshot; the current round →
+  // the live outcome; upcoming → nobody yet), and purchases inside that round's own window — its dates
+  // + the 30-day tail, but never past the next round's start, so a sale is credited to one round only.
+  const curRound = Math.max(1, camp.currentRound);
+  const snapReached = new Set((await prisma.campaignMemberRound.findMany({ where: { campaignId, reached: true }, select: { memberId: true, round: true } })).map((r) => `${r.memberId}:${r.round}`));
+  const liveReached = new Set(liveMembers.filter((m) => m.reached).map((m) => m.id));
+  const reachedIn = (memberId: number, ord: number) => (ord < curRound ? snapReached.has(`${memberId}:${ord}`) : ord === curRound ? liveReached.has(memberId) : false);
+  for (let i = 0; i < phases.length; i++) {
+    const p = phases[i], next = phases[i + 1];
+    let rEnd = new Date(p.defaultEnd.getTime() + 31 * 86_400_000 - 1); // end day inclusive + 30-day grace tail
+    if (next && next.defaultStart.getTime() - 1 < rEnd.getTime()) rEnd = new Date(next.defaultStart.getTime() - 1);
+    const roundMembers = members.map((m) => ({ ...m, reached: m.group === "TEST" && reachedIn(m.id, p.ordinal) }));
+    const status = p.ordinal < curRound ? "finished" : p.ordinal === curRound ? "current" : "upcoming";
+    scopes.push(await computeScope(roundMembers, pf, codesOf(p), p.defaultStart, rEnd, `R${p.ordinal}`, `Round ${p.ordinal} · ${p.name.replace(/^\s*round\s*\d+\s*[-:]?\s*/i, "") || p.name}`, status));
   }
 
   const basisLabel = pf.all

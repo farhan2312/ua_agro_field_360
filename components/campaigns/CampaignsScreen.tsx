@@ -2019,7 +2019,10 @@ function TrackerBody({ t }: { t: CampaignTracker }) {
       <div className={`${CARD} p-4`}>
         <div className="mb-1 text-[13px] font-bold text-[#1A1C1A]">Campaign performance</div>
         <div className="mb-3 text-[11px] text-[#9E9E9E]">
-          Uplift % = (Reach %buy − Control %buy) ÷ Reach %buy. Incremental = uplift × total sales (all transactions, base ₹) — shown as <b>all-test / reached</b>. Buy follows the selected view; total sales is every transaction. Window: {scope?.windowStart} → {scope?.windowEnd} (+30-day tail). Basis: <b>{a.basisLabel}</b>.
+          Uplift % = (Reach %buy − Control %buy) ÷ Reach %buy. Incremental = uplift × total sales (all transactions, base ₹) — shown as <b>all-test / reached</b>. Buy follows the selected view; total sales is every transaction. Window: {scope?.windowStart} → {scope?.windowEnd} (+30-day tail{scope?.roundStatus ? ", stopping before the next round starts" : ""}). Basis: <b>{a.basisLabel}</b>.
+          {scope?.roundStatus
+            ? <> <b>This round only:</b> Reach = farmers reached in this round{scope.roundStatus === "current" ? " (so far)" : scope.roundStatus === "upcoming" ? " (round hasn’t started)" : ""}; buys and sales are inside this round’s window.</>
+            : <> <b>All rounds:</b> Reach = farmers reached in any round; buys and sales over the whole campaign.</>}
         </div>
 
         {/* Scope: Overall + each round */}
