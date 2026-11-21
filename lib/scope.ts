@@ -46,9 +46,9 @@ export function canManage(role: RoleKey): boolean {
 }
 
 /**
- * May the current user act on (complete an action / sign off a visit) a record made by someone?
- * The maker themselves (by employee code, any role), the RM who manages that store, and any
- * central/sysadmin qualify. Officers may only act on their OWN records. Campaigners: never.
+ * May the current user complete a follow-up (action)? The maker themselves (by employee code, any role),
+ * the store's own officer (follow-ups an RM raised for their store, e.g. from a visit review flag), the
+ * RM who manages that store, and any central/sysadmin qualify. Campaigners: never.
  */
 export function canSignOff(
   scope: Scope,
@@ -59,7 +59,7 @@ export function canSignOff(
   const isMaker = !!actorCode && !!target.byCode && target.byCode === actorCode;
   if (scope.role === "regional")
     return isMaker || (target.storeId != null && (scope.managedStoreIds ?? []).includes(target.storeId));
-  if (scope.role === "officer") return isMaker;
+  if (scope.role === "officer") return isMaker || (target.storeId != null && target.storeId === scope.storeId);
   return false; // campaigner
 }
 

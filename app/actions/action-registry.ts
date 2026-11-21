@@ -156,11 +156,11 @@ export async function completeAction(id: number, note?: string): Promise<{ ok: b
   const closing = (note ?? "").trim();
   if (!closing) return { ok: false, error: "A closing summary is required to mark an action done." };
   const actor = await getActor();
-  // Only the creator, the RM who manages that store, or a central/sysadmin may complete it.
+  // The creator, the store's own officer, the RM who manages that store, or a central/sysadmin may complete it.
   const target = await prisma.action.findUnique({ where: { id }, select: { storeId: true, createdByCode: true } });
   if (!target) return { ok: false, error: "Action not found." };
   if (!canSignOff(scope, actor.code, { storeId: target.storeId, byCode: target.createdByCode }))
-    return { ok: false, error: "You can only complete actions you created, or (as their RM/admin) ones in your stores." };
+    return { ok: false, error: "You can only complete follow-ups you created or ones for your own store (RMs: their stores)." };
   try {
     await prisma.action.update({
       where: { id },
