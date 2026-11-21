@@ -770,7 +770,7 @@ export async function getCampaignContactList(campaignId: number, limit = 25000):
  */
 export async function exportCampaignTrackerXlsx(campaignId: number, campaignName: string, locIn?: LocFilter): Promise<{ ok: boolean; filename?: string; b64?: string; error?: string }> {
   const perm = await requireManager(); if (!perm.ok) return perm;
-  const loc = sanitizeLoc(locIn); // optional Region/District/Village filter (same as the tracker screen)
+  const loc = sanitizeLoc(locIn); // optional Region/Store/Village filter (same as the tracker screen)
   const allMembers = await prisma.campaignMember.findMany({
     where: { campaignId },
     orderBy: [{ group: "asc" }, { id: "asc" }],
@@ -802,7 +802,7 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
   // Location of a member: village + district from the farmer, region = enrolled store's zone.
   const locOf = (m: { farmerId: number; storeId: number | null }) => {
     const f = fMap.get(m.farmerId);
-    return { village: locVal(f?.village), district: locVal(f?.district), region: m.storeId != null ? zoneMap.get(m.storeId) ?? null : null };
+    return { village: locVal(f?.village), district: locVal(f?.district), region: m.storeId != null ? zoneMap.get(m.storeId) ?? null : null, store: m.storeId != null ? locVal(sMap.get(m.storeId)) : null };
   };
   const inLoc = locMatcher(loc);
   const members = loc ? allMembers.filter((m) => inLoc(locOf(m))) : allMembers;
@@ -1068,7 +1068,7 @@ export interface CampaignAnalytics {
   callByStore: CallRow[];
   /** The same outreach breakdown by farmer location (TEST group). Village rows are capped at the top 300. */
   callByLocation: { region: CallRow[]; district: CallRow[]; village: CallRow[] };
-  /** Distinct Region/District/Village combinations of the campaign's farmers (scope applied, filters NOT) — filter options. */
+  /** Distinct Region/Store/Village combinations of the campaign's farmers (scope applied, filters NOT) — filter options. */
   locItems: LocItem[];
   /** Regional managers that have members in this campaign (within the caller's scope) — for the RM filter. */
   rmOptions: string[];
@@ -1105,7 +1105,7 @@ export async function getCampaignAnalytics(campaignId: number, rms?: string[], l
   const zoneByName = new Map(stores.map((s) => [shortStoreName(s.name), locVal(s.zone) ?? ""]));
   const locOf = (m: { farmerId: number; storeId: number | null }) => {
     const f = fMap.get(m.farmerId);
-    return { village: locVal(f?.village), district: locVal(f?.district), region: m.storeId != null ? zoneByStore.get(m.storeId) ?? null : null };
+    return { village: locVal(f?.village), district: locVal(f?.district), region: m.storeId != null ? zoneByStore.get(m.storeId) ?? null : null, store: m.storeId != null ? locVal(sMap.get(m.storeId)) : null };
   };
   const locItems = locItemsOf(allMembers.map(locOf)); // filter options: every location in scope, before RM/location filters
 
@@ -1273,7 +1273,7 @@ async function loadRoundData(campaignId: number, rms?: string[], locIn?: LocFilt
   const sZone = new Map(stores.map((s) => [s.id, locVal(s.zone)]));
   const locOf = (m: { farmerId: number; storeId: number | null }) => {
     const f = fMap.get(m.farmerId);
-    return { village: locVal(f?.village), district: locVal(f?.district), region: m.storeId != null ? sZone.get(m.storeId) ?? null : null };
+    return { village: locVal(f?.village), district: locVal(f?.district), region: m.storeId != null ? sZone.get(m.storeId) ?? null : null, store: m.storeId != null ? locVal(sName.get(m.storeId)) : null };
   };
   const rmSet = rms?.length ? new Set(rms) : null;
   const inLoc = locMatcher(loc);
@@ -1849,7 +1849,7 @@ export interface CampaignTracker {
   reach: CampaignReach;
   attribution: CampaignAttribution;
   scopes: TrackerScope[]; // [0] = overall (all rounds); then one per round
-  locItems: LocItem[];    // Region/District/Village combinations of ALL members — filter options
+  locItems: LocItem[];    // Region/Store/Village combinations of ALL members — filter options
   locFiltered: boolean;   // a location filter narrowed everything above
 }
 
@@ -1896,13 +1896,14 @@ export async function getCampaignTracker(campaignId: number, locIn?: LocFilter):
   // Location of every member (village/district from the farmer, region = enrolled store's zone) → options + optional filter.
   const [locFarmers, locStores] = await Promise.all([
     prisma.farmer.findMany({ where: { id: { in: [...new Set(allMembers.map((m) => m.farmerId))] } }, select: { id: true, village: true, district: true } }),
-    prisma.store.findMany({ select: { id: true, zone: true } }),
+    prisma.store.findMany({ select: { id: true, zone: true, name: true } }),
   ]);
   const lfMap = new Map(locFarmers.map((f) => [f.id, f]));
   const lzMap = new Map(locStores.map((s) => [s.id, locVal(s.zone)]));
+  const lsMap = new Map(locStores.map((s) => [s.id, locVal(shortStoreName(s.name) || s.name)]));
   const locOf = (m: { farmerId: number; storeId: number | null }) => {
     const f = lfMap.get(m.farmerId);
-    return { village: locVal(f?.village), district: locVal(f?.district), region: m.storeId != null ? lzMap.get(m.storeId) ?? null : null };
+    return { village: locVal(f?.village), district: locVal(f?.district), region: m.storeId != null ? lzMap.get(m.storeId) ?? null : null, store: m.storeId != null ? lsMap.get(m.storeId) ?? null : null };
   };
   const locItems = locItemsOf(allMembers.map(locOf));
   const inLoc = locMatcher(loc);

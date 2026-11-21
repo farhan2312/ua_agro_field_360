@@ -527,7 +527,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
   const [trackerOf, setTrackerOf] = useState<CampaignListItem | null>(null);
   const [tracker, setTracker] = useState<CampaignTracker | null>(null);
   const [trackerExporting, setTrackerExporting] = useState(false);
-  const [trackerLoc, setTrackerLoc] = useState<LocFilter>(EMPTY_LOC); // tracker Region/District/Village filter (server-side)
+  const [trackerLoc, setTrackerLoc] = useState<LocFilter>(EMPTY_LOC); // tracker Region/Store/Village filter (server-side)
   const [trackerReloading, setTrackerReloading] = useState(false);
   const trackerSeq = useRef(0); // drops stale tracker responses when filters change quickly
   const [analyticsOf, setAnalyticsOf] = useState<CampaignListItem | null>(null);
@@ -536,7 +536,7 @@ function CampaignsTab({ campaigns, projects, canManage, initialProjectId, commPl
   const [members, setMembers] = useState<CampaignMemberVM[] | null>(null);
   const [memberRound, setMemberRound] = useState<{ round: number; boughtSkipped: number } | null>(null); // Round 2+: buyers left out
   const [memberPage, setMemberPage] = useState(0);
-  const [memberLoc, setMemberLoc] = useState<LocFilter>(EMPTY_LOC); // contact-list Region/District/Village filter
+  const [memberLoc, setMemberLoc] = useState<LocFilter>(EMPTY_LOC); // contact-list Region/Store/Village filter
   const [focusMode, setFocusMode] = useState(false);
   const [broadcasting, setBroadcasting] = useState(false); // admin mass-send panel
   const [bcReload, setBcReload] = useState(0); // bump to refresh broadcast history after a run

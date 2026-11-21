@@ -8,7 +8,6 @@ import {
   APPROACH_TILES, UNREACHABLE_TILE, statusOf, rank, digits10, OutreachProgress,
   ScriptPanel, ResponsePicker, ResponseBadge, useOutreach, type CommTemplateVM, type CropOption,
 } from "@/components/campaigns/CampaignsScreen";
-import { ClusterMultiSelect } from "@/components/campaigns/ClusterMultiSelect";
 import { PrevRoundTag } from "@/components/campaigns/PrevRoundTag";
 import { LocationFilterBar } from "@/components/campaigns/LocationFilter";
 import { EMPTY_LOC, locActive, locMatcher, type LocFilter } from "@/lib/campaign-location";
@@ -16,7 +15,6 @@ import { EMPTY_LOC, locActive, locMatcher, type LocFilter } from "@/lib/campaign
 const CARD = "rounded-[14px] border border-black/[0.04] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]";
 const n = (x: number) => x.toLocaleString("en-IN");
 const PAGE = 50;
-const NO_STORE = 0; // filter id for farmers enrolled without a store
 
 /** Shared row grid — farmer | village | district | region | phone | outcome (response + channel) | note | save. */
 const GRID = "grid grid-cols-[1.2fr_0.75fr_0.7fr_0.65fr_0.8fr_auto_1.1fr_auto] items-center gap-3";
@@ -24,29 +22,17 @@ const GRID = "grid grid-cols-[1.2fr_0.75fr_0.7fr_0.65fr_0.8fr_auto_1.1fr_auto] i
 /**
  * Full-page outreach matrix: every farmer on ONE line — outcome tiles, note and save together.
  * Reached/unreachable rows sink to the bottom; un-contacted stay on top.
- * Everyone can filter by Region / District / Village; central/system admins also get a store filter.
+ * Everyone can filter by Region / Store / Village.
  * Filters narrow both the list and the progress bar.
  */
-export function OutreachMatrix({ campaign, initial, scripts = [], crops = [], canFilterStores = false }: { campaign: CampaignListItem; initial: CampaignMemberVM[]; scripts?: CommTemplateVM[]; crops?: CropOption[]; canFilterStores?: boolean }) {
+export function OutreachMatrix({ campaign, initial, scripts = [], crops = [] }: { campaign: CampaignListItem; initial: CampaignMemberVM[]; scripts?: CommTemplateVM[]; crops?: CropOption[] }) {
   const [members, setMembers] = useState(initial);
   const [page, setPage] = useState(0);
-  const [storeIds, setStoreIds] = useState<number[]>([]);
   const [loc, setLoc] = useState<LocFilter>(EMPTY_LOC);
   const patch = (u: CampaignMemberVM) => setMembers((list) => list.map((x) => (x.id === u.id ? u : x)));
 
-  // Filter options come from this campaign's own farmers, with each store's count; "No store" goes last.
-  const storeOpts = new Map<number, { id: number; name: string; count: number }>();
-  for (const m of members) {
-    const id = m.storeId ?? NO_STORE;
-    const o = storeOpts.get(id);
-    if (o) o.count++;
-    else storeOpts.set(id, { id, name: id === NO_STORE ? "No store" : m.store || `Store #${id}`, count: 1 });
-  }
-  const storeOptions = [...storeOpts.values()].sort((a, b) => (a.id === NO_STORE ? 1 : b.id === NO_STORE ? -1 : a.name.localeCompare(b.name)));
-
-  const inStores = storeIds.length ? members.filter((m) => storeIds.includes(m.storeId ?? NO_STORE)) : members;
   const inLoc = locMatcher(loc);
-  const visible = locActive(loc) ? inStores.filter(inLoc) : inStores;
+  const visible = locActive(loc) ? members.filter(inLoc) : members;
   const sorted = [...visible].sort((a, b) => rank(a) - rank(b));
   const pages = Math.max(1, Math.ceil(sorted.length / PAGE));
   const p = Math.min(page, pages - 1);
@@ -82,14 +68,7 @@ export function OutreachMatrix({ campaign, initial, scripts = [], crops = [], ca
         <div className="min-w-0 flex-1">
           <div className={`${CARD} p-4`}>
             <div className="mb-3 flex flex-col gap-2">
-              {canFilterStores && (
-                <div className="max-w-[420px]">
-                  <div className="text-[11px] font-semibold uppercase text-[#9E9E9E]">Store</div>
-                  <ClusterMultiSelect options={storeOptions} value={storeIds} onChange={(ids) => { setStoreIds(ids); setPage(0); }} compact
-                    noun="stores" emptyLabel={`All stores (${storeOptions.length})`} allLabel={`All ${storeOptions.length} stores selected`} />
-                </div>
-              )}
-              <LocationFilterBar items={inStores} value={loc} onChange={(f) => { setLoc(f); setPage(0); }} />
+              <LocationFilterBar items={members} value={loc} onChange={(f) => { setLoc(f); setPage(0); }} />
             </div>
             <OutreachProgress members={visible} />
           </div>

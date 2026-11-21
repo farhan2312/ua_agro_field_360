@@ -4,9 +4,9 @@ import { ClusterMultiSelect } from "./ClusterMultiSelect";
 import { EMPTY_LOC, LOC_DIMS, locActive, locOptions, pruneLoc, type LocFilter, type Located } from "@/lib/campaign-location";
 
 /**
- * Region → District → Village filter used on every campaign page. Options come from the farmers
+ * Region → Store → Village filter used on every campaign page. Options come from the farmers
  * on that page (`items`, optionally pre-counted with `n`) and cascade: picking a region narrows the
- * district list, picking a district narrows the villages. Picks that fall outside a narrowed parent
+ * store list, picking a store narrows the villages. Picks that fall outside a narrowed parent
  * are dropped automatically.
  */
 export function LocationFilterBar({ items, value, onChange, className = "" }: {

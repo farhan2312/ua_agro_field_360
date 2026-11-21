@@ -8,6 +8,7 @@ import { sendSms, zapConfig, getSmsDeliveryReport } from "@/lib/zapsms";
 import { sendWhatsApp, waConfig } from "@/lib/whatsapp";
 import { resolveVars, fillSmsTemplate, fillWaTemplate, positionalParams, type FarmerVarSource } from "@/lib/campaign-vars";
 import { roundBuyersToSkip } from "@/lib/campaign-round-audience";
+import { shortStoreName } from "@/lib/store-utils";
 import { locVal, locMatcher, locItemsOf, sanitizeLoc, locSummary, type LocFilter, type LocItem } from "@/lib/campaign-location";
 
 export type Channel = "SMS" | "WHATSAPP";
@@ -29,7 +30,7 @@ async function farmerMap(ids: (number | null)[]): Promise<Map<number, { mobile: 
 type TestMember = { id: number; farmerId: number; mediums: string[]; storeId: number | null };
 /**
  * The campaign's TEST group, with each farmer's location (region = enrolled store's zone, district/village
- * from the farmer) and the optional Region/District/Village filter applied. `locItems` covers the whole
+ * from the farmer) and the optional Region/Store/Village filter applied. `locItems` covers the whole
  * TEST group (before filtering) so the filter dropdowns always list every option.
  */
 async function testAudience(campaignId: number, locIn?: unknown) {
@@ -42,12 +43,16 @@ async function testAudience(campaignId: number, locIn?: unknown) {
   const all = skip.size ? everyone.filter((m) => !skip.has(m.farmerId)) : everyone;
   const [fmap, stores] = await Promise.all([
     farmerMap(all.map((m) => m.farmerId)),
-    prisma.store.findMany({ select: { id: true, zone: true } }),
+    prisma.store.findMany({ select: { id: true, zone: true, name: true } }),
   ]);
   const zones = new Map(stores.map((st) => [st.id, locVal(st.zone)]));
+  const stName = new Map(stores.map((st) => [st.id, locVal(shortStoreName(st.name) || st.name)]));
   const locOf = (m: TestMember) => {
     const f = fmap.get(m.farmerId);
-    return { village: locVal(f?.village), district: locVal(f?.district), region: m.storeId != null ? zones.get(m.storeId) ?? null : null };
+    return {
+      village: locVal(f?.village), district: locVal(f?.district),
+      region: m.storeId != null ? zones.get(m.storeId) ?? null : null, store: m.storeId != null ? stName.get(m.storeId) ?? null : null,
+    };
   };
   const loc = sanitizeLoc(locIn);
   const ok = locMatcher(loc);
@@ -64,7 +69,7 @@ export interface BroadcastAudience {
   alreadyContacted: number; // members whose outcome already includes this channel
   eligible: number;     // who this channel would send to
   smsReady: boolean; waReady: boolean;
-  locItems: LocItem[];  // Region/District/Village options (whole TEST group)
+  locItems: LocItem[];  // Region/Store/Village options (whole TEST group)
   locFiltered: boolean; // counts above are for the location filter
 }
 

@@ -69,13 +69,24 @@ export async function applyCampaignTeam(
   actor: { name: string | null; code: string | null },
 ): Promise<string | null> {
   const want = { officers: [...new Set(officerIds)], campaigners: [...new Set(campaignerIds)] };
-  const users = await prisma.user.findMany({
-    where: { id: { in: [...want.officers, ...want.campaigners] }, active: true, approvalStatus: "APPROVED" },
-    select: { id: true, role: true, storeId: true },
-  });
+  const [users, curWorkers, curCallers] = await Promise.all([
+    prisma.user.findMany({
+      where: { id: { in: [...want.officers, ...want.campaigners] }, active: true, approvalStatus: "APPROVED" },
+      select: { id: true, role: true, storeId: true },
+    }),
+    prisma.campaignWorker.findMany({ where: { campaignId }, select: { userId: true } }),
+    prisma.campaignCaller.findMany({ where: { campaignId }, select: { userId: true } }),
+  ]);
   const byId = new Map(users.map((u) => [u.id, u]));
-  if (want.officers.some((id) => !["ASR", "STORE_MANAGER"].includes(String(byId.get(id)?.role)))) return "One of the picked officers isn't an active Agri Officer.";
-  if (want.campaigners.some((id) => String(byId.get(id)?.role) !== "CAMPAIGNER")) return "One of the picked campaigners isn't an active Campaigner.";
+  const okOfficer = (id: number) => ["ASR", "STORE_MANAGER"].includes(String(byId.get(id)?.role));
+  const okCampaigner = (id: number) => String(byId.get(id)?.role) === "CAMPAIGNER";
+  // People already on the team who have since left / been deactivated / deleted are dropped quietly —
+  // they must not block adding someone new to a running campaign. Only a NEW bad pick is an error.
+  const wasOn = new Set([...curWorkers, ...curCallers].map((r) => r.userId));
+  if (want.officers.some((id) => !okOfficer(id) && !wasOn.has(id))) return "One of the picked officers isn't an active Agri Officer.";
+  if (want.campaigners.some((id) => !okCampaigner(id) && !wasOn.has(id))) return "One of the picked campaigners isn't an active Campaigner.";
+  want.officers = want.officers.filter(okOfficer);
+  want.campaigners = want.campaigners.filter(okCampaigner);
 
   const stores = new Set(await campaignStoreIds(campaignId));
   const workedBy = want.officers.length ? (want.campaigners.length ? "BOTH" : "STORE") : "CAMPAIGNERS";
@@ -109,10 +120,13 @@ export async function readCampaignTeam(campaignId: number): Promise<{ explicit: 
     prisma.campaignCaller.findMany({ where: { campaignId }, select: { userId: true } }),
     camp.teamExplicit ? prisma.campaignWorker.findMany({ where: { campaignId }, select: { userId: true } }) : Promise.resolve([]),
   ]);
-  let officerIds = workers.map((w) => w.userId);
+  // Hide people who have since left / been deactivated (or whose account was deleted) — the next save drops them.
+  const pickedIds = [...workers, ...callers].map((r) => r.userId);
+  const live = new Set(pickedIds.length ? (await prisma.user.findMany({ where: { id: { in: pickedIds }, active: true, approvalStatus: "APPROVED" }, select: { id: true } })).map((u) => u.id) : []);
+  let officerIds = workers.map((w) => w.userId).filter((id) => live.has(id));
   if (!camp.teamExplicit && camp.workedBy !== "CAMPAIGNERS" && storeIds.length) {
     const rows = await prisma.user.findMany({ where: { active: true, approvalStatus: "APPROVED", role: { in: ["ASR", "STORE_MANAGER"] }, storeId: { in: storeIds } }, select: { id: true } });
     officerIds = rows.map((r) => r.id);
   }
-  return { explicit: camp.teamExplicit, officerIds, campaignerIds: callers.map((c) => c.userId), storeIds };
+  return { explicit: camp.teamExplicit, officerIds, campaignerIds: callers.map((c) => c.userId).filter((id) => live.has(id)), storeIds };
 }

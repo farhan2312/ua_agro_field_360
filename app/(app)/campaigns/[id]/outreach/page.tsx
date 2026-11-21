@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 import { getRole } from "@/lib/session";
 import { canAccess } from "@/lib/roles";
-import { canManage } from "@/lib/scope";
 import { prisma } from "@/lib/prisma";
 import { listCampaigns, getCampaignMembers, getCropOptions } from "@/app/actions/campaigns";
 import { OutreachMatrix } from "@/components/campaigns/OutreachMatrix";
@@ -41,5 +40,5 @@ export default async function OutreachMatrixPage({ params }: { params: { id: str
     }));
   }
 
-  return <OutreachMatrix campaign={campaign} initial={members} scripts={scripts} crops={crops} canFilterStores={canManage(role)} />;
+  return <OutreachMatrix campaign={campaign} initial={members} scripts={scripts} crops={crops} />;
 }
