@@ -1998,6 +1998,11 @@ function TrackerBody({ t }: { t: CampaignTracker }) {
           <span className="ml-auto text-[11px] text-[#9E9E9E]">
             {reachScope?.roundStatus ? "Outreach, responses and sales for this round only." : "All rounds: a farmer reached in any round counts as reached."}
           </span>
+          {reachScope && reachScope.boughtBeforeExcluded > 0 && (
+            <div className="w-full rounded-[8px] bg-[#F1F8F1] px-2.5 py-1.5 text-[11px] text-[#1B5E20]">
+              {reachScope.label.split(" · ")[0]} is measured only on farmers who hadn&apos;t bought yet: everyone who bought before this round started is left out — {n(reachScope.boughtBeforeExcluded)} test farmers, and control farmers the same way — so this round&apos;s test, control and uplift are new buyers only. Rounds now add up to All rounds, which still counts everyone.
+            </div>
+          )}
         </div>
       )}
       <div className={`${CARD} p-4`}>

@@ -22,7 +22,7 @@ import { locVal, locMatcher, locItemsOf, sanitizeLoc, locSummary, locLabel, type
 import { buildWorkbookB64, type Cell } from "@/lib/xlsx-export";
 import { loadPrevRounds, earlierReached } from "@/lib/campaign-member-rounds";
 import type { PrevRoundContact } from "@/lib/campaign-prev-round";
-import { roundBuyersToSkip } from "@/lib/campaign-round-audience";
+import { roundBuyersToSkip, purchasedFarmerIds } from "@/lib/campaign-round-audience";
 import { buildStyledWorkbookB64, type StyledSheetSpec, type StyledCell } from "@/lib/xlsx-styled";
 import { sendSms, zapConfig, listSmsTemplates, type SmsTemplate } from "@/lib/zapsms";
 import { sendWhatsApp, waConfig, waCreateTemplate } from "@/lib/whatsapp";
@@ -1850,6 +1850,7 @@ export interface TrackerReachScope {
   label: string;
   roundStatus: "finished" | "current" | "upcoming" | null;
   reach: CampaignReach;
+  boughtBeforeExcluded: number; // Round 2+: TEST farmers left out because they bought before the round started
 }
 export interface CampaignTracker {
   reach: CampaignReach;   // = reachScopes[0] (all rounds, cumulative)
@@ -1993,17 +1994,22 @@ export async function getCampaignTracker(campaignId: number, locIn?: LocFilter):
   const liveReached = new Set(liveMembers.filter((m) => m.reached).map((m) => m.id));
   const liveById = new Map(liveMembers.map((m) => [m.id, m]));
   // Outreach for one round: finished → that round's saved outcome; current → the live outcome; upcoming → nobody.
-  const reachScopes: TrackerReachScope[] = [{ key: "overall", label: "All rounds", roundStatus: null, reach: overallReach }];
+  const reachScopes: TrackerReachScope[] = [{ key: "overall", label: "All rounds", roundStatus: null, reach: overallReach, boughtBeforeExcluded: 0 }];
+  const allFarmerIds = [...new Set(members.map((m) => m.farmerId))];
   const reachedIn = (memberId: number, ord: number) => (ord < curRound ? snapReached.has(`${memberId}:${ord}`) : ord === curRound ? liveReached.has(memberId) : false);
   for (let i = 0; i < phases.length; i++) {
     const p = phases[i], next = phases[i + 1];
     let rEnd = new Date(p.defaultEnd.getTime() + 31 * 86_400_000 - 1); // end day inclusive + 30-day grace tail
     if (next && next.defaultStart.getTime() - 1 < rEnd.getTime()) rEnd = new Date(next.defaultStart.getTime() - 1);
-    const roundMembers = members.map((m) => ({ ...m, reached: m.group === "TEST" && reachedIn(m.id, p.ordinal) }));
+    // Round 2+: measured on the farmers still in play — anyone (test AND control, so the comparison stays
+    // fair) who already bought between the campaign start and this round's start is left out.
+    const boughtBefore = p.ordinal >= 2 ? await purchasedFarmerIds(allFarmerIds, start, p.defaultStart) : new Set<number>();
+    const inRound = (m: { farmerId: number }) => !boughtBefore.has(m.farmerId);
+    const roundMembers = members.filter(inRound).map((m) => ({ ...m, reached: m.group === "TEST" && reachedIn(m.id, p.ordinal) }));
     const status = p.ordinal < curRound ? "finished" : p.ordinal === curRound ? "current" : "upcoming";
     const label = `Round ${p.ordinal} · ${p.name.replace(/^\s*round\s*\d+\s*[-:]?\s*/i, "") || p.name}`;
     scopes.push(await computeScope(roundMembers, pf, codesOf(p), p.defaultStart, rEnd, `R${p.ordinal}`, label, status));
-    const roundTest = test.map((m) => {
+    const roundTest = test.filter(inRound).map((m) => {
       if (p.ordinal < curRound) {
         const r = snapBy.get(`${m.id}:${p.ordinal}`);
         return r ? { ...m, reached: true, mediums: r.mediums, response: r.response, responseCrop: r.responseCrop } : { ...m, reached: false, mediums: [], response: null, responseCrop: null };
@@ -2011,7 +2017,7 @@ export async function getCampaignTracker(campaignId: number, locIn?: LocFilter):
       if (p.ordinal === curRound) { const l = liveById.get(m.id); return l ? { ...m, reached: l.reached, mediums: l.mediums, response: l.response, responseCrop: l.responseCrop } : m; }
       return { ...m, reached: false, mediums: [], response: null, responseCrop: null };
     });
-    reachScopes.push({ key: `R${p.ordinal}`, label, roundStatus: status, reach: buildReach(roundTest) });
+    reachScopes.push({ key: `R${p.ordinal}`, label, roundStatus: status, reach: buildReach(roundTest), boughtBeforeExcluded: p.ordinal >= 2 ? test.length - roundTest.length : 0 });
   }
 
   const basisLabel = pf.all
