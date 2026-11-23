@@ -1956,46 +1956,77 @@ const REACH_DIM_LABEL = { store: "Store", region: "Region", district: "District"
 
 function TrackerBody({ t }: { t: CampaignTracker }) {
   const a = t.attribution;
-  const reachPct = t.reach.testTotal > 0 ? Math.round((t.reach.reached / t.reach.testTotal) * 100) : 0;
-  const [scopeKey, setScopeKey] = useState(t.scopes[0]?.key ?? "overall");
+  // One round picker drives the whole tracker (outreach + performance). Once a campaign is past Round 1 it
+  // opens on the live round, so callers' new-round work shows straight away.
+  const liveKey = `R${t.currentRound}`;
+  const [scopeKey, setScopeKey] = useState(t.currentRound >= 2 && t.scopes.some((x) => x.key === liveKey) ? liveKey : t.scopes[0]?.key ?? "overall");
+  const reachScope = t.reachScopes.find((x) => x.key === scopeKey) ?? t.reachScopes[0];
+  const rc = reachScope?.reach ?? t.reach;
+  const reachPct = rc.testTotal > 0 ? Math.round((rc.reached / rc.testTotal) * 100) : 0;
   const [view, setView] = useState<MatchView>("total");
   const [axis, setAxis] = useState<"value" | "lifecycle">("value");
   const scope = t.scopes.find((s) => s.key === scopeKey) ?? t.scopes[0];
   const rows = scope ? (axis === "value" ? scope.byValue : scope.byLifecycle) : [];
-  // Reached test who bought anything (all-transaction view), overall — for the outreach KPI.
-  const payingContacted = t.scopes[0] ? t.scopes[0].byValue.reduce((s, r) => s + r.views.total.buy, 0) : 0;
+  // Reached test who bought anything (all-transaction view) in the picked round / all rounds — outreach KPI.
+  const payingContacted = scope ? scope.byValue.reduce((s, r) => s + r.views.total.buy, 0) : 0;
   const [reachDim, setReachDim] = useState<keyof typeof REACH_DIM_LABEL>("store");
   const reachRows: { store: string; sub?: string; reached: number; total: number; broadcast: number }[] =
-    reachDim === "store" ? t.reach.byStore : t.reach.byLocation[reachDim];
+    reachDim === "store" ? rc.byStore : rc.byLocation[reachDim];
+  const statusTag = (st: string | null) => st === "current" ? "live" : st === "finished" ? "done" : st === "upcoming" ? "not started" : "";
   return (
     <div className="flex flex-col gap-4">
+      {/* Round picker — everything below follows it */}
+      {t.scopes.length > 1 && (
+        <div className={`${CARD} flex flex-wrap items-center gap-2 p-3`}>
+          <span className="text-[11px] font-semibold uppercase text-[#757575]">Show</span>
+          {t.scopes.map((x) => {
+            const on = scopeKey === x.key;
+            return (
+              <button key={x.key} type="button" onClick={() => setScopeKey(x.key)}
+                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-semibold transition-colors"
+                style={on ? { background: "#1A3A1A", color: "#fff" } : { background: "#F5F5F5", color: "#616161" }}>
+                {x.label}
+                {x.roundStatus && (
+                  <span className="rounded-full px-1.5 py-[1px] text-[9.5px] font-bold uppercase"
+                    style={x.roundStatus === "current" ? { background: on ? "#43A047" : "#E8F5E9", color: on ? "#fff" : "#2E7D32" } : { background: on ? "rgba(255,255,255,0.18)" : "#EEEEEE", color: on ? "#fff" : "#9E9E9E" }}>
+                    {statusTag(x.roundStatus)}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+          <span className="ml-auto text-[11px] text-[#9E9E9E]">
+            {reachScope?.roundStatus ? "Outreach, responses and sales for this round only." : "All rounds: a farmer reached in any round counts as reached."}
+          </span>
+        </div>
+      )}
       <div className={`${CARD} p-4`}>
-        <div className="mb-2 text-[13px] font-bold text-[#1A1C1A]">Outreach</div>
+        <div className="mb-2 text-[13px] font-bold text-[#1A1C1A]">Outreach{reachScope && reachScope.key !== "overall" ? <span className="ml-1.5 font-semibold text-[#2E7D32]">· {reachScope.label}</span> : null}</div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Kpi label="Test farmers" value={n(t.reach.testTotal)} />
-          <Kpi label={`Reached (${reachPct}%)`} value={n(t.reach.reached)} color="#2E7D32" />
-          <Kpi label="Call·WA·SMS·Visit" value={`${n(t.reach.byApproach.CALL)}·${n(t.reach.byApproach.WHATSAPP)}·${n(t.reach.byApproach.SMS)}·${n(t.reach.byApproach.IN_PERSON)}`} />
+          <Kpi label="Test farmers" value={n(rc.testTotal)} />
+          <Kpi label={`Reached (${reachPct}%)`} value={n(rc.reached)} color="#2E7D32" />
+          <Kpi label="Call·WA·SMS·Visit" value={`${n(rc.byApproach.CALL)}·${n(rc.byApproach.WHATSAPP)}·${n(rc.byApproach.SMS)}·${n(rc.byApproach.IN_PERSON)}`} />
           <Kpi label="Bought (contacted)" value={n(payingContacted)} color="#1565C0" />
         </div>
         <div className="mt-2 text-[11px] text-[#9E9E9E]">A farmer can be reached by more than one approach, so the Call·WA·SMS·Visit counts can add up to more than “Reached”.</div>
         {/* Interest response breakdown (of the reached farmers) */}
         <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[#F0F0F0] pt-3">
           <span className="text-[11px] font-semibold uppercase text-[#757575]">Response</span>
-          <span className="rounded-full bg-[#E8F5E9] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#1B5E20]">Interested {n(t.reach.byResponse.interested)}</span>
-          <span className="rounded-full bg-[#FDECEA] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#C62828]">Not interested {n(t.reach.byResponse.notInterested)}</span>
-          <span className="rounded-full bg-[#FFF3E0] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#E65100]">Wants another crop {n(t.reach.byResponse.otherCrop)}</span>
-          {t.reach.byResponse.noResponse > 0 && <span className="rounded-full bg-[#F5F5F5] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#9E9E9E]">Not logged {n(t.reach.byResponse.noResponse)}</span>}
+          <span className="rounded-full bg-[#E8F5E9] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#1B5E20]">Interested {n(rc.byResponse.interested)}</span>
+          <span className="rounded-full bg-[#FDECEA] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#C62828]">Not interested {n(rc.byResponse.notInterested)}</span>
+          <span className="rounded-full bg-[#FFF3E0] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#E65100]">Wants another crop {n(rc.byResponse.otherCrop)}</span>
+          {rc.byResponse.noResponse > 0 && <span className="rounded-full bg-[#F5F5F5] px-2.5 py-0.5 text-[11.5px] font-semibold text-[#9E9E9E]">Not logged {n(rc.byResponse.noResponse)}</span>}
         </div>
-        {t.reach.otherCrops.length > 0 && (
+        {rc.otherCrops.length > 0 && (
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             <span className="text-[11px] font-semibold uppercase text-[#757575]">Crops requested</span>
-            {t.reach.otherCrops.map((c) => <span key={c.crop} className="rounded-full border border-[#FFCC80] bg-[#FFF8F0] px-2 py-0.5 text-[11px] font-semibold text-[#E65100]">{cropLabel(c.crop)} · {n(c.count)}</span>)}
+            {rc.otherCrops.map((c) => <span key={c.crop} className="rounded-full border border-[#FFCC80] bg-[#FFF8F0] px-2 py-0.5 text-[11px] font-semibold text-[#E65100]">{cropLabel(c.crop)} · {n(c.count)}</span>)}
           </div>
         )}
       </div>
 
       {/* Outreach progress per store / region / district / village — individually reached / total (TEST group) */}
-      {t.reach.byStore.length > 0 && (
+      {rc.byStore.length > 0 && (
         <div className={`${CARD} p-4`}>
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <div className="text-[13px] font-bold text-[#1A1C1A]">Reached by {REACH_DIM_LABEL[reachDim].toLowerCase()}</div>
@@ -2040,16 +2071,10 @@ function TrackerBody({ t }: { t: CampaignTracker }) {
             : <> <b>All rounds:</b> Reach = farmers reached in any round; buys and sales over the whole campaign.</>}
         </div>
 
-        {/* Scope: Overall + each round */}
-        <div className="mb-2 flex flex-wrap items-center gap-1.5">
-          {t.scopes.map((s) => (
-            <button key={s.key} type="button" onClick={() => setScopeKey(s.key)}
-              className="rounded-full px-3 py-1 text-[11.5px] font-semibold transition-colors"
-              style={scopeKey === s.key ? { background: "#1A3A1A", color: "#fff" } : { background: "#F5F5F5", color: "#616161" }}>
-              {s.label}
-            </button>
-          ))}
-        </div>
+        {/* Scope follows the round picker at the top */}
+        {t.scopes.length > 1 && scope && (
+          <div className="mb-2 text-[11.5px] font-semibold text-[#1A3A1A]">Showing: {scope.label} <span className="font-normal text-[#9E9E9E]">— change it with the picker at the top</span></div>
+        )}
         {/* View + axis toggles */}
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="inline-flex rounded-[8px] border border-[#E0E0E0] bg-[#F5F7F5] p-0.5">
@@ -2084,7 +2109,7 @@ function TrackerBody({ t }: { t: CampaignTracker }) {
       <div className={`${CARD} border-[#EDE7F6] p-4`} style={{ background: "#FCFAFF" }}>
         <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
           <div className="text-[13px] font-bold text-[#6A1B9A]">📣 Broadcast reach</div>
-          <span className="text-[11px] text-[#9E9E9E]">mass send · separate from individual reach</span>
+          <span className="text-[11px] text-[#9E9E9E]">mass send · separate from individual reach · whole campaign (all rounds)</span>
         </div>
         <div className="mt-2 grid grid-cols-3 gap-3">
           <Kpi label="Delivered to" value={n(t.reach.broadcastDelivered)} color="#6A1B9A" />

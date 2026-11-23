@@ -1845,8 +1845,16 @@ export interface CampaignAttribution {
   basisLabel: string; crops: string[]; categories: string[]; all: boolean; noCatalogMatch: boolean;
   windowStart: string; windowEnd: string;
 }
-export interface CampaignTracker {
+export interface TrackerReachScope {
+  key: string;            // "overall" | "R1" | "R2" … (same keys as `scopes`)
+  label: string;
+  roundStatus: "finished" | "current" | "upcoming" | null;
   reach: CampaignReach;
+}
+export interface CampaignTracker {
+  reach: CampaignReach;   // = reachScopes[0] (all rounds, cumulative)
+  reachScopes: TrackerReachScope[]; // outreach per round picker: [0] = all rounds; then one per round
+  currentRound: number;
   attribution: CampaignAttribution;
   scopes: TrackerScope[]; // [0] = overall (all rounds); then one per round
   locItems: LocItem[];    // Region/Store/Village combinations of ALL members — filter options
@@ -1909,6 +1917,10 @@ export async function getCampaignTracker(campaignId: number, locIn?: LocFilter):
   const inLoc = locMatcher(loc);
   const members = loc ? allMembers.filter((m) => inLoc(locOf(m))) : allMembers;
   const test = members.filter((m) => m.group === "TEST");
+  const storeIds = [...new Set(test.map((m) => m.storeId).filter((x): x is number => x != null))];
+  const storeNames = new Map((await prisma.store.findMany({ where: { id: { in: storeIds } }, select: { id: true, name: true } })).map((s) => [s.id, shortStoreName(s.name)]));
+  type ReachMember = (typeof test)[number];
+  const buildReach = (test: ReachMember[]): CampaignReach => {
   const reachedMembers = test.filter((m) => m.reached);
   // Approaches are multi-select, so a farmer reached by Call AND WhatsApp counts under both:
   // these buckets can sum to more than `reached` (the UI says so).
@@ -1931,8 +1943,6 @@ export async function getCampaignTracker(campaignId: number, locIn?: LocFilter):
   const otherCrops = [...otherCropTally.entries()].sort((a, b) => b[1] - a[1]).map(([crop, count]) => ({ crop, count }));
 
   // Per-store outreach progress + broadcast delivery (TEST group). Store names resolved from Store.
-  const storeIds = [...new Set(test.map((m) => m.storeId).filter((x): x is number => x != null))];
-  const storeNames = new Map((await prisma.store.findMany({ where: { id: { in: storeIds } }, select: { id: true, name: true } })).map((s) => [s.id, shortStoreName(s.name)]));
   const storeAgg = new Map<string, { store: string; reached: number; total: number; broadcast: number }>();
   const byBroadcastChannel = { SMS: 0, WHATSAPP: 0 };
   let broadcastDelivered = 0;
@@ -1962,6 +1972,9 @@ export async function getCampaignTracker(campaignId: number, locIn?: LocFilter):
   }
   const reachRows = (map: Map<string, ReachRow>, cap = Infinity) => [...map.values()].sort((a, b) => b.total - a.total || a.store.localeCompare(b.store)).slice(0, cap);
   const byLocation = { region: reachRows(locAgg.region), district: reachRows(locAgg.district), village: reachRows(locAgg.village, 300) };
+  return { testTotal: test.length, reached: reachedMembers.length, byApproach, byResponse, otherCrops, byStore, byLocation, broadcastDelivered, byBroadcastChannel };
+  };
+  const overallReach = buildReach(test); // all rounds: reached in any round (cumulative)
 
   // ── Segment × view scopes: overall (all rounds) + one per round ──────────────────────────────────
   const phases = await prisma.campaignPhase.findMany({ where: { campaignId }, orderBy: { ordinal: "asc" } });
@@ -1974,8 +1987,13 @@ export async function getCampaignTracker(campaignId: number, locIn?: LocFilter):
   // the live outcome; upcoming → nobody yet), and purchases inside that round's own window — its dates
   // + the 30-day tail, but never past the next round's start, so a sale is credited to one round only.
   const curRound = Math.max(1, camp.currentRound);
-  const snapReached = new Set((await prisma.campaignMemberRound.findMany({ where: { campaignId, reached: true }, select: { memberId: true, round: true } })).map((r) => `${r.memberId}:${r.round}`));
+  const snapRows = await prisma.campaignMemberRound.findMany({ where: { campaignId, reached: true }, select: { memberId: true, round: true, mediums: true, response: true, responseCrop: true } });
+  const snapBy = new Map(snapRows.map((r) => [`${r.memberId}:${r.round}`, r]));
+  const snapReached = new Set(snapBy.keys());
   const liveReached = new Set(liveMembers.filter((m) => m.reached).map((m) => m.id));
+  const liveById = new Map(liveMembers.map((m) => [m.id, m]));
+  // Outreach for one round: finished → that round's saved outcome; current → the live outcome; upcoming → nobody.
+  const reachScopes: TrackerReachScope[] = [{ key: "overall", label: "All rounds", roundStatus: null, reach: overallReach }];
   const reachedIn = (memberId: number, ord: number) => (ord < curRound ? snapReached.has(`${memberId}:${ord}`) : ord === curRound ? liveReached.has(memberId) : false);
   for (let i = 0; i < phases.length; i++) {
     const p = phases[i], next = phases[i + 1];
@@ -1983,7 +2001,17 @@ export async function getCampaignTracker(campaignId: number, locIn?: LocFilter):
     if (next && next.defaultStart.getTime() - 1 < rEnd.getTime()) rEnd = new Date(next.defaultStart.getTime() - 1);
     const roundMembers = members.map((m) => ({ ...m, reached: m.group === "TEST" && reachedIn(m.id, p.ordinal) }));
     const status = p.ordinal < curRound ? "finished" : p.ordinal === curRound ? "current" : "upcoming";
-    scopes.push(await computeScope(roundMembers, pf, codesOf(p), p.defaultStart, rEnd, `R${p.ordinal}`, `Round ${p.ordinal} · ${p.name.replace(/^\s*round\s*\d+\s*[-:]?\s*/i, "") || p.name}`, status));
+    const label = `Round ${p.ordinal} · ${p.name.replace(/^\s*round\s*\d+\s*[-:]?\s*/i, "") || p.name}`;
+    scopes.push(await computeScope(roundMembers, pf, codesOf(p), p.defaultStart, rEnd, `R${p.ordinal}`, label, status));
+    const roundTest = test.map((m) => {
+      if (p.ordinal < curRound) {
+        const r = snapBy.get(`${m.id}:${p.ordinal}`);
+        return r ? { ...m, reached: true, mediums: r.mediums, response: r.response, responseCrop: r.responseCrop } : { ...m, reached: false, mediums: [], response: null, responseCrop: null };
+      }
+      if (p.ordinal === curRound) { const l = liveById.get(m.id); return l ? { ...m, reached: l.reached, mediums: l.mediums, response: l.response, responseCrop: l.responseCrop } : m; }
+      return { ...m, reached: false, mediums: [], response: null, responseCrop: null };
+    });
+    reachScopes.push({ key: `R${p.ordinal}`, label, roundStatus: status, reach: buildReach(roundTest) });
   }
 
   const basisLabel = pf.all
@@ -1991,7 +2019,9 @@ export async function getCampaignTracker(campaignId: number, locIn?: LocFilter):
     : [pf.crops.length ? `Crop: ${pf.crops.map(cropLabel).join(", ")}` : "", pf.categories.length ? `Category: ${pf.categories.join(", ")}` : ""].filter(Boolean).join(" · ");
 
   return {
-    reach: { testTotal: test.length, reached: reachedMembers.length, byApproach, byResponse, otherCrops, byStore, byLocation, broadcastDelivered, byBroadcastChannel },
+    reach: overallReach,
+    reachScopes,
+    currentRound: phases.length ? Math.min(curRound, Math.max(...phases.map((p) => p.ordinal))) : 1,
     attribution: { basisLabel, crops: pf.crops, categories: pf.categories, all: pf.all, noCatalogMatch, windowStart: iso(start)!, windowEnd: iso(end)! },
     scopes,
     locItems,
