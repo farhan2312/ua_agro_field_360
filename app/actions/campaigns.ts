@@ -903,28 +903,43 @@ export async function exportCampaignTrackerXlsx(campaignId: number, campaignName
       return [`${p.ordinal}. ${p.name}`, `${fmtDay(p.defaultStart)} → ${fmtDay(p.defaultEnd)}`, sms, wa, reached, ...couponCols] as (string | number)[];
     }),
     [""],
-    ["Note", "Each round's outcome (channels, response, comment) is saved when the campaign moves to the next round, so the per-round sheets show what happened in that round. SMS/WhatsApp sends are counted by the round window they fall in. 'All farmers' shows the current round plus a summary of earlier rounds."],
+    ["Note", "Each round's outcome (channels, response, comment) is saved when the campaign moves to the next round, so the per-round sheets show what happened in that round. SMS/WhatsApp sends are counted by the round window they fall in. 'All farmers' is cumulative: 'Reached (any round)' counts a farmer reached in any round, with one Reached column per round; channels, response and comment are from the latest round they were reached in."],
     ["Coupon note", "A round with a coupon code is scored on hard redemptions (a reached test farmer buying on that code, item or invoice, within the round window + 30 days). A round with no code falls back to matched spend, same as the campaign total."],
   ];
 
-  // ── All farmers sheet (full current outreach state) ──
-  const allHeader = ["Group", "Farmer", "Mobile", "Village", "District", "Region", "Store code", "Store", "RM", "Value segment", "Lifecycle", "Reached", "Channels", "Response", "Response crop", "Broadcast delivered", "SMS sent", "WhatsApp sent",
+  // ── All farmers sheet — cumulative across rounds: reached in ANY round, one column per round, and the
+  //    details (channels / response / comment / who) from the latest round the farmer was reached in. ──
+  const multiRound = phases.length > 1;
+  /** Latest reached outcome: the live (current-round) one if reached, else the most recent saved round. */
+  const latestOf = (m: Mem) => {
+    if (m.reached) return { round: curRound, mediums: m.mediums ?? [], response: m.response, responseCrop: m.responseCrop, comment: m.comment, reachedAt: m.reachedAt, reachedBy: m.reachedBy, reachedByCode: m.reachedByCode };
+    const sn = [...(snapsOf.get(m.id) ?? [])].reverse().find((r) => r.reached);
+    return sn ? { round: sn.round, mediums: sn.mediums ?? [], response: sn.response, responseCrop: sn.responseCrop, comment: sn.comment, reachedAt: sn.reachedAt, reachedBy: sn.reachedBy, reachedByCode: sn.reachedByCode } : null;
+  };
+  const allHeader = ["Group", "Farmer", "Mobile", "Village", "District", "Region", "Store code", "Store", "RM", "Value segment", "Lifecycle",
+    multiRound ? "Reached (any round)" : "Reached",
+    ...(multiRound ? phases.map((p) => `Reached in R${p.ordinal}`) : []),
+    ...(multiRound ? ["Last reached in"] : []),
+    "Channels", "Response", "Response crop", "Broadcast delivered", "SMS sent", "WhatsApp sent",
     ...(anyCoupons ? ["Coupon(s) redeemed", "Coupon revenue (₹)"] : []),
     "Recorded by", "Recorded at (IST)", "Comment", "Earlier rounds"];
   const allRows: (string | number)[][] = members.map((m) => {
     const f = fMap.get(m.farmerId);
     const cp = couponByFarmer.get(m.farmerId);
+    const last = latestOf(m);
     return [
       m.group ?? "", f?.name ?? `Farmer #${m.farmerId}`, f?.mobile ?? "", ...locCols(m), storeCode(m.storeId), store(m.storeId), rm(m.storeId),
       m.valueSegment ? segMeta(m.valueSegment).label : (m.segment ? segMeta(m.segment).label : ""),
       m.lifecycleSegment ? segMeta(m.lifecycleSegment).label : "",
-      m.reached ? "Yes" : "No",
-      (m.mediums ?? []).map((x) => MED[x] ?? x).join(", "),
-      m.response ? RESP[m.response] ?? m.response : "", m.responseCrop ? cropLabel(m.responseCrop) : "",
+      last ? "Yes" : "No",
+      ...(multiRound ? phases.map((p) => (recIn(m, p.ordinal)?.reached ? "Yes" : "No")) : []),
+      ...(multiRound ? [last ? `Round ${last.round}` : ""] : []),
+      (last?.mediums ?? []).map((x) => MED[x] ?? x).join(", "),
+      last?.response ? RESP[last.response] ?? last.response : "", last?.responseCrop ? cropLabel(last.responseCrop) : "",
       (m.broadcastMediums ?? []).map((x) => MED[x] ?? x).join(", "),
       smsTotal.get(m.id) ?? 0, waTotal.get(m.id) ?? 0,
       ...(anyCoupons ? [cp ? [...cp.codes].join(", ") : "", cp ? Math.round(cp.revenue) : ""] : []),
-      m.reachedBy ? `${m.reachedBy}${m.reachedByCode ? ` (${m.reachedByCode})` : ""}` : "", fmtTs(m.reachedAt), m.comment ?? "",
+      last?.reachedBy ? `${last.reachedBy}${last.reachedByCode ? ` (${last.reachedByCode})` : ""}` : "", fmtTs(last?.reachedAt ?? null), last?.comment ?? m.comment ?? "",
       earlierText(m),
     ];
   });

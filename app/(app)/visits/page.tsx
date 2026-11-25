@@ -43,7 +43,8 @@ const PERIOD_DAYS: Record<string, number | null> = {
 };
 
 function periodCutoff(period: string): Date | null {
-  const days = PERIOD_DAYS[period] ?? PERIOD_DAYS.month;
+  // NB: `all` maps to null (no cutoff) — don't use `??` here, it would turn "All time" into a month.
+  const days = period in PERIOD_DAYS ? PERIOD_DAYS[period] : PERIOD_DAYS.month;
   if (days === null || days === undefined) return null;
   // "now" anchored to the live date; window keeps visits newer than (now - days).
   const cutoff = new Date();
