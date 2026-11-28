@@ -1490,6 +1490,185 @@ function computeRoundAnalytics(d: NonNullable<Awaited<ReturnType<typeof loadRoun
  * getCampaignAnalytics), so the file matches the screen: sheet 1 = Call stats by centre (the headline
  * table), sheet 2 = the Value + Lifecycle × Store composition matrix. Respects the RM filter + scope.
  */
+/* ─────────── Analytics export: officer / campaigner + store performance sheets ─────────── */
+const PERF_ROLE: Record<string, string> = { ASR: "Agri Officer", STORE_MANAGER: "Store Manager", CAMPAIGNER: "Campaigner", REGIONAL: "RM", CENTRAL: "Central team", SYSADMIN: "System Admin" };
+/**
+ * Who did the outreach and how each store performed — built from every round's recorded outcome
+ * (finished rounds → their saved snapshot, current round → live). One outcome per farmer per round is
+ * credited to whoever recorded it (code, falling back to name). "Bought" = the farmer bought campaign
+ * products inside that round's own window (same basis as the Rounds sheets).
+ */
+async function performanceSheets(rd: NonNullable<Awaited<ReturnType<typeof loadRoundData>>>): Promise<StyledSheetSpec[]> {
+  const { started, test, control, outcome, spend, sName, sCode, sRm, locOf, camp } = rd;
+  const pc = (x: number, t: number) => (t ? Math.round((x / t) * 1000) / 10 : 0);
+  const day = (d: Date) => new Date(d.getTime() + 330 * 60_000).toISOString().slice(0, 10);
+  const memberIds = test.map((m) => m.id);
+
+  type Acc = {
+    worked: number; reached: number; unreachable: number; call: number; wa: number; sms: number; inPerson: number;
+    interested: number; notInterested: number; otherCrop: number; noResponse: number; comments: number;
+    bought: number; sales: number; days: Set<string>; first: Date | null; last: Date | null; byRound: Map<number, { worked: number; reached: number; interested: number }>;
+  };
+  const mk = (): Acc => ({ worked: 0, reached: 0, unreachable: 0, call: 0, wa: 0, sms: 0, inPerson: 0, interested: 0, notInterested: 0, otherCrop: 0, noResponse: 0, comments: 0, bought: 0, sales: 0, days: new Set(), first: null, last: null, byRound: new Map() });
+  const add = (a: Acc, o: RoundOutcome, ord: number, farmerId: number) => {
+    a.worked++;
+    const meds = o.mediums ?? [];
+    if (o.reached) a.reached++;
+    if (meds.includes("UNREACHABLE")) a.unreachable++;
+    if (meds.includes("CALL")) a.call++;
+    if (meds.includes("WHATSAPP")) a.wa++;
+    if (meds.includes("SMS")) a.sms++;
+    if (meds.includes("IN_PERSON")) a.inPerson++;
+    if (o.response === "INTERESTED") a.interested++;
+    else if (o.response === "NOT_INTERESTED") a.notInterested++;
+    else if (o.response === "OTHER_CROP") a.otherCrop++;
+    else if (o.reached) a.noResponse++;
+    if ((o.comment ?? "").trim()) a.comments++;
+    if (o.reached) { const s = spend.get(ord)?.get(farmerId) ?? 0; if (s > 0) { a.bought++; a.sales += s; } }
+    if (o.reachedAt) { a.days.add(day(o.reachedAt)); if (!a.first || o.reachedAt < a.first) a.first = o.reachedAt; if (!a.last || o.reachedAt > a.last) a.last = o.reachedAt; }
+    const r = a.byRound.get(ord) ?? a.byRound.set(ord, { worked: 0, reached: 0, interested: 0 }).get(ord)!;
+    r.worked++; if (o.reached) r.reached++; if (o.response === "INTERESTED") r.interested++;
+  };
+
+  // Who recorded each outcome → people + store + store×person + daily.
+  const people = new Map<string, Acc & { name: string; code: string; stores: Map<number | null, number> }>();
+  const storeAcc = new Map<number | null, Acc & { workers: Set<string>; ownWorked: number; otherWorked: number }>();
+  const pairAcc = new Map<string, Acc & { storeId: number | null; person: string }>();
+  const daily = new Map<string, { person: string; date: string; worked: number; reached: number; call: number; interested: number }>();
+  const outs: { m: (typeof test)[number]; ord: number; o: RoundOutcome; who: string }[] = [];
+  for (const m of test) for (const r of started) {
+    const o = outcome(m, r.ordinal);
+    if (!o || (!o.reached && !(o.mediums ?? []).length && !o.response && !(o.comment ?? "").trim())) continue;
+    const who = (o.reachedByCode || o.reachedBy || "").trim() || "(not recorded)";
+    outs.push({ m, ord: r.ordinal, o, who });
+  }
+  const codes = [...new Set(outs.map((x) => x.o.reachedByCode).filter((x): x is string => !!x))];
+  const [users, smsLogs, waLogs] = await Promise.all([
+    codes.length ? prisma.user.findMany({ where: { employeeCode: { in: codes } }, select: { employeeCode: true, name: true, role: true, storeId: true, active: true } }) : Promise.resolve([]),
+    prisma.smsLog.findMany({ where: { campaignId: camp.id, memberId: { in: memberIds } }, select: { sentByCode: true, sentByName: true } }),
+    prisma.whatsAppLog.findMany({ where: { campaignId: camp.id, memberId: { in: memberIds } }, select: { sentByCode: true, sentByName: true } }),
+  ]);
+  const uBy = new Map(users.map((u) => [u.employeeCode!, u]));
+  const sentBy = (rows: { sentByCode: string | null; sentByName: string | null }[]) => {
+    const mp = new Map<string, number>();
+    for (const r of rows) { const k = (r.sentByCode || r.sentByName || "").trim(); if (k) mp.set(k, (mp.get(k) ?? 0) + 1); }
+    return mp;
+  };
+  const smsBy = sentBy(smsLogs), waBy = sentBy(waLogs);
+
+  for (const { m, ord, o, who } of outs) {
+    const p = people.get(who) ?? people.set(who, { ...mk(), name: (o.reachedBy ?? "").trim() || who, code: o.reachedByCode ?? "", stores: new Map() }).get(who)!;
+    add(p, o, ord, m.farmerId);
+    p.stores.set(m.storeId, (p.stores.get(m.storeId) ?? 0) + 1);
+    const s = storeAcc.get(m.storeId) ?? storeAcc.set(m.storeId, { ...mk(), workers: new Set(), ownWorked: 0, otherWorked: 0 }).get(m.storeId)!;
+    add(s, o, ord, m.farmerId);
+    s.workers.add(who);
+    const u = o.reachedByCode ? uBy.get(o.reachedByCode) : undefined;
+    if (u && (u.role === "ASR" || u.role === "STORE_MANAGER") && u.storeId != null && u.storeId === m.storeId) s.ownWorked++; else s.otherWorked++;
+    const pk = `${m.storeId ?? ""}\u0001${who}`;
+    const pa = pairAcc.get(pk) ?? pairAcc.set(pk, { ...mk(), storeId: m.storeId, person: who }).get(pk)!;
+    add(pa, o, ord, m.farmerId);
+    if (o.reachedAt) {
+      const dk = `${who}\u0001${day(o.reachedAt)}`;
+      const d = daily.get(dk) ?? daily.set(dk, { person: who, date: day(o.reachedAt), worked: 0, reached: 0, call: 0, interested: 0 }).get(dk)!;
+      d.worked++; if (o.reached) d.reached++; if ((o.mediums ?? []).includes("CALL")) d.call++; if (o.response === "INTERESTED") d.interested++;
+    }
+  }
+  const storeLabel = (id: number | null) => (id != null ? sName.get(id) ?? `Store #${id}` : "No store");
+  const roleOf = (code: string) => { const u = code ? uBy.get(code) : undefined; return u ? PERF_ROLE[String(u.role)] ?? String(u.role) : code ? "Not a current account" : ""; };
+  const homeStore = (code: string) => { const u = code ? uBy.get(code) : undefined; return u?.storeId != null ? storeLabel(u.storeId) : ""; };
+  const ts = (d: Date | null) => (d ? new Date(d.getTime() + 330 * 60_000).toISOString().slice(0, 16).replace("T", " ") : "");
+  const multi = started.length > 1;
+  const roundCols = (a: Acc) => (multi ? started.flatMap((r) => { const x = a.byRound.get(r.ordinal); return [x?.worked ?? 0, x?.reached ?? 0, x?.interested ?? 0]; }) : []);
+  const roundHead = multi ? started.flatMap((r) => [`R${r.ordinal} farmers worked`, `R${r.ordinal} reached`, `R${r.ordinal} interested`]) : [];
+  const core = (a: Acc) => [
+    a.worked, a.reached, pc(a.reached, a.worked), a.unreachable, a.call, a.wa, a.sms, a.inPerson,
+    a.interested, a.notInterested, a.otherCrop, a.noResponse, pc(a.interested, a.reached), a.comments,
+    a.bought, pc(a.bought, a.reached), Math.round(a.sales),
+  ];
+  const coreHead = [
+    "Farmers worked (outcomes logged)", "Reached", "Reach rate % (reached ÷ worked)", "Unreachable", "Call", "WhatsApp", "SMS", "In-person",
+    "Interested", "Not interested", "Wants another crop", "Reached, no response logged", "Interest rate % (interested ÷ reached)", "Comments written",
+    `Reached who bought campaign products in the round (${rd.basisLabel})`, "Conversion % (bought ÷ reached)", "Campaign-product sales by those farmers (₹, base)",
+  ];
+
+  // Sheet A — one row per officer / campaigner, ranked by farmers reached.
+  const pRows = [...people.entries()].sort((a, b) => b[1].reached - a[1].reached || b[1].worked - a[1].worked);
+  const officerSheet: StyledCell[][] = [[
+    "Rank", "Name", "Employee code", "Role", "Home store", "Stores worked in", "Main store worked",
+    ...coreHead, "SMS sent from the app", "WhatsApp sent from the app",
+    "Active days", "Avg farmers worked per active day", "First activity (IST)", "Last activity (IST)", ...roundHead,
+  ]];
+  pRows.forEach(([key, p], i) => {
+    const main = [...p.stores.entries()].sort((a, b) => b[1] - a[1])[0];
+    officerSheet.push([
+      i + 1, p.name, p.code, roleOf(p.code), homeStore(p.code), p.stores.size, main ? storeLabel(main[0]) : "",
+      ...core(p), smsBy.get(key) ?? smsBy.get(p.name) ?? 0, waBy.get(key) ?? waBy.get(p.name) ?? 0,
+      p.days.size, p.days.size ? Math.round((p.worked / p.days.size) * 10) / 10 : 0, ts(p.first), ts(p.last), ...roundCols(p),
+    ]);
+  });
+
+  // Sheet B — one row per store (TEST farmers enrolled under it), ranked by reach %.
+  const testBy = new Map<number | null, (typeof test)[number][]>();
+  for (const m of test) (testBy.get(m.storeId) ?? testBy.set(m.storeId, []).get(m.storeId)!).push(m);
+  const ctrlBy = new Map<number | null, (typeof control)[number][]>();
+  for (const m of control) (ctrlBy.get(m.storeId) ?? ctrlBy.set(m.storeId, []).get(m.storeId)!).push(m);
+  const boughtAny = (fid: number) => started.some((r) => (spend.get(r.ordinal)?.get(fid) ?? 0) > 0);
+  const officersAt = new Map<number, number>();
+  for (const u of await prisma.user.findMany({ where: { active: true, role: { in: ["ASR", "STORE_MANAGER"] }, storeId: { not: null } }, select: { storeId: true } }))
+    officersAt.set(u.storeId!, (officersAt.get(u.storeId!) ?? 0) + 1);
+  const storeRows = [...testBy.entries()].map(([sid, ms]) => {
+    const a = storeAcc.get(sid) ?? { ...mk(), workers: new Set<string>(), ownWorked: 0, otherWorked: 0 };
+    const reachedFarmers = ms.filter((m) => started.some((r) => outcome(m, r.ordinal)?.reached)).length;
+    const touched = ms.filter((m) => started.some((r) => !!outcome(m, r.ordinal))).length;
+    const ctrl = ctrlBy.get(sid) ?? [];
+    return { sid, ms, a, reachedFarmers, touched, ctrl, ctrlBought: ctrl.filter((m) => boughtAny(m.farmerId)).length };
+  }).sort((x, y) => pc(y.reachedFarmers, y.ms.length) - pc(x.reachedFarmers, x.ms.length) || y.ms.length - x.ms.length);
+  const storeSheet: StyledCell[][] = [[
+    "Rank", "Store", "Store code", "Region", "RM", "Test farmers", "Farmers reached (any round)", "Reach % of test farmers", "Never contacted",
+    "Active officers at store", "People who logged outreach", "Logged by the store's own officers", "Logged by others (campaigners / helpers / central)",
+    ...coreHead, "Control farmers", "Control who bought campaign products", "Control %buy", "Reached %buy minus control %buy (points)",
+    "Active days", "Last activity (IST)", ...roundHead,
+  ]];
+  storeRows.forEach((s, i) => {
+    const reachedBuyPct = pc(s.a.bought, s.a.reached), ctrlPct = pc(s.ctrlBought, s.ctrl.length);
+    const sample = s.ms[0];
+    storeSheet.push([
+      i + 1, storeLabel(s.sid), s.sid != null ? sCode.get(s.sid) ?? "" : "", sample ? locOf(sample).region ?? "" : "", s.sid != null ? sRm.get(s.sid) ?? "" : "",
+      s.ms.length, s.reachedFarmers, pc(s.reachedFarmers, s.ms.length), s.ms.length - s.touched,
+      s.sid != null ? officersAt.get(s.sid) ?? 0 : 0, s.a.workers.size, s.a.ownWorked, s.a.otherWorked,
+      ...core(s.a), s.ctrl.length, s.ctrlBought, ctrlPct, s.ctrl.length && s.a.reached ? Math.round((reachedBuyPct - ctrlPct) * 10) / 10 : null,
+      s.a.days.size, ts(s.a.last), ...roundCols(s.a),
+    ]);
+  });
+
+  // Sheet C — store × person: who worked which store's farmers.
+  const pairSheet: StyledCell[][] = [["Store", "Region", "RM", "Name", "Employee code", "Role", "Home store", "Own store officer?", "Farmers worked", "Reached", "Reach rate %", "Call", "WhatsApp", "SMS", "In-person", "Interested", "Interest rate %", "Reached who bought", "Conversion %", "Last activity (IST)"]];
+  [...pairAcc.values()].sort((a, b) => storeLabel(a.storeId).localeCompare(storeLabel(b.storeId)) || b.worked - a.worked).forEach((pa) => {
+    const p = people.get(pa.person)!;
+    const u = p.code ? uBy.get(p.code) : undefined;
+    const own = !!u && (u.role === "ASR" || u.role === "STORE_MANAGER") && u.storeId != null && u.storeId === pa.storeId;
+    const sample = testBy.get(pa.storeId)?.[0];
+    pairSheet.push([storeLabel(pa.storeId), sample ? locOf(sample).region ?? "" : "", pa.storeId != null ? sRm.get(pa.storeId) ?? "" : "", p.name, p.code, roleOf(p.code), homeStore(p.code), own ? "Yes" : "No",
+      pa.worked, pa.reached, pc(pa.reached, pa.worked), pa.call, pa.wa, pa.sms, pa.inPerson, pa.interested, pc(pa.interested, pa.reached), pa.bought, pc(pa.bought, pa.reached), ts(pa.last)]);
+  });
+
+  // Sheet D — daily activity per person (IST day) — pivot-ready.
+  const dailySheet: StyledCell[][] = [["Date (IST)", "Name", "Employee code", "Role", "Home store", "Farmers worked", "Reached", "Calls", "Interested"]];
+  [...daily.values()].sort((a, b) => b.date.localeCompare(a.date) || b.worked - a.worked).forEach((d) => {
+    const p = people.get(d.person)!;
+    dailySheet.push([d.date, p.name, p.code, roleOf(p.code), homeStore(p.code), d.worked, d.reached, d.call, d.interested]);
+  });
+
+  const none = (msg: string): StyledCell[][] => [[msg]];
+  return [
+    { name: "Officer performance", rows: pRows.length ? officerSheet : none("No outreach recorded yet."), leftCols: [1, 2, 3, 4, 6], wrapHeaders: true },
+    { name: "Store performance", rows: storeRows.length ? storeSheet : none("No test farmers in scope."), leftCols: [1, 2, 3, 4], wrapHeaders: true },
+    { name: "Store x officer", rows: pairSheet.length > 1 ? pairSheet : none("No outreach recorded yet."), leftCols: [0, 1, 2, 3, 4, 5, 6, 7], wrapHeaders: true },
+    { name: "Daily activity", rows: dailySheet.length > 1 ? dailySheet : none("No dated outreach recorded yet."), leftCols: [0, 1, 2, 3, 4], wrapHeaders: true },
+  ];
+}
+
 export async function exportCampaignAudienceXlsx(campaignId: number, campaignName: string, rms?: string[], locIn?: LocFilter): Promise<{ ok: boolean; filename?: string; b64?: string; error?: string }> {
   const a = await getCampaignAnalytics(campaignId, rms, locIn);
   if (!a.total) return { ok: false, error: "No enrolled farmers in your scope (and filters) for this campaign." };
@@ -1585,8 +1764,11 @@ export async function exportCampaignAudienceXlsx(campaignId: number, campaignNam
   }
 
   const safe = (campaignName || "campaign").replace(/[\\/?*[\]:]/g, " ").trim().slice(0, 60) || "campaign";
+  // Officer / campaigner + store performance (who did the outreach, how each store did).
+  const perfSheets = rd ? await performanceSheets(rd) : [];
   const b64 = await buildStyledWorkbookB64([
     { name: "Call stats by centre", rows: callSheet, leftCols: [0, 1, 2], boldRows: [1] }, // Centre, Region, RM text; totals row bold
+    ...perfSheets,
     { name: "Call stats by region", rows: locSheet("Region", a.callByLocation.region), leftCols: [0] },
     { name: "Call stats by district", rows: locSheet("District", a.callByLocation.district), leftCols: [0] },
     { name: "Call stats by village", rows: locSheet("Village", a.callByLocation.village, "District"), leftCols: [0, 1] },
